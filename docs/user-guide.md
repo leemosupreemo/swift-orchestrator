@@ -14,7 +14,7 @@ python3 -m pip install -e .
 Install from Git:
 
 ```bash
-python3 -m pip install "git+ssh://git@github.com/neemaameskin/swift-orchestrator.git"
+python3 -m pip install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
 ```
 
 Verify the command is available:
