@@ -66,10 +66,17 @@ to validate environment and project configuration.
 For first-time setup, use:
 
 ```bash
-swift-orchestrator wizard
+swift-orchestrator wizard --project /path/to/SwiftProject
 ```
 
 The wizard initializes project config, chooses at least one model, can copy project-local prompt Markdown overrides, can add SSH workers, and can configure Firebase delivery.
+
+List or switch remembered projects:
+
+```bash
+swift-orchestrator projects
+swift-orchestrator use MyApp
+```
 
 The package stores project-specific runtime files in `.swift-orchestrator/` by default:
 

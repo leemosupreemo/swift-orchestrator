@@ -10,6 +10,81 @@ from typing import Any
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_RUNTIME_DIRNAME = ".swift-orchestrator"
+USER_STATE_DIR_ENV = "SWIFT_ORCHESTRATOR_USER_STATE_DIR"
+
+
+def user_state_dir() -> Path:
+    explicit = os.environ.get(USER_STATE_DIR_ENV)
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return (Path.home() / ".swift-orchestrator").resolve()
+
+
+def recent_projects_path() -> Path:
+    return user_state_dir() / "projects.json"
+
+
+def load_recent_projects() -> dict[str, Any]:
+    path = recent_projects_path()
+    if not path.exists():
+        return {"version": 1, "active": None, "projects": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"version": 1, "active": None, "projects": []}
+    data.setdefault("version", 1)
+    data.setdefault("active", None)
+    data.setdefault("projects", [])
+    return data
+
+
+def save_recent_projects(data: dict[str, Any]) -> None:
+    path = recent_projects_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def project_display_name(root: Path) -> str:
+    config_path = root / DEFAULT_RUNTIME_DIRNAME / "project.json"
+    data = _load_json(config_path)
+    return data.get("project_name") or root.name
+
+
+def remember_project(root: Path, name: str | None = None, active: bool = True) -> None:
+    root = root.expanduser().resolve()
+    display_name = name or project_display_name(root)
+    data = load_recent_projects()
+    projects = [
+        project for project in data.get("projects", [])
+        if Path(project.get("root", "")).expanduser().resolve() != root
+        and project.get("name") != display_name
+    ]
+    projects.insert(0, {"name": display_name, "root": str(root)})
+    data["projects"] = projects[:20]
+    if active:
+        data["active"] = display_name
+    save_recent_projects(data)
+
+
+def resolve_project_reference(reference: str | None) -> Path | None:
+    if not reference:
+        return None
+    candidate = Path(reference).expanduser()
+    if candidate.exists() or "/" in reference or reference.startswith("."):
+        return candidate.resolve()
+    data = load_recent_projects()
+    for project in data.get("projects", []):
+        if project.get("name") == reference:
+            return Path(project["root"]).expanduser().resolve()
+    return None
+
+
+def active_project_root() -> Path | None:
+    data = load_recent_projects()
+    active = data.get("active")
+    if not active:
+        return None
+    return resolve_project_reference(active)
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -23,6 +98,13 @@ def find_project_root(start: Path | None = None) -> Path:
             return candidate
         if any(candidate.glob("*.xcodeproj")) or any(candidate.glob("*.xcworkspace")):
             return candidate
+        if (candidate / DEFAULT_RUNTIME_DIRNAME / "project.json").exists():
+            return candidate
+        if (candidate / "Package.swift").exists():
+            return candidate
+    active = active_project_root()
+    if active and start is None:
+        return active
     return current
 
 

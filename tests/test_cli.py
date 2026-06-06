@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
+import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +18,18 @@ from orchestrator import cli  # noqa: E402
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state_dir = tempfile.TemporaryDirectory(prefix="swift-orchestrator-user-state-")
+        self.old_state_dir = os.environ.get("SWIFT_ORCHESTRATOR_USER_STATE_DIR")
+        os.environ["SWIFT_ORCHESTRATOR_USER_STATE_DIR"] = self.state_dir.name
+
+    def tearDown(self) -> None:
+        if self.old_state_dir is None:
+            os.environ.pop("SWIFT_ORCHESTRATOR_USER_STATE_DIR", None)
+        else:
+            os.environ["SWIFT_ORCHESTRATOR_USER_STATE_DIR"] = self.old_state_dir
+        self.state_dir.cleanup()
+
     def test_init_project_scaffolds_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:
             root = Path(temp_dir)
@@ -51,6 +66,41 @@ class CliTests(unittest.TestCase):
             self.assertIn("logs/", gitignore)
             self.assertIn("output/", gitignore)
             self.assertIn("state/", gitignore)
+
+    def test_init_project_accepts_project_alias_and_remembers_project(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+
+            result = cli.main([
+                "init",
+                "--project",
+                str(root),
+                "--project-name",
+                "SampleApp",
+            ])
+
+            self.assertEqual(result, 0)
+            recent = json.loads((Path(self.state_dir.name) / "projects.json").read_text(encoding="utf-8"))
+            self.assertEqual(recent["active"], "SampleApp")
+            self.assertEqual(recent["projects"][0]["root"], str(root.resolve()))
+
+    def test_projects_and_use_commands_manage_recent_project_selection(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-use-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+            self.assertEqual(cli.main(["init", "--project", str(root), "--project-name", "SampleApp"]), 0)
+
+            list_output = io.StringIO()
+            with redirect_stdout(list_output):
+                self.assertEqual(cli.main(["projects"]), 0)
+            self.assertIn("* SampleApp:", list_output.getvalue())
+
+            use_output = io.StringIO()
+            with redirect_stdout(use_output):
+                self.assertEqual(cli.main(["use", "SampleApp"]), 0)
+            self.assertIn("Project: SampleApp", use_output.getvalue())
+            self.assertIn(str(root.resolve()), use_output.getvalue())
 
     def test_init_project_can_generate_starter_docs_and_helper_script(self) -> None:
         with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:

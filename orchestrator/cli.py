@@ -10,6 +10,8 @@ from pathlib import Path
 
 from orchestrator.project_config import DEFAULT_RUNTIME_DIRNAME, find_project_root
 from orchestrator.project_config import load_project_config
+from orchestrator.project_config import load_recent_projects, project_display_name
+from orchestrator.project_config import remember_project, resolve_project_reference
 from orchestrator.config_validation import validate_machine_config, validate_project_config
 
 
@@ -193,6 +195,31 @@ def write_json_file(path: Path, data: dict) -> None:
     print(f"Updated {path}")
 
 
+def resolve_cli_project(project: str | None) -> Path | None:
+    if not project:
+        return None
+    root = resolve_project_reference(project)
+    if not root:
+        print(f"Unknown project reference: {project}")
+        print("Run `swift-orchestrator projects` to list recent projects, or pass a path.")
+        return None
+    return root
+
+
+def print_project_context(root: Path) -> None:
+    print(f"Project: {project_display_name(root)}")
+    print(f"Root:    {root}")
+
+
+def apply_project_env(project: str | None) -> int:
+    root = resolve_cli_project(project)
+    if not root:
+        return 1
+    os.environ["SWIFT_ORCHESTRATOR_PROJECT_ROOT"] = str(root)
+    print_project_context(root)
+    return 0
+
+
 def prompt_text(label: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default is not None else ""
     value = input(f"{label}{suffix}: ").strip()
@@ -299,7 +326,8 @@ def verify_wizard_setup(install_workers: list[str]) -> int:
 
 
 def run_wizard(args: argparse.Namespace) -> int:
-    root = Path(args.root).expanduser().resolve() if args.root else find_project_root()
+    root_arg = args.project or args.root
+    root = Path(root_arg).expanduser().resolve() if root_arg else find_project_root()
     models = parse_csv(args.models)
     if args.non_interactive and not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
@@ -321,6 +349,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     if needs_init:
         init_args = argparse.Namespace(
             root=str(root),
+            project=None,
             project_name=args.project_name,
             scheme=args.scheme,
             test_target=args.test_target,
@@ -395,13 +424,15 @@ def run_wizard(args: argparse.Namespace) -> int:
     if not args.non_interactive and ssh_machines and not install_workers:
         if prompt_yes_no("Install/check SSH worker packages now?", False):
             install_workers = [machine["name"] for machine in ssh_machines]
+    remember_project(root, project_display_name(root), active=True)
     if args.verify or install_workers:
         return verify_wizard_setup(install_workers)
     return 0
 
 
 def init_project(args: argparse.Namespace) -> int:
-    root = Path(args.root).expanduser().resolve() if args.root else find_project_root()
+    root_arg = getattr(args, "project", None) or args.root
+    root = Path(root_arg).expanduser().resolve() if root_arg else find_project_root()
     runtime_dir = root / DEFAULT_RUNTIME_DIRNAME
     config_dir = runtime_dir / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -491,6 +522,7 @@ def init_project(args: argparse.Namespace) -> int:
         write_helper_script(root, args.force)
 
     print("Run: swift-orchestrator check")
+    remember_project(root, config["project_name"], active=True)
     return 0
 
 
@@ -514,12 +546,38 @@ def run_script(script_name: str, script_args: list[str]) -> int:
     return subprocess.call([sys.executable, str(scripts_dir / script_name), *script_args], env=env)
 
 
+def list_projects_command() -> int:
+    data = load_recent_projects()
+    active = data.get("active")
+    projects = data.get("projects", [])
+    if not projects:
+        print("No recent projects.")
+        return 0
+    for project in projects:
+        marker = "*" if project.get("name") == active else " "
+        print(f"{marker} {project.get('name')}: {project.get('root')}")
+    return 0
+
+
+def use_project_command(reference: str) -> int:
+    root = resolve_cli_project(reference)
+    if not root:
+        return 1
+    if not root.exists():
+        print(f"Project path does not exist: {root}")
+        return 1
+    remember_project(root, project_display_name(root), active=True)
+    print_project_context(root)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="swift-orchestrator")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--root")
+    init_parser.add_argument("--project", help="Project root path. Alias for --root.")
     init_parser.add_argument("--project-name")
     init_parser.add_argument("--scheme")
     init_parser.add_argument("--test-target")
@@ -530,6 +588,7 @@ def main(argv: list[str] | None = None) -> int:
 
     wizard_parser = subparsers.add_parser("wizard")
     wizard_parser.add_argument("--root")
+    wizard_parser.add_argument("--project", help="Project root path. Alias for --root.")
     wizard_parser.add_argument("--project-name")
     wizard_parser.add_argument("--scheme")
     wizard_parser.add_argument("--test-target")
@@ -545,15 +604,24 @@ def main(argv: list[str] | None = None) -> int:
     wizard_parser.add_argument("--install-workers", action="store_true", help="Run worker install/check for SSH machines added by this wizard")
     wizard_parser.add_argument("--non-interactive", action="store_true")
 
-    subparsers.add_parser("console")
-    subparsers.add_parser("check")
-    subparsers.add_parser("check-config")
+    console_parser = subparsers.add_parser("console")
+    console_parser.add_argument("--project", help="Recent project name or project root path")
+    check_parser = subparsers.add_parser("check")
+    check_parser.add_argument("--project", help="Recent project name or project root path")
+    check_config_parser = subparsers.add_parser("check-config")
+    check_config_parser.add_argument("--project", help="Recent project name or project root path")
     worker_check = subparsers.add_parser("worker-check")
     worker_check.add_argument("--machine")
+    worker_check.add_argument("--project", help="Recent project name or project root path")
     worker_install = subparsers.add_parser("worker-install")
     worker_install.add_argument("--machine")
+    worker_install.add_argument("--project", help="Recent project name or project root path")
+    subparsers.add_parser("projects")
+    use_parser = subparsers.add_parser("use")
+    use_parser.add_argument("project", help="Recent project name or project root path")
 
     passthrough = subparsers.add_parser("script")
+    passthrough.add_argument("--project", help="Recent project name or project root path")
     passthrough.add_argument("script_name")
     passthrough.add_argument("script_args", nargs=argparse.REMAINDER)
 
@@ -563,22 +631,38 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "wizard":
         return run_wizard(args)
     if args.command == "console":
+        if args.project and apply_project_env(args.project):
+            return 1
         return run_script("dev_console.py", [])
     if args.command == "check":
+        if args.project and apply_project_env(args.project):
+            return 1
         return run_script("check_setup.py", [])
     if args.command == "check-config":
+        if args.project and apply_project_env(args.project):
+            return 1
         return validate_config_command()
     if args.command == "worker-check":
+        if args.project and apply_project_env(args.project):
+            return 1
         script_args = ["check"]
         if args.machine:
             script_args.extend(["--machine", args.machine])
         return run_script("worker_tools.py", script_args)
     if args.command == "worker-install":
+        if args.project and apply_project_env(args.project):
+            return 1
         script_args = ["install"]
         if args.machine:
             script_args.extend(["--machine", args.machine])
         return run_script("worker_tools.py", script_args)
+    if args.command == "projects":
+        return list_projects_command()
+    if args.command == "use":
+        return use_project_command(args.project)
     if args.command == "script":
+        if args.project and apply_project_env(args.project):
+            return 1
         return run_script(args.script_name, args.script_args)
     return 1
 

@@ -79,6 +79,54 @@ The files in `.swift-orchestrator/prompts/` are project-local role prompt overri
 
 Use `--verify` to run setup/config checks before the wizard exits. Use `--install-workers` when the wizard adds SSH machines and should immediately run package install/check for those workers.
 
+## Project Selection
+
+The easiest path is to run commands from the project root:
+
+```bash
+cd /path/to/MyApp
+swift-orchestrator wizard
+swift-orchestrator console
+```
+
+You can also point commands at a project explicitly:
+
+```bash
+swift-orchestrator wizard --project /path/to/MyApp
+swift-orchestrator check-config --project /path/to/MyApp
+swift-orchestrator console --project /path/to/MyApp
+```
+
+Initialized projects are remembered in:
+
+```text
+~/.swift-orchestrator/projects.json
+```
+
+List recent projects:
+
+```bash
+swift-orchestrator projects
+```
+
+Set the active project:
+
+```bash
+swift-orchestrator use MyApp
+```
+
+Then commands can run from outside the repo and use the active project when no project is found from the current directory:
+
+```bash
+swift-orchestrator console
+```
+
+Explicit project selection still wins:
+
+```bash
+swift-orchestrator console --project MyApp
+```
+
 ## Manual Initialization
 
 From the target Swift repository:
@@ -93,6 +141,7 @@ Or initialize a specific path:
 
 ```bash
 swift-orchestrator init --root /path/to/MyApp --project-name MyApp
+swift-orchestrator init --project /path/to/MyApp --project-name MyApp
 ```
 
 Optional starter files:
