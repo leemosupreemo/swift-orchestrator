@@ -4,17 +4,25 @@ This guide covers using the standalone package from any Swift/Xcode project.
 
 ## Install
 
+Recommended CLI install:
+
+```bash
+brew install pipx
+pipx ensurepath
+pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
+```
+
+Upgrade later with:
+
+```bash
+pipx upgrade swift-orchestrator
+```
+
 For local development from this repository:
 
 ```bash
 cd /path/to/swift_orchestrator
 python3 -m pip install -e .
-```
-
-Install from Git:
-
-```bash
-python3 -m pip install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
 ```
 
 Verify the command is available:
@@ -356,6 +364,7 @@ swift-orchestrator check-config
 Common issues:
 
 - `swift-orchestrator: command not found`: install the package in the active Python environment or use the virtualenv's `bin/swift-orchestrator`.
+- `swift-orchestrator: command not found` after `pipx install`: run `pipx ensurepath`, open a new terminal, then retry.
 - `Configure xcode_project, xcode_workspace, or build_command`: run `init` from the Swift project root or set `build_command`.
 - `scheme is required`: set `scheme` in `.swift-orchestrator/project.json`.
 - `No AI providers found`: authenticate a provider CLI or export a supported API key.

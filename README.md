@@ -2,6 +2,23 @@
 
 Standalone package scaffold for the AI dev console and worker orchestration used by Swift/Xcode projects.
 
+## Install
+
+Recommended CLI install:
+
+```bash
+brew install pipx
+pipx ensurepath
+pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
+swift-orchestrator --help
+```
+
+Upgrade later with:
+
+```bash
+pipx upgrade swift-orchestrator
+```
+
 ## Local Development
 
 ```bash
