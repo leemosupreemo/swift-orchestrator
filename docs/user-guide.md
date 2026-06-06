@@ -31,7 +31,44 @@ The package has no Python runtime dependencies outside the standard library. Som
 - AI providers: at least one of `codex`, `gemini`, `claude`, `opencode`, `ollama`, or matching API key configuration
 - Firebase delivery: `firebase` plus a project-local distribution script
 
-## Initialize A Swift Project
+## First-Run Wizard
+
+For a new project, prefer the wizard:
+
+```bash
+swift-orchestrator wizard
+```
+
+The wizard initializes the project if needed, creates starter docs and a helper script, requires at least one LLM/model choice, optionally copies the role prompt Markdown files into project-local overrides, optionally adds SSH workers, and optionally configures Firebase distribution.
+
+Scriptable example:
+
+```bash
+swift-orchestrator wizard \
+  --models codex,gemini \
+  --copy-prompt-overrides \
+  --ssh-machine mac2=mac2:/Users/me/Documents/MyApp \
+  --firebase \
+  --distribution-script-path scripts/distribute_ios.sh \
+  --firebase-plist-path MyApp/GoogleService-Info.plist \
+  --non-interactive
+```
+
+After the wizard, review:
+
+```text
+AGENTS.md
+docs/build-test-commands.md
+docs/ai-workflow.md
+.swift-orchestrator/project.json
+.swift-orchestrator/config/machines.json
+.swift-orchestrator/config/settings.json
+.swift-orchestrator/prompts/*.md
+```
+
+The files in `.swift-orchestrator/prompts/` are project-local role prompt overrides. They are copied only when requested, and they should be checked for project-specific assumptions before jobs are created.
+
+## Manual Initialization
 
 From the target Swift repository:
 
@@ -217,6 +254,38 @@ swift-orchestrator worker-install --machine mac2
 ```
 
 `worker-install` copies the installed package source to the worker's `orchestrator_package_path` and verifies that the remote machine can import `orchestrator.scripts.worker_run`. Remote dispatch stops before syncing jobs if the package is missing.
+
+## Prompt Instructions
+
+Default role prompts live in the package:
+
+```text
+orchestrator/prompts/
+```
+
+The prompt files are role-specific rather than model-specific:
+
+```text
+planner_bug.md
+planner_feature.md
+planner_coverage.md
+builder_bug.md
+builder_feature_task.md
+builder_infra.md
+debug_agent.md
+reviewer.md
+verifier.md
+build_checker.md
+designer.md
+```
+
+To customize them per project, run the wizard with `--copy-prompt-overrides` or manually create:
+
+```text
+.swift-orchestrator/prompts/
+```
+
+Project-local prompt files with matching names take precedence over package defaults.
 
 ## Run The Console
 

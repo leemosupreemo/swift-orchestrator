@@ -105,6 +105,67 @@ class CliTests(unittest.TestCase):
             self.assertEqual(project["detected_schemes"], ["AppScheme"])
             self.assertEqual(project["detected_targets"], ["App", "AppUnitTests"])
 
+    def test_wizard_configures_first_run_assets_non_interactively(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--project-name",
+                "SampleApp",
+                "--models",
+                "codex,gemini",
+                "--copy-prompt-overrides",
+                "--ssh-machine",
+                "mac2=remote-host:/Users/me/SampleApp",
+                "--firebase",
+                "--distribution-script-path",
+                "scripts/distribute_ios.sh",
+                "--firebase-plist-path",
+                "SampleApp/GoogleService-Info.plist",
+                "--non-interactive",
+            ])
+
+            self.assertEqual(result, 0)
+            runtime = root / ".swift-orchestrator"
+            project = json.loads((runtime / "project.json").read_text(encoding="utf-8"))
+            machines = json.loads((runtime / "config" / "machines.json").read_text(encoding="utf-8"))
+
+            self.assertTrue((root / "AGENTS.md").exists())
+            self.assertTrue((root / "docs" / "build-test-commands.md").exists())
+            self.assertTrue((root / "scripts" / "orchestrator").exists())
+            self.assertTrue((runtime / "prompts" / "builder_bug.md").exists())
+            self.assertEqual(project["delivery_provider"], "firebase")
+            self.assertTrue(project["firebase_distribution"])
+            self.assertEqual(project["distribution_script_path"], "scripts/distribute_ios.sh")
+            self.assertEqual(project["firebase_plist_path"], "SampleApp/GoogleService-Info.plist")
+
+            machine_index = {machine["name"]: machine for machine in machines["machines"]}
+            self.assertEqual(machine_index["local"]["models"], ["codex", "gemini"])
+            self.assertEqual(machine_index["mac2"]["execution_mode"], "ssh")
+            self.assertEqual(machine_index["mac2"]["ssh_target"], "remote-host")
+            self.assertEqual(machine_index["mac2"]["repo_path"], "/Users/me/SampleApp")
+            self.assertEqual(machine_index["mac2"]["models"], ["codex", "gemini"])
+
+    def test_wizard_requires_model_in_non_interactive_mode(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--project-name",
+                "SampleApp",
+                "--non-interactive",
+            ])
+
+            self.assertEqual(result, 1)
+
     @patch("orchestrator.cli.validate_machine_config", return_value=[])
     @patch("orchestrator.cli.validate_project_config", return_value=[])
     def test_check_config_returns_success_for_valid_config(self, _project, _machines) -> None:

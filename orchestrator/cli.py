@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -176,6 +177,171 @@ def write_helper_script(root: Path, force: bool) -> None:
     script_path.chmod(script_path.stat().st_mode | 0o111)
 
 
+def read_json_file(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json_file(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"Updated {path}")
+
+
+def prompt_text(label: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    value = input(f"{label}{suffix}: ").strip()
+    return value or (default or "")
+
+
+def prompt_yes_no(label: str, default: bool = False) -> bool:
+    suffix = "Y/n" if default else "y/N"
+    value = input(f"{label} [{suffix}]: ").strip().lower()
+    if not value:
+        return default
+    return value in {"y", "yes", "true", "1"}
+
+
+def parse_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_ssh_machine(value: str) -> dict:
+    try:
+        name, rest = value.split("=", 1)
+        ssh_target, repo_path = rest.split(":", 1)
+    except ValueError as exc:
+        raise ValueError("--ssh-machine must use NAME=SSH_TARGET:/absolute/repo/path") from exc
+    if not name or not ssh_target or not repo_path.startswith("/"):
+        raise ValueError("--ssh-machine must use NAME=SSH_TARGET:/absolute/repo/path")
+    return {
+        "name": name,
+        "enabled": True,
+        "execution_mode": "ssh",
+        "ssh_target": ssh_target,
+        "repo_path": repo_path,
+        "orchestrator_package_path": "~/.swift-orchestrator/package",
+        "orchestrator_runtime_dir": ".swift-orchestrator",
+        "roles": ["worker", "build", "test"],
+        "models": [],
+        "priority": 90,
+        "max_concurrent_jobs": 1,
+        "max_heavy_jobs": 1,
+        "supports_xcode": True,
+        "supports_simulator": True,
+        "supports_backend_tests": False,
+        "interactive_reserved": False,
+        "tags": ["remote"],
+    }
+
+
+def copy_prompt_overrides(root: Path, force: bool) -> None:
+    prompts_source = Path(__file__).resolve().parent / "prompts"
+    prompts_dest = root / DEFAULT_RUNTIME_DIRNAME / "prompts"
+    prompts_dest.mkdir(parents=True, exist_ok=True)
+    for prompt_file in sorted(prompts_source.glob("*.md")):
+        dest = prompts_dest / prompt_file.name
+        if dest.exists() and not force:
+            print(f"Already exists: {dest}")
+            continue
+        shutil.copyfile(prompt_file, dest)
+        print(f"Created {dest}")
+
+
+def update_machine_models(config_dir: Path, models: list[str], ssh_machines: list[dict]) -> None:
+    machines_file = config_dir / "machines.json"
+    machines_config = read_json_file(machines_file)
+    existing = {machine["name"]: machine for machine in machines_config.get("machines", [])}
+    for machine in existing.values():
+        machine["models"] = models
+    for machine in ssh_machines:
+        machine["models"] = models
+        existing[machine["name"]] = machine
+    machines_config["machines"] = list(existing.values())
+    write_json_file(machines_file, machines_config)
+
+
+def update_firebase_config(
+    project_file: Path,
+    enabled: bool,
+    distribution_script_path: str | None,
+    firebase_plist_path: str | None,
+) -> None:
+    config = read_json_file(project_file)
+    config["firebase_distribution"] = enabled
+    config["delivery_provider"] = "firebase" if enabled else None
+    config["distribution_script_path"] = distribution_script_path if enabled else None
+    config["firebase_plist_path"] = firebase_plist_path if enabled else None
+    write_json_file(project_file, config)
+
+
+def run_wizard(args: argparse.Namespace) -> int:
+    root = Path(args.root).expanduser().resolve() if args.root else find_project_root()
+    runtime_dir = root / DEFAULT_RUNTIME_DIRNAME
+    project_file = runtime_dir / "project.json"
+    needs_init = args.force or not project_file.exists()
+    if needs_init:
+        init_args = argparse.Namespace(
+            root=str(root),
+            project_name=args.project_name,
+            scheme=args.scheme,
+            test_target=args.test_target,
+            base_branch=args.base_branch,
+            force=args.force,
+            with_starter_docs=True,
+            with_helper_script=True,
+        )
+        init_project(init_args)
+    else:
+        write_starter_docs(root, read_json_file(project_file), args.force)
+        write_helper_script(root, args.force)
+
+    models = parse_csv(args.models)
+    if not models and not args.non_interactive:
+        print("\nChoose at least one LLM/model alias. Examples: codex, gemini, claude")
+        models = parse_csv(prompt_text("Models", "codex"))
+    if not models:
+        print("Wizard requires at least one model. Pass --models codex or run interactively.")
+        return 1
+
+    copy_prompts = args.copy_prompt_overrides
+    if not copy_prompts and not args.non_interactive:
+        copy_prompts = prompt_yes_no("Copy role prompt .md files into .swift-orchestrator/prompts for project editing?", True)
+    if copy_prompts:
+        copy_prompt_overrides(root, args.force)
+
+    ssh_machines = [parse_ssh_machine(value) for value in args.ssh_machine]
+    if not args.non_interactive and prompt_yes_no("Add an SSH worker machine now?", False):
+        name = prompt_text("Machine name", "mac2")
+        target = prompt_text("SSH target", name)
+        repo_path = prompt_text("Remote repo path")
+        ssh_machines.append(parse_ssh_machine(f"{name}={target}:{repo_path}"))
+    update_machine_models(runtime_dir / "config", models, ssh_machines)
+
+    firebase_enabled = args.firebase
+    distribution_script_path = args.distribution_script_path
+    firebase_plist_path = args.firebase_plist_path
+    if not firebase_enabled and not args.non_interactive:
+        firebase_enabled = prompt_yes_no("Configure Firebase distribution now?", False)
+    if firebase_enabled:
+        distribution_script_path = distribution_script_path or (
+            None if args.non_interactive else prompt_text("Distribution script path", "scripts/distribute_ios.sh")
+        )
+        firebase_plist_path = firebase_plist_path or (
+            None if args.non_interactive else prompt_text("Firebase plist path", f"{root.name}/GoogleService-Info.plist")
+        )
+        if not distribution_script_path or not firebase_plist_path:
+            print("Firebase setup requires --distribution-script-path and --firebase-plist-path.")
+            return 1
+    update_firebase_config(project_file, firebase_enabled, distribution_script_path, firebase_plist_path)
+
+    print("\nFirst-run wizard complete.")
+    print("Review generated Markdown files and prompt overrides before creating jobs.")
+    print("Run: swift-orchestrator check")
+    print("Run: swift-orchestrator check-config")
+    return 0
+
+
 def init_project(args: argparse.Namespace) -> int:
     root = Path(args.root).expanduser().resolve() if args.root else find_project_root()
     runtime_dir = root / DEFAULT_RUNTIME_DIRNAME
@@ -304,6 +470,21 @@ def main(argv: list[str] | None = None) -> int:
     init_parser.add_argument("--with-starter-docs", action="store_true")
     init_parser.add_argument("--with-helper-script", action="store_true")
 
+    wizard_parser = subparsers.add_parser("wizard")
+    wizard_parser.add_argument("--root")
+    wizard_parser.add_argument("--project-name")
+    wizard_parser.add_argument("--scheme")
+    wizard_parser.add_argument("--test-target")
+    wizard_parser.add_argument("--base-branch", default="main")
+    wizard_parser.add_argument("--force", action="store_true")
+    wizard_parser.add_argument("--models", help="Comma-separated model aliases or model IDs, for example codex,gemini")
+    wizard_parser.add_argument("--copy-prompt-overrides", action="store_true")
+    wizard_parser.add_argument("--ssh-machine", action="append", default=[], help="Add SSH worker as NAME=SSH_TARGET:/absolute/repo/path")
+    wizard_parser.add_argument("--firebase", action="store_true")
+    wizard_parser.add_argument("--distribution-script-path")
+    wizard_parser.add_argument("--firebase-plist-path")
+    wizard_parser.add_argument("--non-interactive", action="store_true")
+
     subparsers.add_parser("console")
     subparsers.add_parser("check")
     subparsers.add_parser("check-config")
@@ -319,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "init":
         return init_project(args)
+    if args.command == "wizard":
+        return run_wizard(args)
     if args.command == "console":
         return run_script("dev_console.py", [])
     if args.command == "check":

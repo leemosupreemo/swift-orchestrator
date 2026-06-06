@@ -7,7 +7,7 @@ Standalone package scaffold for the AI dev console and worker orchestration used
 ```bash
 cd swift_orchestrator
 python3 -m pip install -e .
-swift-orchestrator init --root /path/to/SwiftProject
+swift-orchestrator wizard --root /path/to/SwiftProject
 cd /path/to/SwiftProject
 swift-orchestrator check
 swift-orchestrator check-config
@@ -45,6 +45,14 @@ swift-orchestrator check-config
 ```
 
 to validate environment and project configuration.
+
+For first-time setup, use:
+
+```bash
+swift-orchestrator wizard
+```
+
+The wizard initializes project config, chooses at least one model, can copy project-local prompt Markdown overrides, can add SSH workers, and can configure Firebase delivery.
 
 The package stores project-specific runtime files in `.swift-orchestrator/` by default:
 
