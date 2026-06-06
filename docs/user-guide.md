@@ -7,7 +7,7 @@ This guide covers using the standalone package from any Swift/Xcode project.
 For local development from this repository:
 
 ```bash
-cd /path/to/Thirteen/swift_orchestrator
+cd /path/to/swift_orchestrator
 python3 -m pip install -e .
 ```
 
