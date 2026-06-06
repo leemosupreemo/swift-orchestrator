@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swift-orchestrator"
+version = "0.1.0"
+description = "Reusable AI orchestration console for Swift and Xcode projects."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+swift-orchestrator = "orchestrator.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["orchestrator*"]
+
+[tool.setuptools.package-data]
+orchestrator = ["prompts/*.md", "templates/*"]
+

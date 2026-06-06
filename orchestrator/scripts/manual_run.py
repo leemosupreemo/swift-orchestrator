@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import subprocess
+import shlex
+from pathlib import Path
+
+# Add scripts dir to path
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.append(str(SCRIPTS_DIR))
+
+from common import ROOT, OUTPUT_DIR, timestamp, write_text, extract_commands, JOBS_DIR, read_json
+
+
+def strip_xcode_test_plan(cmd: str) -> str:
+    """Remove -testPlan <name> so focused -only-testing flags control the run."""
+    parts = shlex.split(cmd)
+    cleaned: list[str] = []
+    i = 0
+    while i < len(parts):
+        if parts[i] == "-testPlan":
+            i += 2
+            continue
+        cleaned.append(parts[i])
+        i += 1
+    return shlex.join(cleaned)
+
+def cleanup_logs(manual_base: Path, keep: int = 3):
+    """Keeps only the 'keep' most recent log directories, UNLESS they are linked to an active job."""
+    linked_paths = set()
+    for f in JOBS_DIR.glob("*.json"):
+        try:
+            job_data = read_json(f)
+            paths = job_data.get("last_manual_log_paths", [])
+            for p in paths:
+                full_p = ROOT / p if not Path(p).is_absolute() else Path(p)
+                linked_paths.add(str(full_p.resolve()))
+        except:
+            continue
+
+    dirs = sorted([d for d in manual_base.iterdir() if d.is_dir() and d.name != "latest"], key=lambda x: x.name)
+    keep_dirs = set(dirs[-keep:]) if len(dirs) >= keep else set(dirs)
+    
+    for d in dirs:
+        if str(d.resolve()) in linked_paths:
+            keep_dirs.add(d)
+    
+    for d in dirs:
+        if d not in keep_dirs:
+            print(f"      - Cleaning up old UNLINKED manual logs: {d.name}")
+            import shutil
+            shutil.rmtree(d)
+
+def stream_command(cmd: str, log_file: Path) -> bool:
+    """Runs a command and streams output to both terminal and file in real-time."""
+    print(f"🚀 Executing: {cmd}", flush=True)
+    print(f"📝 Logging to: {log_file.relative_to(ROOT)}", flush=True)
+    
+    with open(log_file, "w", encoding="utf-8") as f:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            shell=True,
+            cwd=str(ROOT),
+            text=True,
+            bufsize=1,
+            executable="/bin/bash"
+        )
+        
+        for line in process.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            f.write(line)
+            f.flush()
+            
+        process.wait()
+        return process.returncode == 0
+
+def capture_logs(manual_out: Path) -> Path | None:
+    """Prompts the user to paste logs and saves them to manual_out / 'captured.log'."""
+    print("\n📥 Paste your logs below. When finished, press Ctrl-D on a new line.", flush=True)
+    try:
+        logs = sys.stdin.read()
+    except EOFError:
+        logs = ""
+
+    if logs.strip():
+        log_file = manual_out / "captured.log"
+        write_text(log_file, logs)
+        print(f"✅ Logs captured to captured.log")
+        return log_file
+    else:
+        print("⚠️  No logs provided. Skipping.")
+        return None
+
+def main():
+    parser = argparse.ArgumentParser(description="Run manual build/tests and save logs.")
+    parser.add_argument("mode", choices=["build", "test", "both", "run", "capture"], help="What to run")
+    parser.add_argument("--test-only", help="Additional -only-testing flags for xcodebuild")
+    parser.add_argument("--run-cmd", help="Custom command to run for 'run' mode")
+    args = parser.parse_args()
+
+    ts = timestamp()
+    manual_base = OUTPUT_DIR / "manual"
+    manual_out = manual_base / ts
+    manual_out.mkdir(parents=True, exist_ok=True)
+    
+    # Update 'latest' symlink
+    latest_link = manual_base / "latest"
+    if latest_link.exists() or latest_link.is_symlink():
+        latest_link.unlink()
+    try:
+        latest_link.symlink_to(ts, target_is_directory=True)
+    except Exception as e:
+        print(f"Warning: Could not create 'latest' symlink: {e}")
+
+    build_cmd, test_cmd = extract_commands()
+
+    if args.mode == "capture":
+        capture_logs(manual_out)
+
+    if args.mode == "run":
+        if not args.run_cmd:
+            print("❌ Error: --run-cmd is required for 'run' mode.")
+            sys.exit(1)
+        success = stream_command(args.run_cmd, manual_out / "run.log")
+        if not success:
+            print("\n❌ Manual Run FAILED.")
+            sys.exit(1)
+        print("\n✅ Manual Run SUCCESSFUL.")
+
+    if args.mode in ["build", "both"]:
+        success = stream_command(build_cmd, manual_out / "build.log")
+        if not success:
+            print("\n❌ Manual Build FAILED.")
+            if args.mode == "both":
+                print("Skipping tests due to build failure.")
+                sys.exit(1)
+            sys.exit(1)
+        print("\n✅ Manual Build SUCCESSFUL.")
+
+    if args.mode in ["test", "both"]:
+        final_test_cmd = test_cmd
+        if args.test_only:
+            if "xcodebuild test" in args.test_only:
+                final_test_cmd = args.test_only
+            else:
+                # Simply append the extra flags to the end of the base test command
+                final_test_cmd = f"{strip_xcode_test_plan(test_cmd)} {args.test_only}"
+
+        success = stream_command(final_test_cmd, manual_out / "test.log")
+        if not success:
+            print("\n❌ Manual Tests FAILED.")
+            sys.exit(1)
+        print("\n✅ Manual Tests SUCCESSFUL.")
+
+    print(f"\n📝 All logs saved to: {manual_out.relative_to(ROOT)}")
+    cleanup_logs(manual_base)
+
+if __name__ == "__main__":
+    main()

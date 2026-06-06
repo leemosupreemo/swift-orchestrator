@@ -1,0 +1,53 @@
+{
+  "job_id": "20260423-200000-bug-4000",
+  "type": "bug-fix",
+  "source": "manual",
+  "issue_number": 4000,
+  "title": "Grouped scheduler fixture",
+  "status": "planned",
+  "planner": "gemini",
+  "builder": "codex",
+  "reviewer": "gemini",
+  "created_at": "2026-04-23T20:00:00-05:00",
+  "updated_at": "2026-04-23T20:00:00-05:00",
+  "raw_input": "Fixture",
+  "plan": {
+    "summary": "Fixture summary"
+  },
+  "task_groups": [
+    {
+      "group_id": "A",
+      "title": "Investigation",
+      "kind": "investigation",
+      "resource_profile": "reasoning",
+      "preferred_roles": ["worker"],
+      "preferred_models": ["gemini"],
+      "depends_on": [],
+      "tasks": ["Investigate"],
+      "status": "completed"
+    },
+    {
+      "group_id": "B",
+      "title": "Implementation",
+      "kind": "implementation",
+      "resource_profile": "implementation",
+      "preferred_roles": ["worker"],
+      "preferred_models": ["codex"],
+      "depends_on": ["A"],
+      "tasks": ["Implement"],
+      "status": "pending"
+    },
+    {
+      "group_id": "C",
+      "title": "Verification",
+      "kind": "verification",
+      "resource_profile": "build_test",
+      "preferred_roles": ["build", "test"],
+      "preferred_models": ["codex"],
+      "depends_on": ["B"],
+      "tasks": ["Verify"],
+      "status": "pending"
+    }
+  ],
+  "dispatch_history": []
+}

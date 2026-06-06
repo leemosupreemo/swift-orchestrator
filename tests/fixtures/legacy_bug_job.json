@@ -1,0 +1,42 @@
+{
+  "job_id": "20260423-164905-bug-3335",
+  "type": "bug-fix",
+  "source": "manual",
+  "issue_number": 3335,
+  "title": "Settings name updates are not reflected in detail view without restart",
+  "status": "planned",
+  "planner": "gemini",
+  "builder": "codex",
+  "reviewer": "gemini",
+  "branch": null,
+  "pr_number": null,
+  "created_at": "2026-04-23T16:49:05-05:00",
+  "updated_at": "2026-04-23T16:49:05-05:00",
+  "raw_input": "After editing the display name in settings, the updated name does not appear in the detail view until restarting the app.",
+  "plan": {
+    "title": "Settings name updates are not reflected in detail view without restart",
+    "summary": "When a user edits their display name in settings, the detail view continues to display the old name.",
+    "repro_steps": [
+      "Launch the app and navigate to settings.",
+      "Edit the display name.",
+      "Open the detail view."
+    ],
+    "expected_behavior": "The detail view should reflect the new display name without restart.",
+    "acceptance_criteria": [
+      "Display name changes in settings are reactively updated in the detail view."
+    ],
+    "constraints": [
+      "Must adhere to existing SwiftUI state management patterns."
+    ],
+    "complexity": "complex",
+    "recommended_job_type": "bug-fix",
+    "likely_files": [
+      "MyApp/SettingsViewModel.swift",
+      "MyApp/DetailView.swift"
+    ],
+    "test_recommendations": [
+      "Add a focused unit test."
+    ]
+  }
+}
+
