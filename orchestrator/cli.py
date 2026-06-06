@@ -165,16 +165,23 @@ exec swift-orchestrator "$@"
 """
 
 
-def write_starter_docs(root: Path, config: dict, force: bool) -> None:
-    write_text_file(root / "docs" / "build-test-commands.md", build_test_docs(config), force)
-    write_text_file(root / "docs" / "ai-workflow.md", ai_workflow_docs(config["project_name"]), force)
-    write_text_file(root / "AGENTS.md", agents_docs(config["project_name"]), force)
+def write_starter_docs(root: Path, config: dict, force: bool) -> list[Path]:
+    paths = [
+        root / "AGENTS.md",
+        root / "docs" / "build-test-commands.md",
+        root / "docs" / "ai-workflow.md",
+    ]
+    write_text_file(paths[1], build_test_docs(config), force)
+    write_text_file(paths[2], ai_workflow_docs(config["project_name"]), force)
+    write_text_file(paths[0], agents_docs(config["project_name"]), force)
+    return paths
 
 
-def write_helper_script(root: Path, force: bool) -> None:
+def write_helper_script(root: Path, force: bool) -> Path:
     script_path = root / "scripts" / "orchestrator"
     write_text_file(script_path, helper_script(), force)
     script_path.chmod(script_path.stat().st_mode | 0o111)
+    return script_path
 
 
 def read_json_file(path: Path) -> dict:
@@ -235,17 +242,21 @@ def parse_ssh_machine(value: str) -> dict:
     }
 
 
-def copy_prompt_overrides(root: Path, force: bool) -> None:
+def copy_prompt_overrides(root: Path, force: bool) -> list[Path]:
     prompts_source = Path(__file__).resolve().parent / "prompts"
     prompts_dest = root / DEFAULT_RUNTIME_DIRNAME / "prompts"
     prompts_dest.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
     for prompt_file in sorted(prompts_source.glob("*.md")):
         dest = prompts_dest / prompt_file.name
         if dest.exists() and not force:
             print(f"Already exists: {dest}")
+            copied.append(dest)
             continue
         shutil.copyfile(prompt_file, dest)
         print(f"Created {dest}")
+        copied.append(dest)
+    return copied
 
 
 def update_machine_models(config_dir: Path, models: list[str], ssh_machines: list[dict]) -> None:
@@ -275,11 +286,38 @@ def update_firebase_config(
     write_json_file(project_file, config)
 
 
+def verify_wizard_setup(install_workers: list[str]) -> int:
+    check_result = run_script("check_setup.py", [])
+    config_result = validate_config_command()
+    worker_failures = 0
+    for machine_name in install_workers:
+        install_result = run_script("worker_tools.py", ["install", "--machine", machine_name])
+        check_worker_result = run_script("worker_tools.py", ["check", "--machine", machine_name])
+        if install_result != 0 or check_worker_result != 0:
+            worker_failures += 1
+    return 1 if check_result != 0 or config_result != 0 or worker_failures else 0
+
+
 def run_wizard(args: argparse.Namespace) -> int:
     root = Path(args.root).expanduser().resolve() if args.root else find_project_root()
+    models = parse_csv(args.models)
+    if args.non_interactive and not models:
+        print("Wizard requires at least one model. Pass --models codex or run interactively.")
+        return 1
+    if args.non_interactive and args.firebase and (not args.distribution_script_path or not args.firebase_plist_path):
+        print("Firebase setup requires --distribution-script-path and --firebase-plist-path.")
+        return 1
+
+    try:
+        ssh_machines = [parse_ssh_machine(value) for value in args.ssh_machine]
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+
     runtime_dir = root / DEFAULT_RUNTIME_DIRNAME
     project_file = runtime_dir / "project.json"
     needs_init = args.force or not project_file.exists()
+    review_paths: list[Path] = []
     if needs_init:
         init_args = argparse.Namespace(
             root=str(root),
@@ -292,11 +330,15 @@ def run_wizard(args: argparse.Namespace) -> int:
             with_helper_script=True,
         )
         init_project(init_args)
+        review_paths.extend([
+            root / "AGENTS.md",
+            root / "docs" / "build-test-commands.md",
+            root / "docs" / "ai-workflow.md",
+        ])
     else:
-        write_starter_docs(root, read_json_file(project_file), args.force)
+        review_paths.extend(write_starter_docs(root, read_json_file(project_file), args.force))
         write_helper_script(root, args.force)
 
-    models = parse_csv(args.models)
     if not models and not args.non_interactive:
         print("\nChoose at least one LLM/model alias. Examples: codex, gemini, claude")
         models = parse_csv(prompt_text("Models", "codex"))
@@ -308,14 +350,17 @@ def run_wizard(args: argparse.Namespace) -> int:
     if not copy_prompts and not args.non_interactive:
         copy_prompts = prompt_yes_no("Copy role prompt .md files into .swift-orchestrator/prompts for project editing?", True)
     if copy_prompts:
-        copy_prompt_overrides(root, args.force)
+        review_paths.extend(copy_prompt_overrides(root, args.force))
 
-    ssh_machines = [parse_ssh_machine(value) for value in args.ssh_machine]
     if not args.non_interactive and prompt_yes_no("Add an SSH worker machine now?", False):
         name = prompt_text("Machine name", "mac2")
         target = prompt_text("SSH target", name)
         repo_path = prompt_text("Remote repo path")
-        ssh_machines.append(parse_ssh_machine(f"{name}={target}:{repo_path}"))
+        try:
+            ssh_machines.append(parse_ssh_machine(f"{name}={target}:{repo_path}"))
+        except ValueError as exc:
+            print(str(exc))
+            return 1
     update_machine_models(runtime_dir / "config", models, ssh_machines)
 
     firebase_enabled = args.firebase
@@ -336,9 +381,22 @@ def run_wizard(args: argparse.Namespace) -> int:
     update_firebase_config(project_file, firebase_enabled, distribution_script_path, firebase_plist_path)
 
     print("\nFirst-run wizard complete.")
-    print("Review generated Markdown files and prompt overrides before creating jobs.")
+    print("Review these Markdown/config files before creating jobs:")
+    for path in [
+        *review_paths,
+        runtime_dir / "project.json",
+        runtime_dir / "config" / "machines.json",
+        runtime_dir / "config" / "settings.json",
+    ]:
+        print(f"  - {path.relative_to(root)}")
     print("Run: swift-orchestrator check")
     print("Run: swift-orchestrator check-config")
+    install_workers = [machine["name"] for machine in ssh_machines] if args.install_workers else []
+    if not args.non_interactive and ssh_machines and not install_workers:
+        if prompt_yes_no("Install/check SSH worker packages now?", False):
+            install_workers = [machine["name"] for machine in ssh_machines]
+    if args.verify or install_workers:
+        return verify_wizard_setup(install_workers)
     return 0
 
 
@@ -483,6 +541,8 @@ def main(argv: list[str] | None = None) -> int:
     wizard_parser.add_argument("--firebase", action="store_true")
     wizard_parser.add_argument("--distribution-script-path")
     wizard_parser.add_argument("--firebase-plist-path")
+    wizard_parser.add_argument("--verify", action="store_true", help="Run setup and config checks before exiting")
+    wizard_parser.add_argument("--install-workers", action="store_true", help="Run worker install/check for SSH machines added by this wizard")
     wizard_parser.add_argument("--non-interactive", action="store_true")
 
     subparsers.add_parser("console")

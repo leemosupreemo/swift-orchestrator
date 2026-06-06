@@ -165,6 +165,62 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(result, 1)
+            self.assertFalse((root / ".swift-orchestrator").exists())
+
+    def test_wizard_requires_complete_firebase_args_before_writing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--project-name",
+                "SampleApp",
+                "--models",
+                "codex",
+                "--firebase",
+                "--distribution-script-path",
+                "scripts/distribute_ios.sh",
+                "--non-interactive",
+            ])
+
+            self.assertEqual(result, 1)
+            self.assertFalse((root / ".swift-orchestrator").exists())
+
+    @patch("orchestrator.cli.validate_config_command", return_value=0)
+    @patch("orchestrator.cli.run_script", return_value=0)
+    def test_wizard_verify_runs_checks_and_worker_install(self, mock_run_script, _validate) -> None:
+        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--project-name",
+                "SampleApp",
+                "--models",
+                "codex",
+                "--ssh-machine",
+                "mac2=remote-host:/Users/me/SampleApp",
+                "--verify",
+                "--install-workers",
+                "--non-interactive",
+            ])
+
+            self.assertEqual(result, 0)
+            self.assertIn(("check_setup.py", []), [call.args for call in mock_run_script.call_args_list])
+            self.assertIn(
+                ("worker_tools.py", ["install", "--machine", "mac2"]),
+                [call.args for call in mock_run_script.call_args_list],
+            )
+            self.assertIn(
+                ("worker_tools.py", ["check", "--machine", "mac2"]),
+                [call.args for call in mock_run_script.call_args_list],
+            )
 
     @patch("orchestrator.cli.validate_machine_config", return_value=[])
     @patch("orchestrator.cli.validate_project_config", return_value=[])

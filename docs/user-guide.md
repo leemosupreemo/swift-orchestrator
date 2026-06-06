@@ -11,10 +11,10 @@ cd /path/to/swift_orchestrator
 python3 -m pip install -e .
 ```
 
-After the package is moved to its own Git repository, the intended install shape is:
+Install from Git:
 
 ```bash
-python3 -m pip install "git+ssh://git@github.com/OWNER/swift-orchestrator.git"
+python3 -m pip install "git+ssh://git@github.com/neemaameskin/swift-orchestrator.git"
 ```
 
 Verify the command is available:
@@ -51,6 +51,7 @@ swift-orchestrator wizard \
   --firebase \
   --distribution-script-path scripts/distribute_ios.sh \
   --firebase-plist-path MyApp/GoogleService-Info.plist \
+  --verify \
   --non-interactive
 ```
 
@@ -67,6 +68,8 @@ docs/ai-workflow.md
 ```
 
 The files in `.swift-orchestrator/prompts/` are project-local role prompt overrides. They are copied only when requested, and they should be checked for project-specific assumptions before jobs are created.
+
+Use `--verify` to run setup/config checks before the wizard exits. Use `--install-workers` when the wizard adds SSH machines and should immediately run package install/check for those workers.
 
 ## Manual Initialization
 
