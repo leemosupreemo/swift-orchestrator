@@ -11,4 +11,4 @@ build/
 dist/
 
 # Runtime directories generated when testing project initialization.
-.swift-orchestrator/
+.orchestrator/

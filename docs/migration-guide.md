@@ -27,7 +27,7 @@ swift_orchestrator/
     scripts/
 
 TargetSwiftProject/
-  .swift-orchestrator/
+  .orchestrator/
     .gitignore
     project.json
     config/
@@ -37,7 +37,7 @@ TargetSwiftProject/
     state/
 ```
 
-The reusable code and prompts live in the Python package. Project-specific config and runtime data live in `.swift-orchestrator/` inside each Swift repository.
+The reusable code and prompts live in the Python package. Project-specific config and runtime data live in `.orchestrator/` inside each Swift repository.
 
 ## 1. Install The Package
 
@@ -46,7 +46,7 @@ From the repository containing `swift_orchestrator`:
 ```bash
 cd swift_orchestrator
 python3 -m pip install -e .
-swift-orchestrator --help
+orchestrator --help
 ```
 
 ## 2. Initialize The Swift Project
@@ -54,14 +54,14 @@ swift-orchestrator --help
 From the Swift project root:
 
 ```bash
-swift-orchestrator init
-swift-orchestrator check-config
+orchestrator init
+orchestrator check-config
 ```
 
 If the project has multiple schemes, pass the intended values:
 
 ```bash
-swift-orchestrator init --scheme MyApp --test-target MyAppTests --base-branch main
+orchestrator init --scheme MyApp --test-target MyAppTests --base-branch main
 ```
 
 ## 3. Port Project Config
@@ -69,20 +69,20 @@ swift-orchestrator init --scheme MyApp --test-target MyAppTests --base-branch ma
 Move project-specific settings from old `ai/config/*.json` into:
 
 ```text
-.swift-orchestrator/project.json
-.swift-orchestrator/config/machines.json
-.swift-orchestrator/config/settings.json
+.orchestrator/project.json
+.orchestrator/config/machines.json
+.orchestrator/config/settings.json
 ```
 
 Use these mappings:
 
 | Old repo-local assumption | New package config |
 | --- | --- |
-| `ai/config/machines.json` | `.swift-orchestrator/config/machines.json` |
-| `ai/config/settings.json` | `.swift-orchestrator/config/settings.json` |
-| `ai/jobs` | `.swift-orchestrator/jobs` |
-| `ai/logs` | `.swift-orchestrator/logs` |
-| `ai/output` | `.swift-orchestrator/output` |
+| `ai/config/machines.json` | `.orchestrator/config/machines.json` |
+| `ai/config/settings.json` | `.orchestrator/config/settings.json` |
+| `ai/jobs` | `.orchestrator/jobs` |
+| `ai/logs` | `.orchestrator/logs` |
+| `ai/output` | `.orchestrator/output` |
 | hardcoded `Thirteen.xcodeproj` | `project.json` `xcode_project` |
 | hardcoded `Thirteen` scheme | `project.json` `scheme` |
 | hardcoded `ThirteenTests` | `project.json` `test_target` |
@@ -97,36 +97,36 @@ Use the console script instead of direct `ai/scripts` paths.
 
 | Old | New |
 | --- | --- |
-| `python3 ai/scripts/dev_console.py` | `swift-orchestrator console` |
-| `python3 ai/scripts/check_setup.py` | `swift-orchestrator check` |
-| `python3 ai/scripts/worker_tools.py check` | `swift-orchestrator worker-check` |
-| `python3 ai/scripts/new_job.py bug` | `swift-orchestrator script new_job.py bug` |
+| `python3 ai/scripts/dev_console.py` | `orchestrator console` |
+| `python3 ai/scripts/check_setup.py` | `orchestrator check` |
+| `python3 ai/scripts/worker_tools.py check` | `orchestrator worker-check` |
+| `python3 ai/scripts/new_job.py bug` | `orchestrator script new_job.py bug` |
 
 For temporary compatibility, direct script passthrough is available:
 
 ```bash
-swift-orchestrator script SCRIPT_NAME.py [args...]
+orchestrator script SCRIPT_NAME.py [args...]
 ```
 
 ## 5. Configure Remote Workers
 
-For every SSH worker in `.swift-orchestrator/config/machines.json`, set:
+For every SSH worker in `.orchestrator/config/machines.json`, set:
 
 ```json
 {
   "execution_mode": "ssh",
   "ssh_target": "mac2",
   "repo_path": "/Users/me/Documents/MyApp",
-  "orchestrator_package_path": "~/.swift-orchestrator/package",
-  "orchestrator_runtime_dir": ".swift-orchestrator"
+  "orchestrator_package_path": "~/.orchestrator/package",
+  "orchestrator_runtime_dir": ".orchestrator"
 }
 ```
 
 Then install the package copy on each worker:
 
 ```bash
-swift-orchestrator worker-install --machine mac2
-swift-orchestrator worker-check --machine mac2
+orchestrator worker-install --machine mac2
+orchestrator worker-check --machine mac2
 ```
 
 This is the main behavioral difference from the old `ai/` layout. Remote workers no longer assume `python3 -m orchestrator...` exists inside the app repo. They import the package from `orchestrator_package_path`.
@@ -142,7 +142,7 @@ swift_orchestrator/orchestrator/prompts/
 If a project needs custom prompts, place them in:
 
 ```text
-.swift-orchestrator/prompts/
+.orchestrator/prompts/
 ```
 
 The project prompts directory takes precedence when it exists.
@@ -160,16 +160,16 @@ PYTHONPATH=.:orchestrator/scripts python3 orchestrator/scripts/smoke_test_workfl
 From the target Swift project:
 
 ```bash
-swift-orchestrator check
-swift-orchestrator check-config
-swift-orchestrator worker-check
+orchestrator check
+orchestrator check-config
+orchestrator worker-check
 ```
 
 Run a small local job before enabling SSH dispatch or delivery.
 
 ## 8. Git Ignore Recommendations
 
-`swift-orchestrator init` writes `.swift-orchestrator/.gitignore` so runtime output is ignored inside the generated directory:
+`orchestrator init` writes `.orchestrator/.gitignore` so runtime output is ignored inside the generated directory:
 
 ```gitignore
 jobs/
@@ -183,22 +183,22 @@ __pycache__/
 Commit these when they are intended to be shared:
 
 ```text
-.swift-orchestrator/.gitignore
-.swift-orchestrator/project.json
-.swift-orchestrator/config/machines.json
-.swift-orchestrator/config/settings.json
+.orchestrator/.gitignore
+.orchestrator/project.json
+.orchestrator/config/machines.json
+.orchestrator/config/settings.json
 ```
 
 If `settings.json` contains secrets, do not commit it. Use an example file instead.
 
 ## Cutover Checklist
 
-1. `swift-orchestrator --help` works in the developer shell.
-2. `.swift-orchestrator/project.json` has the correct project, scheme, test target, and branch settings.
-3. `swift-orchestrator check-config` passes.
-4. `swift-orchestrator check` finds Xcode, GitHub CLI, and at least one AI provider.
+1. `orchestrator --help` works in the developer shell.
+2. `.orchestrator/project.json` has the correct project, scheme, test target, and branch settings.
+3. `orchestrator check-config` passes.
+4. `orchestrator check` finds Xcode, GitHub CLI, and at least one AI provider.
 5. Local job creation and scheduling works.
-6. `swift-orchestrator worker-install` and `worker-check` pass for SSH workers.
+6. `orchestrator worker-install` and `worker-check` pass for SSH workers.
 7. Firebase delivery is disabled or has valid project paths.
 8. Old `ai/` commands have been replaced in scripts, docs, and runbooks.
 9. Generated runtime directories are ignored by Git.

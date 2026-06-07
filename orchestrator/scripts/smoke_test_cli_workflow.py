@@ -388,10 +388,10 @@ xcodebuild test -project MyApp.xcodeproj -scheme MyApp
 
 def scenario_env(base_env: dict[str, str], project_root: Path, runtime_dir: Path, fake_bin_dir: Path, log_path: Path) -> dict[str, str]:
     env = dict(base_env)
-    env["SWIFT_ORCHESTRATOR_PROJECT_ROOT"] = str(project_root)
-    env["SWIFT_ORCHESTRATOR_RUNTIME_DIR"] = str(runtime_dir)
-    env["SWIFT_ORCHESTRATOR_FAKE_DISK_FREE_GB"] = "100"
-    env["SWIFT_ORCHESTRATOR_DISABLE_NOTIFICATIONS"] = "1"
+    env["ORCHESTRATOR_PROJECT_ROOT"] = str(project_root)
+    env["ORCHESTRATOR_RUNTIME_DIR"] = str(runtime_dir)
+    env["ORCHESTRATOR_FAKE_DISK_FREE_GB"] = "100"
+    env["ORCHESTRATOR_DISABLE_NOTIFICATIONS"] = "1"
     env["FAKE_LOG_PATH"] = str(log_path)
     env["PYTHONPATH"] = f"{PACKAGE_ROOT.parent}:{env.get('PYTHONPATH', '')}"
     env["PATH"] = f"{fake_bin_dir}:{env.get('PATH', '')}"
@@ -576,9 +576,9 @@ def run_resume_scenario() -> None:
         summary_file.write_text("Previous AI thinking results", encoding="utf-8")
 
         env = os.environ.copy()
-        env["SWIFT_ORCHESTRATOR_PROJECT_ROOT"] = str(project_root)
-        env["SWIFT_ORCHESTRATOR_RUNTIME_DIR"] = str(runtime_dir)
-        env["SWIFT_ORCHESTRATOR_DISABLE_NOTIFICATIONS"] = "1"
+        env["ORCHESTRATOR_PROJECT_ROOT"] = str(project_root)
+        env["ORCHESTRATOR_RUNTIME_DIR"] = str(runtime_dir)
+        env["ORCHESTRATOR_DISABLE_NOTIFICATIONS"] = "1"
         env["FAKE_LOG_PATH"] = str(log_path)
         env["PYTHONPATH"] = f"{PACKAGE_ROOT.parent}:{env.get('PYTHONPATH', '')}"
         env["PATH"] = f"{fake_bin_dir}:{env.get('PATH', '')}"

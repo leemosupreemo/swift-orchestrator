@@ -22,13 +22,13 @@ class WorkerToolsTests(unittest.TestCase):
             "execution_mode": "ssh",
             "ssh_target": "worker-host",
             "repo_path": "/Users/me/App",
-            "orchestrator_package_path": "/opt/swift-orchestrator",
+            "orchestrator_package_path": "/opt/orchestrator",
         }
 
         command = worker_tools.remote_import_check_command(machine)
 
         self.assertIn("cd /Users/me/App", command)
-        self.assertIn("PYTHONPATH=/opt/swift-orchestrator:$PYTHONPATH", command)
+        self.assertIn("PYTHONPATH=/opt/orchestrator:$PYTHONPATH", command)
         self.assertIn("import orchestrator.scripts.worker_run", command)
 
     @patch("worker_tools.subprocess.run")

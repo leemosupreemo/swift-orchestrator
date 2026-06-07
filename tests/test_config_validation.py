@@ -17,7 +17,7 @@ from orchestrator.project_config import ProjectConfig  # noqa: E402
 def make_config(root: Path, **overrides) -> ProjectConfig:
     data = {
         "root": root,
-        "runtime_dir": root / ".swift-orchestrator",
+        "runtime_dir": root / ".orchestrator",
         "package_prompts_dir": PACKAGE_ROOT / "orchestrator" / "prompts",
         "project_name": "SampleApp",
         "base_branch": "main",
@@ -37,7 +37,7 @@ def make_config(root: Path, **overrides) -> ProjectConfig:
         "distribution_script_path": None,
         "firebase_plist_path": None,
         "visual_app_path": None,
-        "remote_package_install_path": "~/.swift-orchestrator/package",
+        "remote_package_install_path": "~/.orchestrator/package",
         "firebase_distribution": False,
         "notification_display_name": "SampleApp AI Orchestrator",
     }

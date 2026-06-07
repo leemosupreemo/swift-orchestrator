@@ -9,13 +9,13 @@ Recommended CLI install:
 ```bash
 brew install pipx
 pipx ensurepath
-pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
+pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
 ```
 
 Upgrade later with:
 
 ```bash
-pipx upgrade swift-orchestrator
+pipx upgrade orchestrator
 ```
 
 For local development from this repository:
@@ -28,7 +28,7 @@ python3 -m pip install -e .
 Verify the command is available:
 
 ```bash
-swift-orchestrator --help
+orchestrator --help
 ```
 
 The package has no Python runtime dependencies outside the standard library. Some workflows require external command-line tools:
@@ -44,7 +44,7 @@ The package has no Python runtime dependencies outside the standard library. Som
 For a new project, prefer the wizard:
 
 ```bash
-swift-orchestrator wizard
+orchestrator wizard
 ```
 
 The wizard initializes the project if needed, creates starter docs and a helper script, requires at least one LLM/model choice, optionally copies the role prompt Markdown files into project-local overrides, optionally adds SSH workers, and optionally configures Firebase distribution.
@@ -52,7 +52,7 @@ The wizard initializes the project if needed, creates starter docs and a helper 
 Scriptable example:
 
 ```bash
-swift-orchestrator wizard \
+orchestrator wizard \
   --models codex,gemini \
   --copy-prompt-overrides \
   --ssh-machine mac2=mac2:/Users/me/Documents/MyApp \
@@ -69,13 +69,13 @@ After the wizard, review:
 AGENTS.md
 docs/build-test-commands.md
 docs/ai-workflow.md
-.swift-orchestrator/project.json
-.swift-orchestrator/config/machines.json
-.swift-orchestrator/config/settings.json
-.swift-orchestrator/prompts/*.md
+.orchestrator/project.json
+.orchestrator/config/machines.json
+.orchestrator/config/settings.json
+.orchestrator/prompts/*.md
 ```
 
-The files in `.swift-orchestrator/prompts/` are project-local role prompt overrides. They are copied only when requested, and they should be checked for project-specific assumptions before jobs are created.
+The files in `.orchestrator/prompts/` are project-local role prompt overrides. They are copied only when requested, and they should be checked for project-specific assumptions before jobs are created.
 
 Use `--verify` to run setup/config checks before the wizard exits. Use `--install-workers` when the wizard adds SSH machines and should immediately run package install/check for those workers.
 
@@ -85,46 +85,46 @@ The easiest path is to run commands from the project root:
 
 ```bash
 cd /path/to/MyApp
-swift-orchestrator wizard
-swift-orchestrator console
+orchestrator wizard
+orchestrator console
 ```
 
 You can also point commands at a project explicitly:
 
 ```bash
-swift-orchestrator wizard --project /path/to/MyApp
-swift-orchestrator check-config --project /path/to/MyApp
-swift-orchestrator console --project /path/to/MyApp
+orchestrator wizard --project /path/to/MyApp
+orchestrator check-config --project /path/to/MyApp
+orchestrator console --project /path/to/MyApp
 ```
 
 Initialized projects are remembered in:
 
 ```text
-~/.swift-orchestrator/projects.json
+~/.orchestrator/projects.json
 ```
 
 List recent projects:
 
 ```bash
-swift-orchestrator projects
+orchestrator projects
 ```
 
 Set the active project:
 
 ```bash
-swift-orchestrator use MyApp
+orchestrator use MyApp
 ```
 
 Then commands can run from outside the repo and use the active project when no project is found from the current directory:
 
 ```bash
-swift-orchestrator console
+orchestrator console
 ```
 
 Explicit project selection still wins:
 
 ```bash
-swift-orchestrator console --project MyApp
+orchestrator console --project MyApp
 ```
 
 ## Manual Initialization
@@ -132,30 +132,30 @@ swift-orchestrator console --project MyApp
 From the target Swift repository:
 
 ```bash
-swift-orchestrator init
-swift-orchestrator check
-swift-orchestrator check-config
+orchestrator init
+orchestrator check
+orchestrator check-config
 ```
 
 Or initialize a specific path:
 
 ```bash
-swift-orchestrator init --root /path/to/MyApp --project-name MyApp
-swift-orchestrator init --project /path/to/MyApp --project-name MyApp
+orchestrator init --root /path/to/MyApp --project-name MyApp
+orchestrator init --project /path/to/MyApp --project-name MyApp
 ```
 
 Optional starter files:
 
 ```bash
-swift-orchestrator init --with-starter-docs --with-helper-script
+orchestrator init --with-starter-docs --with-helper-script
 ```
 
-`init` creates `.swift-orchestrator/` in the target repository. It detects the first `.xcworkspace` or `.xcodeproj`, then asks `xcodebuild -list -json` for schemes and targets when possible.
+`init` creates `.orchestrator/` in the target repository. It detects the first `.xcworkspace` or `.xcodeproj`, then asks `xcodebuild -list -json` for schemes and targets when possible.
 
 Generated files:
 
 ```text
-.swift-orchestrator/
+.orchestrator/
   .gitignore
   project.json
   config/
@@ -167,7 +167,7 @@ Generated files:
   state/
 ```
 
-Commit `.swift-orchestrator/.gitignore`, `.swift-orchestrator/project.json`, and `.swift-orchestrator/config/*.json` if the team should share the same orchestrator setup. The generated `.swift-orchestrator/.gitignore` excludes runtime `jobs/`, `logs/`, `output/`, and `state/` contents by default.
+Commit `.orchestrator/.gitignore`, `.orchestrator/project.json`, and `.orchestrator/config/*.json` if the team should share the same orchestrator setup. The generated `.orchestrator/.gitignore` excludes runtime `jobs/`, `logs/`, `output/`, and `state/` contents by default.
 
 With `--with-starter-docs`, `init` also creates:
 
@@ -183,11 +183,11 @@ With `--with-helper-script`, `init` creates:
 scripts/orchestrator
 ```
 
-The helper script runs `swift-orchestrator "$@"`, which gives the project a stable repo-local command wrapper.
+The helper script runs `orchestrator "$@"`, which gives the project a stable repo-local command wrapper.
 
 ## Configure Project Behavior
 
-Edit `.swift-orchestrator/project.json` after initialization. Common fields:
+Edit `.orchestrator/project.json` after initialization. Common fields:
 
 ```json
 {
@@ -208,7 +208,7 @@ Edit `.swift-orchestrator/project.json` after initialization. Common fields:
   "delivery_provider": null,
   "distribution_script_path": null,
   "firebase_plist_path": null,
-  "remote_package_install_path": "~/.swift-orchestrator/package",
+  "remote_package_install_path": "~/.orchestrator/package",
   "firebase_distribution": false
 }
 ```
@@ -231,7 +231,7 @@ Swift Package example:
 Run validation after edits:
 
 ```bash
-swift-orchestrator check-config
+orchestrator check-config
 ```
 
 ## Configure AI Providers
@@ -239,20 +239,20 @@ swift-orchestrator check-config
 The orchestrator can use model provider CLIs or API keys. The setup check looks for common CLIs and environment keys:
 
 ```bash
-swift-orchestrator check
+orchestrator check
 ```
 
 Practical options:
 
 - Install and authenticate a CLI, such as `codex login`, `claude auth login`, or the equivalent command for your provider.
 - Export API keys in the shell where the console runs, such as `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`.
-- Store non-secret project settings in `.swift-orchestrator/config/settings.json`.
+- Store non-secret project settings in `.orchestrator/config/settings.json`.
 
 Do not commit secrets.
 
 ## Configure Workers
 
-Local worker config is generated automatically in `.swift-orchestrator/config/machines.json`.
+Local worker config is generated automatically in `.orchestrator/config/machines.json`.
 
 Example local machine:
 
@@ -285,8 +285,8 @@ Example SSH worker:
   "execution_mode": "ssh",
   "ssh_target": "mac2",
   "repo_path": "/Users/me/Documents/MyApp",
-  "orchestrator_package_path": "~/.swift-orchestrator/package",
-  "orchestrator_runtime_dir": ".swift-orchestrator",
+  "orchestrator_package_path": "~/.orchestrator/package",
+  "orchestrator_runtime_dir": ".orchestrator",
   "roles": ["worker", "build", "test"],
   "models": ["codex", "gemini"],
   "priority": 90,
@@ -303,14 +303,14 @@ Example SSH worker:
 Check worker readiness:
 
 ```bash
-swift-orchestrator worker-check
-swift-orchestrator worker-check --machine mac2
+orchestrator worker-check
+orchestrator worker-check --machine mac2
 ```
 
 Install or refresh the package on an SSH worker:
 
 ```bash
-swift-orchestrator worker-install --machine mac2
+orchestrator worker-install --machine mac2
 ```
 
 `worker-install` copies the installed package source to the worker's `orchestrator_package_path` and verifies that the remote machine can import `orchestrator.scripts.worker_run`. Remote dispatch stops before syncing jobs if the package is missing.
@@ -342,7 +342,7 @@ designer.md
 To customize them per project, run the wizard with `--copy-prompt-overrides` or manually create:
 
 ```text
-.swift-orchestrator/prompts/
+.orchestrator/prompts/
 ```
 
 Project-local prompt files with matching names take precedence over package defaults.
@@ -352,13 +352,13 @@ Project-local prompt files with matching names take precedence over package defa
 From the Swift project root:
 
 ```bash
-swift-orchestrator console
+orchestrator console
 ```
 
-The console stores runtime data under `.swift-orchestrator/` by default. To run from another directory, set the project root:
+The console stores runtime data under `.orchestrator/` by default. To run from another directory, set the project root:
 
 ```bash
-SWIFT_ORCHESTRATOR_PROJECT_ROOT=/path/to/MyApp swift-orchestrator console
+SWIFT_ORCHESTRATOR_PROJECT_ROOT=/path/to/MyApp orchestrator console
 ```
 
 ## Create And Run Jobs
@@ -366,12 +366,12 @@ SWIFT_ORCHESTRATOR_PROJECT_ROOT=/path/to/MyApp swift-orchestrator console
 Use the console for normal job creation. For direct script access:
 
 ```bash
-swift-orchestrator script new_job.py bug
-swift-orchestrator script new_job.py feature
-swift-orchestrator script schedule_job.py .swift-orchestrator/jobs/JOB.json
+orchestrator script new_job.py bug
+orchestrator script new_job.py feature
+orchestrator script schedule_job.py .orchestrator/jobs/JOB.json
 ```
 
-Generated job files are written under `.swift-orchestrator/jobs/`. Logs and review output are written under `.swift-orchestrator/logs/` and `.swift-orchestrator/output/`.
+Generated job files are written under `.orchestrator/jobs/`. Logs and review output are written under `.orchestrator/logs/` and `.orchestrator/output/`.
 
 ## Visual Simulator Checks
 
@@ -406,24 +406,24 @@ Firebase delivery is opt-in:
 Run both checks first:
 
 ```bash
-swift-orchestrator check
-swift-orchestrator check-config
+orchestrator check
+orchestrator check-config
 ```
 
 Common issues:
 
-- `swift-orchestrator: command not found`: install the package in the active Python environment or use the virtualenv's `bin/swift-orchestrator`.
-- `swift-orchestrator: command not found` after `pipx install`: run `pipx ensurepath`, open a new terminal, then retry.
+- `orchestrator: command not found`: install the package in the active Python environment or use the virtualenv's `bin/orchestrator`.
+- `orchestrator: command not found` after `pipx install`: run `pipx ensurepath`, open a new terminal, then retry.
 - `Configure xcode_project, xcode_workspace, or build_command`: run `init` from the Swift project root or set `build_command`.
-- `scheme is required`: set `scheme` in `.swift-orchestrator/project.json`.
+- `scheme is required`: set `scheme` in `.orchestrator/project.json`.
 - `No AI providers found`: authenticate a provider CLI or export a supported API key.
-- SSH worker is `NOT READY`: run `swift-orchestrator worker-install --machine NAME`, then rerun `worker-check`.
+- SSH worker is `NOT READY`: run `orchestrator worker-install --machine NAME`, then rerun `worker-check`.
 - Remote worker imports fail after package changes: rerun `worker-install` to refresh the source copy.
 - GitHub actions fail: install `gh` and run `gh auth login`.
 
 ## Generated Ignore Rules
 
-`swift-orchestrator init` writes `.swift-orchestrator/.gitignore`:
+`orchestrator init` writes `.orchestrator/.gitignore`:
 
 ```gitignore
 jobs/
@@ -455,5 +455,5 @@ Minimal `AGENTS.md` snippet:
 Use `docs/build-test-commands.md` for canonical validation commands.
 Prefer minimal, reviewable diffs.
 Do not commit secrets, generated runtime logs, or unrelated changes.
-Run `swift-orchestrator check-config` after changing `.swift-orchestrator/project.json`.
+Run `orchestrator check-config` after changing `.orchestrator/project.json`.
 ```

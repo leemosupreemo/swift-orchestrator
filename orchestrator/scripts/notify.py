@@ -32,7 +32,7 @@ except ImportError:
             return json.load(f)
 
 def notify(title: str, message: str, job_id: str | None = None, summary: str | None = None) -> None:
-    if os.environ.get("SWIFT_ORCHESTRATOR_DISABLE_NOTIFICATIONS") == "1":
+    if os.environ.get("ORCHESTRATOR_DISABLE_NOTIFICATIONS") == "1":
         print(f"      - Notifications disabled for: {title}")
         return False
 

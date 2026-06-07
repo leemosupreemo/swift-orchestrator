@@ -9,15 +9,15 @@ from typing import Any
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
-DEFAULT_RUNTIME_DIRNAME = ".swift-orchestrator"
-USER_STATE_DIR_ENV = "SWIFT_ORCHESTRATOR_USER_STATE_DIR"
+DEFAULT_RUNTIME_DIRNAME = ".orchestrator"
+USER_STATE_DIR_ENV = "ORCHESTRATOR_USER_STATE_DIR"
 
 
 def user_state_dir() -> Path:
     explicit = os.environ.get(USER_STATE_DIR_ENV)
     if explicit:
         return Path(explicit).expanduser().resolve()
-    return (Path.home() / ".swift-orchestrator").resolve()
+    return (Path.home() / ".orchestrator").resolve()
 
 
 def recent_projects_path() -> Path:
@@ -88,7 +88,7 @@ def active_project_root() -> Path | None:
 
 
 def find_project_root(start: Path | None = None) -> Path:
-    explicit = os.environ.get("SWIFT_ORCHESTRATOR_PROJECT_ROOT")
+    explicit = os.environ.get("ORCHESTRATOR_PROJECT_ROOT")
     if explicit:
         return Path(explicit).expanduser().resolve()
 
@@ -170,7 +170,7 @@ class ProjectConfig:
 
 def load_project_config() -> ProjectConfig:
     root = find_project_root()
-    config_path = os.environ.get("SWIFT_ORCHESTRATOR_CONFIG")
+    config_path = os.environ.get("ORCHESTRATOR_CONFIG")
     if config_path:
         config_file = Path(config_path).expanduser().resolve()
     else:
@@ -179,7 +179,7 @@ def load_project_config() -> ProjectConfig:
     data = _load_json(config_file)
     runtime_dir = Path(
         os.environ.get(
-            "SWIFT_ORCHESTRATOR_RUNTIME_DIR",
+            "ORCHESTRATOR_RUNTIME_DIR",
             os.environ.get("AI_RUNTIME_DIR", str(root / DEFAULT_RUNTIME_DIRNAME)),
         )
     ).expanduser()
@@ -216,7 +216,7 @@ def load_project_config() -> ProjectConfig:
         distribution_script_path=data.get("distribution_script_path"),
         firebase_plist_path=data.get("firebase_plist_path"),
         visual_app_path=data.get("visual_app_path"),
-        remote_package_install_path=data.get("remote_package_install_path", "~/.swift-orchestrator/package"),
+        remote_package_install_path=data.get("remote_package_install_path", "~/.orchestrator/package"),
         firebase_distribution=bool(data.get("firebase_distribution", False)),
         notification_display_name=data.get("notification_display_name", f"{project_name} AI Orchestrator"),
     )

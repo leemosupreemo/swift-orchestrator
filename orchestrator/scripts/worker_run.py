@@ -146,7 +146,7 @@ def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Opt
         
         print("\n\033[1;97mNEXT STEPS:\033[0m")
         print(f"  1. Review the changes on GitHub: \033[4;94mgh pr view {pr_number} --web\033[0m")
-        print(f"  2. Run the orchestrator console to manage this job: \033[96mswift-orchestrator console\033[0m")
+        print(f"  2. Run the orchestrator console to manage this job: \033[96morchestrator console\033[0m")
         print(f"  3. Merge and cleanup using dev_console when satisfied.")
     else:
         print("\n\033[91m" + "!"*60)

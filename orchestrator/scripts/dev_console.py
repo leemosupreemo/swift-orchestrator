@@ -2250,6 +2250,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print("    [\033[93mF\033[0m] Manage Machine Fleet")
             print("    [\033[93mP\033[0m] System Health Check")
             print(f"    [\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
+            print("    [\033[93mC\033[0m] Change Target Project")
             print("    [\033[93mA\033[0m] Manage Archived Jobs")
             print("    [\033[93mI\033[0m] Manage CLI Instructions (.md files)")
             print("    [\033[93mS\033[0m] Setup & Architecture Guide")
@@ -2319,6 +2320,30 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 except Exception as ex:
                     print(f"\033[91mError updating base branch: {ex}\033[0m")
                     time.sleep(2)
+            elif choice == "c":
+                from orchestrator.project_config import load_recent_projects, remember_project
+                recent = load_recent_projects()
+                projects = recent.get("projects", [])
+                if not projects:
+                    print("No recent projects found.")
+                    input("\n\033[96mTap Enter to continue...\033[0m")
+                    continue
+                options = [p["name"] for p in projects]
+                options.append("Other...")
+                idx = prompt_radio("Select target project (will restart console):", options, status_bar=status_bar)
+                if idx is not None:
+                    if idx == len(projects):
+                        print("\nRun 'orchestrator use <path>' in your terminal to select a new project.")
+                        input("\033[96mTap Enter to continue...\033[0m")
+                        continue
+                    selected = projects[idx]
+                    remember_project(Path(selected["root"]), selected["name"], active=True)
+                    print(f"\nChanged target project to {selected['name']}.")
+                    print("Restarting console...")
+                    time.sleep(1)
+                    if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
+                        del os.environ["ORCHESTRATOR_PROJECT_ROOT"]
+                    os.execvp("orchestrator", ["orchestrator", "console"])
             elif choice == "a":
                 handle_archived_jobs_menu(session_allowed_machines, session_allowed_models)
             elif choice == "i":

@@ -455,12 +455,12 @@ def verify_remote_worker_package(machine: dict[str, Any], ssh_target: str) -> bo
         return True
 
     print(f"\n❌ CRITICAL: Orchestrator package is not available on {machine['name']}.")
-    print(f"   Run: swift-orchestrator worker-install --machine {machine['name']}")
+    print(f"   Run: orchestrator worker-install --machine {machine['name']}")
     return False
 
 
 def remote_runtime_dir(machine: dict[str, Any]) -> str:
-    return machine.get("orchestrator_runtime_dir") or ".swift-orchestrator"
+    return machine.get("orchestrator_runtime_dir") or ".orchestrator"
 
 def dispatch_job(job_path: Path, machine: dict[str, Any], remote_probe: dict[str, Any], dry_run: bool, resume: bool = False) -> None:
     if dry_run:

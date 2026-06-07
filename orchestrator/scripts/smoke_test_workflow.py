@@ -202,7 +202,7 @@ def run_remote_dispatch_scenario() -> None:
         assert commands[2][0] == "scp", commands
         assert commands[3][0] == "ssh", commands
         assert "PYTHONPATH=" in commands[3][-1], commands
-        assert ".swift-orchestrator/jobs/inbox" in commands[3][-1], commands
+        assert ".orchestrator/jobs/inbox" in commands[3][-1], commands
 
         print("Scenario remote-dispatch passed. Remote dispatch commands were emitted as expected.")
 

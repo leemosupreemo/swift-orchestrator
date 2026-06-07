@@ -127,7 +127,7 @@ Canonical validation commands for this project.
 ## Orchestrator config check
 
 ```bash
-swift-orchestrator check-config
+orchestrator check-config
 ```
 """
 
@@ -135,15 +135,15 @@ swift-orchestrator check-config
 def ai_workflow_docs(project_name: str) -> str:
     return f"""# AI Workflow
 
-Use `swift-orchestrator console` from the repository root to create and manage jobs for {project_name}.
+Use `orchestrator console` from the repository root to create and manage jobs for {project_name}.
 
 Recommended flow:
 
-1. Run `swift-orchestrator check` after initial setup or toolchain changes.
-2. Run `swift-orchestrator check-config` after editing `.swift-orchestrator/project.json` or machine config.
+1. Run `orchestrator check` after initial setup or toolchain changes.
+2. Run `orchestrator check-config` after editing `.orchestrator/project.json` or machine config.
 3. Create jobs from the console.
 4. Review generated branches and pull requests before merging.
-5. Keep generated `.swift-orchestrator/jobs/`, `logs/`, `output/`, and `state/` files out of Git.
+5. Keep generated `.orchestrator/jobs/`, `logs/`, `output/`, and `state/` files out of Git.
 """
 
 
@@ -156,14 +156,14 @@ Repository guidance for coding agents working on {project_name}.
 - Prefer minimal, reviewable diffs.
 - Do not modify unrelated files.
 - Do not commit secrets, generated runtime logs, or unrelated environment changes.
-- Run `swift-orchestrator check-config` after changing `.swift-orchestrator/project.json`.
+- Run `orchestrator check-config` after changing `.orchestrator/project.json`.
 """
 
 
 def helper_script() -> str:
     return """#!/usr/bin/env sh
 set -eu
-exec swift-orchestrator "$@"
+exec orchestrator "$@"
 """
 
 
@@ -201,7 +201,7 @@ def resolve_cli_project(project: str | None) -> Path | None:
     root = resolve_project_reference(project)
     if not root:
         print(f"Unknown project reference: {project}")
-        print("Run `swift-orchestrator projects` to list recent projects, or pass a path.")
+        print("Run `orchestrator projects` to list recent projects, or pass a path.")
         return None
     return root
 
@@ -215,7 +215,7 @@ def apply_project_env(project: str | None) -> int:
     root = resolve_cli_project(project)
     if not root:
         return 1
-    os.environ["SWIFT_ORCHESTRATOR_PROJECT_ROOT"] = str(root)
+    os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(root)
     print_project_context(root)
     return 0
 
@@ -254,8 +254,8 @@ def parse_ssh_machine(value: str) -> dict:
         "execution_mode": "ssh",
         "ssh_target": ssh_target,
         "repo_path": repo_path,
-        "orchestrator_package_path": "~/.swift-orchestrator/package",
-        "orchestrator_runtime_dir": ".swift-orchestrator",
+        "orchestrator_package_path": "~/.orchestrator/package",
+        "orchestrator_runtime_dir": ".orchestrator",
         "roles": ["worker", "build", "test"],
         "models": [],
         "priority": 90,
@@ -369,7 +369,8 @@ def run_wizard(args: argparse.Namespace) -> int:
         write_helper_script(root, args.force)
 
     if not models and not args.non_interactive:
-        print("\nChoose at least one LLM/model alias. Examples: codex, gemini, claude")
+        print(f"\n\033[1;96m{'='*20} LLM Models {'='*20}\033[0m")
+        print("\033[90mChoose at least one LLM/model alias. Examples: codex, gemini, claude\033[0m")
         models = parse_csv(prompt_text("Models", "codex"))
     if not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
@@ -377,25 +378,29 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     copy_prompts = args.copy_prompt_overrides
     if not copy_prompts and not args.non_interactive:
-        copy_prompts = prompt_yes_no("Copy role prompt .md files into .swift-orchestrator/prompts for project editing?", True)
+        print(f"\n\033[1;96m{'='*20} Role Prompts {'='*20}\033[0m")
+        copy_prompts = prompt_yes_no("Copy role prompt .md files into .orchestrator/prompts for project editing?", True)
     if copy_prompts:
         review_paths.extend(copy_prompt_overrides(root, args.force))
 
-    if not args.non_interactive and prompt_yes_no("Add an SSH worker machine now?", False):
-        name = prompt_text("Machine name", "mac2")
-        target = prompt_text("SSH target", name)
-        repo_path = prompt_text("Remote repo path")
-        try:
-            ssh_machines.append(parse_ssh_machine(f"{name}={target}:{repo_path}"))
-        except ValueError as exc:
-            print(str(exc))
-            return 1
+    if not args.non_interactive:
+        print(f"\n\033[1;96m{'='*20} Workers {'='*20}\033[0m")
+        if prompt_yes_no("Add an SSH worker machine now?", False):
+            name = prompt_text("Machine name", "mac2")
+            target = prompt_text("SSH target", name)
+            repo_path = prompt_text("Remote repo path")
+            try:
+                ssh_machines.append(parse_ssh_machine(f"{name}={target}:{repo_path}"))
+            except ValueError as exc:
+                print(str(exc))
+                return 1
     update_machine_models(runtime_dir / "config", models, ssh_machines)
 
     firebase_enabled = args.firebase
     distribution_script_path = args.distribution_script_path
     firebase_plist_path = args.firebase_plist_path
     if not firebase_enabled and not args.non_interactive:
+        print(f"\n\033[1;96m{'='*20} Delivery {'='*20}\033[0m")
         firebase_enabled = prompt_yes_no("Configure Firebase distribution now?", False)
     if firebase_enabled:
         distribution_script_path = distribution_script_path or (
@@ -405,23 +410,24 @@ def run_wizard(args: argparse.Namespace) -> int:
             None if args.non_interactive else prompt_text("Firebase plist path", f"{root.name}/GoogleService-Info.plist")
         )
         if not distribution_script_path or not firebase_plist_path:
-            print("Firebase setup requires --distribution-script-path and --firebase-plist-path.")
+            print("\033[91mFirebase setup requires --distribution-script-path and --firebase-plist-path.\033[0m")
             return 1
     update_firebase_config(project_file, firebase_enabled, distribution_script_path, firebase_plist_path)
 
-    print("\nFirst-run wizard complete.")
-    print("Review these Markdown/config files before creating jobs:")
+    print(f"\n\033[1;92m{'='*20} Wizard Complete {'='*20}\033[0m")
+    print("\033[90mReview these Markdown/config files before creating jobs:\033[0m")
     for path in [
         *review_paths,
         runtime_dir / "project.json",
         runtime_dir / "config" / "machines.json",
         runtime_dir / "config" / "settings.json",
     ]:
-        print(f"  - {path.relative_to(root)}")
-    print("Run: swift-orchestrator check")
-    print("Run: swift-orchestrator check-config")
+        print(f"  - \033[97m{path.relative_to(root)}\033[0m")
+    print("\n\033[90mRun: \033[96morchestrator check\033[0m")
+    print("\033[90mRun: \033[96morchestrator check-config\033[0m\n")
     install_workers = [machine["name"] for machine in ssh_machines] if args.install_workers else []
     if not args.non_interactive and ssh_machines and not install_workers:
+        print(f"\033[1;96m{'='*20} Final Setup {'='*20}\033[0m")
         if prompt_yes_no("Install/check SSH worker packages now?", False):
             install_workers = [machine["name"] for machine in ssh_machines]
     remember_project(root, project_display_name(root), active=True)
@@ -464,7 +470,7 @@ def init_project(args: argparse.Namespace) -> int:
         "delivery_provider": None,
         "distribution_script_path": None,
         "firebase_plist_path": None,
-        "remote_package_install_path": "~/.swift-orchestrator/package",
+        "remote_package_install_path": "~/.orchestrator/package",
         "firebase_distribution": False,
         "notification_display_name": f"{project_name} AI Orchestrator",
     }
@@ -521,7 +527,7 @@ def init_project(args: argparse.Namespace) -> int:
     if args.with_helper_script:
         write_helper_script(root, args.force)
 
-    print("Run: swift-orchestrator check")
+    print("Run: orchestrator check")
     remember_project(root, config["project_name"], active=True)
     return 0
 
@@ -542,7 +548,7 @@ def validate_config_command() -> int:
 def run_script(script_name: str, script_args: list[str]) -> int:
     scripts_dir = Path(__file__).resolve().parent / "scripts"
     env = os.environ.copy()
-    env.setdefault("SWIFT_ORCHESTRATOR_PROJECT_ROOT", str(find_project_root()))
+    env.setdefault("ORCHESTRATOR_PROJECT_ROOT", str(find_project_root()))
     return subprocess.call([sys.executable, str(scripts_dir / script_name), *script_args], env=env)
 
 
@@ -572,7 +578,47 @@ def use_project_command(reference: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="swift-orchestrator")
+    if argv is None:
+        argv = sys.argv[1:]
+    
+    if not argv:
+        current = Path.cwd().resolve()
+        local_root = None
+        for candidate in [current, *current.parents]:
+            if (candidate / DEFAULT_RUNTIME_DIRNAME / "project.json").exists():
+                local_root = candidate
+                break
+        
+        if local_root:
+            os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(local_root)
+            argv = ["console"]
+        else:
+            recent = load_recent_projects()
+            projects = recent.get("projects", [])
+            
+            print(f"\n\033[1;96m{'='*20} Orchestrator {'='*20}\033[0m")
+            print("No initialized project found in current directory.\n")
+            print("    [\033[93m1\033[0m] Initialize new project here (Wizard)")
+            for i, p in enumerate(projects, 2):
+                print(f"    [\033[93m{i}\033[0m] Open {p['name']} \033[90m({p['root']})\033[0m")
+            print("    [\033[91mQ\033[0m] Quit")
+            
+            while True:
+                choice = input("\nChoice: ").strip().lower()
+                if choice == "q":
+                    return 0
+                if choice == "1":
+                    argv = ["wizard"]
+                    break
+                if choice.isdigit():
+                    idx = int(choice) - 2
+                    if 0 <= idx < len(projects):
+                        os.environ["ORCHESTRATOR_PROJECT_ROOT"] = projects[idx]["root"]
+                        argv = ["console"]
+                        break
+                print("Invalid choice.")
+
+    parser = argparse.ArgumentParser(prog="orchestrator")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init")

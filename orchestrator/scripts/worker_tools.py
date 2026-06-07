@@ -11,7 +11,7 @@ from common import CONFIG_DIR, ROOT, read_json
 from orchestrator.project_config import PACKAGE_ROOT
 
 
-DEFAULT_REMOTE_PACKAGE_PATH = "~/.swift-orchestrator/package"
+DEFAULT_REMOTE_PACKAGE_PATH = "~/.orchestrator/package"
 
 
 def load_machines() -> list[dict[str, Any]]:
@@ -100,7 +100,7 @@ def check_remote(machine: dict[str, Any]) -> int:
     print("  worker: NOT READY")
     if details:
         print(f"  details: {details}")
-    print("  hint: run swift-orchestrator worker-install --machine " + machine["name"])
+    print("  hint: run orchestrator worker-install --machine " + machine["name"])
     return 1
 
 

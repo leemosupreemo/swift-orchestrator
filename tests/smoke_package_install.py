@@ -17,7 +17,7 @@ def run(cmd: list[str], cwd: Path | None = None) -> None:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="swift-orchestrator-install-") as temp_dir_str:
+    with tempfile.TemporaryDirectory(prefix="orchestrator-install-") as temp_dir_str:
         temp_dir = Path(temp_dir_str)
         venv = temp_dir / "venv"
         project = temp_dir / "FixtureApp"
@@ -26,18 +26,18 @@ def main() -> int:
 
         run([sys.executable, "-m", "venv", str(venv)])
         python = venv / "bin" / "python"
-        swift_orchestrator = venv / "bin" / "swift-orchestrator"
+        orchestrator = venv / "bin" / "orchestrator"
 
         run([str(python), "-m", "pip", "install", "-e", str(PACKAGE_ROOT)])
-        run([str(swift_orchestrator), "--help"])
-        run([str(swift_orchestrator), "init", "--root", str(project), "--project-name", "FixtureApp", "--force"])
-        run([str(swift_orchestrator), "check-config"], cwd=project)
+        run([str(orchestrator), "--help"])
+        run([str(orchestrator), "init", "--root", str(project), "--project-name", "FixtureApp", "--force"])
+        run([str(orchestrator), "check-config"], cwd=project)
 
-        config_path = project / ".swift-orchestrator" / "project.json"
+        config_path = project / ".orchestrator" / "project.json"
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert config["project_name"] == "FixtureApp", config
         assert config["xcode_project"] == "FixtureApp.xcodeproj", config
-        gitignore = (project / ".swift-orchestrator" / ".gitignore").read_text(encoding="utf-8")
+        gitignore = (project / ".orchestrator" / ".gitignore").read_text(encoding="utf-8")
         assert "jobs/" in gitignore, gitignore
         assert "logs/" in gitignore, gitignore
 

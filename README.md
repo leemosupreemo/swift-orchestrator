@@ -9,14 +9,14 @@ Recommended CLI install:
 ```bash
 brew install pipx
 pipx ensurepath
-pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
-swift-orchestrator --help
+pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
+orchestrator --help
 ```
 
 Upgrade later with:
 
 ```bash
-pipx upgrade swift-orchestrator
+pipx upgrade orchestrator
 ```
 
 ## Local Development
@@ -24,11 +24,11 @@ pipx upgrade swift-orchestrator
 ```bash
 cd swift_orchestrator
 python3 -m pip install -e .
-swift-orchestrator wizard --root /path/to/SwiftProject
+orchestrator wizard --root /path/to/SwiftProject
 cd /path/to/SwiftProject
-swift-orchestrator check
-swift-orchestrator check-config
-swift-orchestrator console
+orchestrator check
+orchestrator check-config
+orchestrator console
 ```
 
 Package install smoke:
@@ -37,7 +37,7 @@ Package install smoke:
 python3 tests/smoke_package_install.py
 ```
 
-This creates a temporary virtual environment, installs the package editable, and verifies the installed `swift-orchestrator` command without relying on `PYTHONPATH`.
+This creates a temporary virtual environment, installs the package editable, and verifies the installed `orchestrator` command without relying on `PYTHONPATH`.
 
 ## External Requirements
 
@@ -57,8 +57,8 @@ Python package dependencies are standard-library only. Runtime functionality dep
 Use:
 
 ```bash
-swift-orchestrator check
-swift-orchestrator check-config
+orchestrator check
+orchestrator check-config
 ```
 
 to validate environment and project configuration.
@@ -66,7 +66,7 @@ to validate environment and project configuration.
 For first-time setup, use:
 
 ```bash
-swift-orchestrator wizard --project /path/to/SwiftProject
+orchestrator wizard --project /path/to/SwiftProject
 ```
 
 The wizard initializes project config, chooses at least one model, can copy project-local prompt Markdown overrides, can add SSH workers, and can configure Firebase delivery.
@@ -74,11 +74,11 @@ The wizard initializes project config, chooses at least one model, can copy proj
 List or switch remembered projects:
 
 ```bash
-swift-orchestrator projects
-swift-orchestrator use MyApp
+orchestrator projects
+orchestrator use MyApp
 ```
 
-The package stores project-specific runtime files in `.swift-orchestrator/` by default:
+The package stores project-specific runtime files in `.orchestrator/` by default:
 
 - `project.json`
 - `config/machines.json`
@@ -92,7 +92,7 @@ The original Thirteen `ai/` directory is not modified by this package.
 
 ## Project Config
 
-`swift-orchestrator init` writes `.swift-orchestrator/project.json`. When available, it uses `xcodebuild -list -json` to detect schemes and targets.
+`orchestrator init` writes `.orchestrator/project.json`. When available, it uses `xcodebuild -list -json` to detect schemes and targets.
 
 Important fields include:
 
@@ -114,7 +114,7 @@ Important fields include:
   "delivery_provider": null,
   "distribution_script_path": null,
   "firebase_plist_path": null,
-  "remote_package_install_path": "~/.swift-orchestrator/package",
+  "remote_package_install_path": "~/.orchestrator/package",
   "firebase_distribution": false
 }
 ```
@@ -122,7 +122,7 @@ Important fields include:
 Run this after editing config:
 
 ```bash
-swift-orchestrator check-config
+orchestrator check-config
 ```
 
 ## Remote Workers
@@ -130,23 +130,23 @@ swift-orchestrator check-config
 Remote Macs need the package source available on `PYTHONPATH`. The default remote package path is:
 
 ```text
-~/.swift-orchestrator/package
+~/.orchestrator/package
 ```
 
 Check workers:
 
 ```bash
-swift-orchestrator worker-check
-swift-orchestrator worker-check --machine mac2
+orchestrator worker-check
+orchestrator worker-check --machine mac2
 ```
 
 Install or refresh the package on an SSH worker:
 
 ```bash
-swift-orchestrator worker-install --machine mac2
+orchestrator worker-install --machine mac2
 ```
 
-You can override the remote package/runtime locations in `.swift-orchestrator/config/machines.json`:
+You can override the remote package/runtime locations in `.orchestrator/config/machines.json`:
 
 ```json
 {
@@ -154,8 +154,8 @@ You can override the remote package/runtime locations in `.swift-orchestrator/co
   "execution_mode": "ssh",
   "ssh_target": "my-mac",
   "repo_path": "/Users/me/Documents/MyApp",
-  "orchestrator_package_path": "~/.swift-orchestrator/package",
-  "orchestrator_runtime_dir": ".swift-orchestrator"
+  "orchestrator_package_path": "~/.orchestrator/package",
+  "orchestrator_runtime_dir": ".orchestrator"
 }
 ```
 

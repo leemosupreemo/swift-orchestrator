@@ -168,8 +168,8 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
     active_jobs = state.get("active_jobs", [])
     hw = probe_hardware_specs()
     disk_free, disk_total = probe_disk_space(repo_path)
-    if os.environ.get("SWIFT_ORCHESTRATOR_FAKE_DISK_FREE_GB"):
-        disk_free = int(os.environ["SWIFT_ORCHESTRATOR_FAKE_DISK_FREE_GB"])
+    if os.environ.get("ORCHESTRATOR_FAKE_DISK_FREE_GB"):
+        disk_free = int(os.environ["ORCHESTRATOR_FAKE_DISK_FREE_GB"])
         disk_total = max(disk_total, disk_free)
     
     # Dependency check for CLIs

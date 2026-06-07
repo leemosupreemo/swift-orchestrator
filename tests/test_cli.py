@@ -19,19 +19,19 @@ from orchestrator import cli  # noqa: E402
 
 class CliTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.state_dir = tempfile.TemporaryDirectory(prefix="swift-orchestrator-user-state-")
-        self.old_state_dir = os.environ.get("SWIFT_ORCHESTRATOR_USER_STATE_DIR")
-        os.environ["SWIFT_ORCHESTRATOR_USER_STATE_DIR"] = self.state_dir.name
+        self.state_dir = tempfile.TemporaryDirectory(prefix="orchestrator-user-state-")
+        self.old_state_dir = os.environ.get("ORCHESTRATOR_USER_STATE_DIR")
+        os.environ["ORCHESTRATOR_USER_STATE_DIR"] = self.state_dir.name
 
     def tearDown(self) -> None:
         if self.old_state_dir is None:
-            os.environ.pop("SWIFT_ORCHESTRATOR_USER_STATE_DIR", None)
+            os.environ.pop("ORCHESTRATOR_USER_STATE_DIR", None)
         else:
-            os.environ["SWIFT_ORCHESTRATOR_USER_STATE_DIR"] = self.old_state_dir
+            os.environ["ORCHESTRATOR_USER_STATE_DIR"] = self.old_state_dir
         self.state_dir.cleanup()
 
     def test_init_project_scaffolds_runtime_config(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-init-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
@@ -46,7 +46,7 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(result, 0)
-            runtime = root / ".swift-orchestrator"
+            runtime = root / ".orchestrator"
             project = json.loads((runtime / "project.json").read_text(encoding="utf-8"))
             machines = json.loads((runtime / "config" / "machines.json").read_text(encoding="utf-8"))
             settings = json.loads((runtime / "config" / "settings.json").read_text(encoding="utf-8"))
@@ -68,7 +68,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("state/", gitignore)
 
     def test_init_project_accepts_project_alias_and_remembers_project(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-init-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
@@ -86,7 +86,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(recent["projects"][0]["root"], str(root.resolve()))
 
     def test_projects_and_use_commands_manage_recent_project_selection(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-use-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-use-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
             self.assertEqual(cli.main(["init", "--project", str(root), "--project-name", "SampleApp"]), 0)
@@ -103,7 +103,7 @@ class CliTests(unittest.TestCase):
             self.assertIn(str(root.resolve()), use_output.getvalue())
 
     def test_init_project_can_generate_starter_docs_and_helper_script(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-init-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
@@ -125,8 +125,8 @@ class CliTests(unittest.TestCase):
 
             self.assertIn("xcodebuild build -project SampleApp.xcodeproj -scheme SampleApp", build_docs)
             self.assertIn("xcodebuild test -project SampleApp.xcodeproj -scheme SampleApp", build_docs)
-            self.assertIn("swift-orchestrator console", workflow_docs)
-            self.assertIn("Run `swift-orchestrator check-config`", agents_docs)
+            self.assertIn("orchestrator console", workflow_docs)
+            self.assertIn("Run `orchestrator check-config`", agents_docs)
             self.assertTrue(helper.exists())
             self.assertTrue(helper.stat().st_mode & 0o111)
 
@@ -142,21 +142,21 @@ class CliTests(unittest.TestCase):
             }),
             stderr="",
         )
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-init-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-init-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
             result = cli.main(["init", "--root", str(root)])
 
             self.assertEqual(result, 0)
-            project = json.loads((root / ".swift-orchestrator" / "project.json").read_text(encoding="utf-8"))
+            project = json.loads((root / ".orchestrator" / "project.json").read_text(encoding="utf-8"))
             self.assertEqual(project["scheme"], "AppScheme")
             self.assertEqual(project["test_target"], "AppUnitTests")
             self.assertEqual(project["detected_schemes"], ["AppScheme"])
             self.assertEqual(project["detected_targets"], ["App", "AppUnitTests"])
 
     def test_wizard_configures_first_run_assets_non_interactively(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
@@ -180,7 +180,7 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(result, 0)
-            runtime = root / ".swift-orchestrator"
+            runtime = root / ".orchestrator"
             project = json.loads((runtime / "project.json").read_text(encoding="utf-8"))
             machines = json.loads((runtime / "config" / "machines.json").read_text(encoding="utf-8"))
 
@@ -201,7 +201,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(machine_index["mac2"]["models"], ["codex", "gemini"])
 
     def test_wizard_requires_model_in_non_interactive_mode(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
@@ -215,10 +215,10 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(result, 1)
-            self.assertFalse((root / ".swift-orchestrator").exists())
+            self.assertFalse((root / ".orchestrator").exists())
 
     def test_wizard_requires_complete_firebase_args_before_writing(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
@@ -237,12 +237,12 @@ class CliTests(unittest.TestCase):
             ])
 
             self.assertEqual(result, 1)
-            self.assertFalse((root / ".swift-orchestrator").exists())
+            self.assertFalse((root / ".orchestrator").exists())
 
     @patch("orchestrator.cli.validate_config_command", return_value=0)
     @patch("orchestrator.cli.run_script", return_value=0)
     def test_wizard_verify_runs_checks_and_worker_install(self, mock_run_script, _validate) -> None:
-        with tempfile.TemporaryDirectory(prefix="swift-orchestrator-wizard-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 

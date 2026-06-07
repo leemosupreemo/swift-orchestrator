@@ -11,7 +11,7 @@ def validate_project_config(config: ProjectConfig) -> list[str]:
     if not config.project_name:
         errors.append("project_name is required.")
     if not config.scheme:
-        errors.append("scheme is required. Set it in .swift-orchestrator/project.json.")
+        errors.append("scheme is required. Set it in .orchestrator/project.json.")
     if not config.xcode_project and not config.xcode_workspace and not config.build_command:
         errors.append("Configure xcode_project, xcode_workspace, or build_command.")
     if config.xcode_project and not (config.root / config.xcode_project).exists():
@@ -70,7 +70,7 @@ def validate_machine_config(config_dir: Path) -> list[str]:
         if mode == "ssh" and not machine.get("orchestrator_package_path"):
             errors.append(
                 f"{name}: orchestrator_package_path is recommended for SSH machines "
-                "(default is ~/.swift-orchestrator/package)."
+                "(default is ~/.orchestrator/package)."
             )
 
     return errors
