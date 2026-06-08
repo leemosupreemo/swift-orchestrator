@@ -396,6 +396,19 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
 
         job["ai_modified_files"] = ai_modified
         job["ai_untracked_files"] = ai_untracked
+        write_json(job_path, job)
+
+        # Commit changes if any
+        if ai_modified or ai_untracked:
+            print(f"      - Committing {len(ai_modified)} modified and {len(ai_untracked)} untracked files...")
+            for f in ai_modified + ai_untracked:
+                run_shell(f"git add {shlex.quote(f)}", cwd=ROOT)
+            
+            commit_msg = f"feat: {job['title']} (AI generated)"
+            if job.get("type") == "bug-fix":
+                commit_msg = f"fix: {job['title']} (AI generated)"
+            
+            run_shell(f"git commit -m '{commit_msg}'", cwd=ROOT)
 
         tasks = job.get("plan", {}).get("tasks", [])
         completed = job.get("completed_task_indices", [])
