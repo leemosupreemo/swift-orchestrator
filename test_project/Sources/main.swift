@@ -19,8 +19,4 @@ func divide(_ a: Int, _ b: Int) -> Int {
     return a / b
 }
 
-func divisionDemoOutput() -> String {
-    return "10 / 2 = \(divide(10, 2))"
-}
-
-print(divisionDemoOutput())
+print(divide(10, 2))

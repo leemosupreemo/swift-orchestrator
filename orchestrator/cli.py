@@ -370,8 +370,22 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     if not models and not args.non_interactive:
         print(f"\n\033[1;96m{'='*20} LLM Models {'='*20}\033[0m")
-        print("\033[90mChoose at least one LLM/model alias. Examples: codex, gemini, claude\033[0m")
-        models = parse_csv(prompt_text("Models", "codex"))
+        from orchestrator.scripts.model_registry import get_all_models
+        all_models = get_all_models()
+        print("\033[90mSelect one or more models (comma-separated numbers or names):\033[0m")
+        for i, m in enumerate(all_models, 1):
+            alias_str = f" \033[90m({', '.join(m.aliases)})\033[0m" if m.aliases else ""
+            print(f"    [\033[93m{i}\033[0m] {m.id}{alias_str}")
+        
+        raw_choice = prompt_text("Models", "codex")
+        models = []
+        for part in parse_csv(raw_choice):
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(all_models):
+                    models.append(all_models[idx].id)
+            else:
+                models.append(part)
     if not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
         return 1
@@ -599,6 +613,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n\033[1;96m{'='*20} Orchestrator {'='*20}\033[0m")
             print("No initialized project found in current directory.\n")
             print("    [\033[93m1\033[0m] Initialize new project here (Wizard)")
+            if projects:
+                print("\n\033[1;97mRecent Projects:\033[0m")
             for i, p in enumerate(projects, 2):
                 print(f"    [\033[93m{i}\033[0m] Open {p['name']} \033[90m({p['root']})\033[0m")
             print("    [\033[91mQ\033[0m] Quit")
