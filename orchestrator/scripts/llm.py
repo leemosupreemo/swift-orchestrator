@@ -123,7 +123,7 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
 
     for current_model in attempts:
         try:
-            output = _run_llm_single(current_model, prompt, cwd, timeout)
+            output = _run_llm_single(current_model, prompt, cwd, timeout, role=role)
             
             # Validation: if role expects JSON, verify we have it
             if role in [ModelRole.PLANNER, ModelRole.BUILDER, ModelRole.DEBUGGER, ModelRole.VERIFIER]:
@@ -164,7 +164,7 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
 
 import selectors
 
-def get_llm_command(model: str, prompt_file: str) -> str:
+def get_llm_command(model: str, prompt_file: str, role: str | None = None) -> str:
     # Resolve actual model ID
     m_meta = get_model(model)
     model_id = m_meta.id if m_meta else model
@@ -184,10 +184,14 @@ def get_llm_command(model: str, prompt_file: str) -> str:
         # to prevent recursive loops and security blocks that cause hangs.
         safe_servers = "context7,exa,swiftlens"
         safe_tools = "read_file,grep_search,glob"
+        if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
+            safe_tools += ",replace,write_file"
         cmd_base = f"gemini --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
     elif model_id == "gemini":
         safe_servers = "context7,exa,swiftlens"
         safe_tools = "read_file,grep_search,glob"
+        if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
+            safe_tools += ",replace,write_file"
         cmd_base = f"gemini --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
     elif model_id.startswith("claude-"):
         cmd_base = f"claude -p --model {model_id}"
@@ -249,7 +253,7 @@ def get_llm_env() -> dict[str, str]:
     return env
 
 
-def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300) -> str:
+def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300, role: str | None = None) -> str:
     source = os.environ.get("AI_REQUEST_SOURCE")
     if source:
         prompt = f"[SOURCE: {source}]\n\n{prompt}"
@@ -258,7 +262,7 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
         f.write(prompt)
         prompt_file = f.name
 
-    cmd = get_llm_command(model, prompt_file)
+    cmd = get_llm_command(model, prompt_file, role=role)
     env = get_llm_env()
 
     prompt_chars = len(prompt)

@@ -244,9 +244,9 @@ def build_quick_issue_body(plan: dict) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("job_type", choices=["bug", "feature", "design", "coverage", "quick"])
-    parser.add_argument("--planner", choices=["gemini", "codex", "claude-opus-4-7"])
-    parser.add_argument("--builder", choices=["gemini", "codex", "claude-opus-4-7"])
-    parser.add_argument("--reviewer", choices=["gemini", "codex", "claude-opus-4-7"])
+    parser.add_argument("--planner")
+    parser.add_argument("--builder")
+    parser.add_argument("--reviewer")
     parser.add_argument("--preset", choices=PRESETS.keys())
     parser.add_argument("--no-dispatch", action="store_true")
     parser.add_argument("--branch-mode", choices=BRANCH_MODE_CHOICES + ["current", "manual"])
@@ -435,148 +435,148 @@ def main() -> None:
         if not raw_input_text.strip():
             raise ValueError("No input provided.")
 
-        print_phase("planning")
+    print_phase("planning")
+    
+    prompt_file = "planner_bug.md"
+    if args.stitch:
+        prompt_file = "designer.md"
+    elif args.job_type == "feature":
+        prompt_file = "planner_feature.md"
+    elif args.job_type == "coverage":
+        prompt_file = "planner_coverage.md"
+    elif args.job_type == "design":
+        prompt_file = "designer.md"
         
-        prompt_file = "planner_bug.md"
-        if args.stitch:
-            prompt_file = "designer.md"
-        elif args.job_type == "feature":
-            prompt_file = "planner_feature.md"
-        elif args.job_type == "coverage":
-            prompt_file = "planner_coverage.md"
-        elif args.job_type == "design":
-            prompt_file = "designer.md"
-            
-        prompt_template = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
-        
-        revision_context = ""
-        if existing_job and args.feedback:
-            prev_plan = existing_job.get("plan", {})
-            revision_context = f"\n\n### PREVIOUS DESIGN/PLAN ###\n{json.dumps(prev_plan, indent=2)}\n\n### USER FEEDBACK ###\n{args.feedback}\n"
-        
-        llm_input = f"{prompt_template}\n\nRaw input:\n{raw_input_text}{extra_input}{revision_context}\n"
-        
-        print(f"\n[1/3] Planning {args.job_type} (Stitch AI Mode: {'Enabled' if args.stitch else 'Off'}) using {planner}...", flush=True)
-        llm_output, actual_planner = run_llm(planner, llm_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+    prompt_template = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+    
+    revision_context = ""
+    if existing_job and args.feedback:
+        prev_plan = existing_job.get("plan", {})
+        revision_context = f"\n\n### PREVIOUS DESIGN/PLAN ###\n{json.dumps(prev_plan, indent=2)}\n\n### USER FEEDBACK ###\n{args.feedback}\n"
+    
+    llm_input = f"{prompt_template}\n\nRaw input:\n{raw_input_text}{extra_input}{revision_context}\n"
+    
+    print(f"\n[1/3] Planning {args.job_type} (Stitch AI Mode: {'Enabled' if args.stitch else 'Off'}) using {planner}...", flush=True)
+    llm_output, actual_planner = run_llm(planner, llm_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
 
-        try:
-            plan = json.loads(llm_output)
-        except json.JSONDecodeError:
-            print("\n\033[91mFAILED TO PARSE PLANNER OUTPUT AS JSON\033[0m")
-            # Try extraction
-            extracted = extract_commands(llm_output, "json")
-            if extracted:
-                try:
-                    plan = json.loads(extracted[0])
-                except:
-                    raise
-            else:
-                print("-" * 40)
-                print(llm_output)
-                print("-" * 40)
+    try:
+        plan = json.loads(llm_output)
+    except json.JSONDecodeError:
+        print("\n\033[91mFAILED TO PARSE PLANNER OUTPUT AS JSON\033[0m")
+        # Try extraction
+        extracted = extract_commands(llm_output, "json")
+        if extracted:
+            try:
+                plan = json.loads(extracted[0])
+            except:
                 raise
-
-        # Check for clarification needed from planner
-        clarification = plan.get("clarification_needed")
-        if clarification:
-            print("\n" + "!"*60)
-            print(f"\033[93mPAUSED: Planner needs clarification\033[0m")
-            print(f"\033[96mQuestion:\033[0m {clarification}")
-            print("!"*60 + "\n")
-
-        # --- VERIFICATION STEP ---
-        verification = None
-        planner_meta = get_model(actual_planner)
-        
-        # Only verify if the planner used was NOT an Extreme model
-        if planner_meta and planner_meta.tier > ModelTier.EXTREME:
-            # Find available extreme models in allowed_models
-            extreme_options = get_prioritized_models(role=ModelRole.VERIFIER, allowed_models=allowed_models)
-            if extreme_options:
-                verifier_model = extreme_options[0]
-                print(f"      - Plan generated by {actual_planner}. Verifying with Extreme model: {verifier_model}...", flush=True)
-                
-                verifier_prompt = (PROMPTS_DIR / "verifier.md").read_text(encoding="utf-8")
-                verifier_input = f"{verifier_prompt}\n\n### ORIGINAL REQUEST ###\n{raw_input_text}\n\n### GENERATED PLAN ###\n{llm_output}"
-                
-                try:
-                    v_output, actual_verifier = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
-                    verification = json.loads(v_output)
-                    verification["verifier_model"] = actual_verifier
-                    print(f"      - Verification complete: {verification['status'].upper()}")
-                    
-                    if verification["status"] in ["rejected", "concerns"]:
-                        status_str = "rejected" if verification["status"] == "rejected" else "raised concerns"
-                        print(f"\n\033[1;93mSenior Architect {status_str}.\033[0m")
-                        
-                        if args.yolo:
-                            print(f"\n\033[1;92mYOLO MODE: Automatically integrating Architect suggestions...\033[0m")
-                            # Construct feedback for recursive planning
-                            yolo_feedback = f"### ARCHITECT FEEDBACK ({verification['status'].upper()}) ###\n"
-                            yolo_feedback += f"Comments: {verification['comments']}\n"
-                            if verification.get("suggested_additions"):
-                                yolo_feedback += "Suggested Additions:\n- " + "\n- ".join(verification["suggested_additions"])
-                            
-                            recursive_input = f"{prompt_template}\n\n### PREVIOUS PLAN ###\n{llm_output}\n\n{yolo_feedback}\n\n"
-                            recursive_input += "Please update the plan JSON to address the architect's feedback while fulfilling the original request."
-                            
-                            print(f"      - Re-planning with {actual_planner}...", flush=True)
-                            new_llm_output, _ = run_llm(planner, recursive_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
-                            
-                            try:
-                                plan = json.loads(new_llm_output)
-                                llm_output = new_llm_output # Update for issue body
-                                print(f"      - Plan revised successfully. Proceeding...")
-                                # Clear clarification so status stays 'planned'
-                                clarification = None
-                            except:
-                                print(f"\033[91m      - Failed to parse revised plan. Falling back to human-needed.\033[0m")
-                                clarification = clarification or f"Architect {status_str}: {verification['comments']}"
-                        else:
-                            # Force human intervention
-                            clarification = clarification or f"Architect {status_str}: {verification['comments']}"
-                except Exception as e:
-                    print(f"⚠️  Verification failed: {e}. Proceeding with unverified plan.")
-
-        print(f"[2/3] Creating GitHub issue: {plan['title']}...", flush=True)
-        if args.job_type == "bug":
-            title = plan["title"]
-            body = build_bug_issue_body(plan, verification)
-            labels = ["job:bug", "source:manual", "status:planned"]
-            if clarification:
-                labels = ["job:bug", "source:manual", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-bug-{issue_number}"
-            job_type = plan["recommended_job_type"]
-        elif args.job_type == "coverage":
-            title = plan["title"]
-            body = build_coverage_issue_body(plan, verification)
-            labels = ["job:coverage", "status:planned"]
-            if clarification:
-                labels = ["job:coverage", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-coverage-{issue_number}"
-            job_type = "test-audit"
-        elif args.job_type == "design" or args.stitch:
-            title = plan["title"]
-            body = build_design_issue_body(plan, verification)
-            labels = ["job:design", "status:designing"]
-            if clarification:
-                labels = ["job:design", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-design-{issue_number}"
-            job_type = "feature-design"
         else:
-            title = plan["title"]
-            body = build_feature_issue_body(plan, verification)
-            labels = ["job:feature", "status:planned"]
-            if clarification:
-                labels = ["job:feature", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-feature-{issue_number}"
-            job_type = "feature-plan"
-        
-        last_manual_logs = [] # Initialized but handled inside bug block above if needed
+            print("-" * 40)
+            print(llm_output)
+            print("-" * 40)
+            raise
+
+    # Check for clarification needed from planner
+    clarification = plan.get("clarification_needed")
+    if clarification:
+        print("\n" + "!"*60)
+        print(f"\033[93mPAUSED: Planner needs clarification\033[0m")
+        print(f"\033[96mQuestion:\033[0m {clarification}")
+        print("!"*60 + "\n")
+
+    # --- VERIFICATION STEP ---
+    verification = None
+    planner_meta = get_model(actual_planner)
+    
+    # Only verify if the planner used was NOT an Extreme model
+    if planner_meta and planner_meta.tier > ModelTier.EXTREME:
+        # Find available extreme models in allowed_models
+        extreme_options = get_prioritized_models(role=ModelRole.VERIFIER, allowed_models=allowed_models)
+        if extreme_options:
+            verifier_model = extreme_options[0]
+            print(f"      - Plan generated by {actual_planner}. Verifying with Extreme model: {verifier_model}...", flush=True)
+            
+            verifier_prompt = (PROMPTS_DIR / "verifier.md").read_text(encoding="utf-8")
+            verifier_input = f"{verifier_prompt}\n\n### ORIGINAL REQUEST ###\n{raw_input_text}\n\n### GENERATED PLAN ###\n{llm_output}"
+            
+            try:
+                v_output, actual_verifier = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
+                verification = json.loads(v_output)
+                verification["verifier_model"] = actual_verifier
+                print(f"      - Verification complete: {verification['status'].upper()}")
+                
+                if verification["status"] in ["rejected", "concerns"]:
+                    status_str = "rejected" if verification["status"] == "rejected" else "raised concerns"
+                    print(f"\n\033[1;93mSenior Architect {status_str}.\033[0m")
+                    
+                    if args.yolo:
+                        print(f"\n\033[1;92mYOLO MODE: Automatically integrating Architect suggestions...\033[0m")
+                        # Construct feedback for recursive planning
+                        yolo_feedback = f"### ARCHITECT FEEDBACK ({verification['status'].upper()}) ###\n"
+                        yolo_feedback += f"Comments: {verification['comments']}\n"
+                        if verification.get("suggested_additions"):
+                            yolo_feedback += "Suggested Additions:\n- " + "\n- ".join(verification["suggested_additions"])
+                        
+                        recursive_input = f"{prompt_template}\n\n### PREVIOUS PLAN ###\n{llm_output}\n\n{yolo_feedback}\n\n"
+                        recursive_input += "Please update the plan JSON to address the architect's feedback while fulfilling the original request."
+                        
+                        print(f"      - Re-planning with {actual_planner}...", flush=True)
+                        new_llm_output, _ = run_llm(planner, recursive_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+                        
+                        try:
+                            plan = json.loads(new_llm_output)
+                            llm_output = new_llm_output # Update for issue body
+                            print(f"      - Plan revised successfully. Proceeding...")
+                            # Clear clarification so status stays 'planned'
+                            clarification = None
+                        except:
+                            print(f"\033[91m      - Failed to parse revised plan. Falling back to human-needed.\033[0m")
+                            clarification = clarification or f"Architect {status_str}: {verification['comments']}"
+                    else:
+                        # Force human intervention
+                        clarification = clarification or f"Architect {status_str}: {verification['comments']}"
+            except Exception as e:
+                print(f"⚠️  Verification failed: {e}. Proceeding with unverified plan.")
+
+    print(f"[2/3] Creating GitHub issue: {plan['title']}...", flush=True)
+    if args.job_type == "bug":
+        title = plan["title"]
+        body = build_bug_issue_body(plan, verification)
+        labels = ["job:bug", "source:manual", "status:planned"]
+        if clarification:
+            labels = ["job:bug", "source:manual", "status:human-needed"]
+        issue_number = create_issue(title, body, labels)
+        job_id = f"{timestamp()}-bug-{issue_number}"
+        job_type = plan["recommended_job_type"]
+    elif args.job_type == "coverage":
+        title = plan["title"]
+        body = build_coverage_issue_body(plan, verification)
+        labels = ["job:coverage", "status:planned"]
+        if clarification:
+            labels = ["job:coverage", "status:human-needed"]
+        issue_number = create_issue(title, body, labels)
+        job_id = f"{timestamp()}-coverage-{issue_number}"
+        job_type = "test-audit"
+    elif args.job_type == "design" or args.stitch:
+        title = plan["title"]
+        body = build_design_issue_body(plan, verification)
+        labels = ["job:design", "status:designing"]
+        if clarification:
+            labels = ["job:design", "status:human-needed"]
+        issue_number = create_issue(title, body, labels)
+        job_id = f"{timestamp()}-design-{issue_number}"
+        job_type = "feature-design"
+    else:
+        title = plan["title"]
+        body = build_feature_issue_body(plan, verification)
+        labels = ["job:feature", "status:planned"]
+        if clarification:
+            labels = ["job:feature", "status:human-needed"]
+        issue_number = create_issue(title, body, labels)
+        job_id = f"{timestamp()}-feature-{issue_number}"
+        job_type = "feature-plan"
+    
+    last_manual_logs = [] # Initialized but handled inside bug block above if needed
 
 
     if existing_job:
