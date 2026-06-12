@@ -299,20 +299,6 @@ def update_machine_models(config_dir: Path, models: list[str], ssh_machines: lis
     write_json_file(machines_file, machines_config)
 
 
-def update_firebase_config(
-    project_file: Path,
-    enabled: bool,
-    distribution_script_path: str | None,
-    firebase_plist_path: str | None,
-) -> None:
-    config = read_json_file(project_file)
-    config["firebase_distribution"] = enabled
-    config["delivery_provider"] = "firebase" if enabled else None
-    config["distribution_script_path"] = distribution_script_path if enabled else None
-    config["firebase_plist_path"] = firebase_plist_path if enabled else None
-    write_json_file(project_file, config)
-
-
 def verify_wizard_setup(install_workers: list[str]) -> int:
     check_result = run_script("check_setup.py", [])
     config_result = validate_config_command()
@@ -331,9 +317,6 @@ def run_wizard(args: argparse.Namespace) -> int:
     models = parse_csv(args.models)
     if args.non_interactive and not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
-        return 1
-    if args.non_interactive and args.firebase and (not args.distribution_script_path or not args.firebase_plist_path):
-        print("Firebase setup requires --distribution-script-path and --firebase-plist-path.")
         return 1
 
     try:
@@ -370,16 +353,28 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     if not models and not args.non_interactive:
         print(f"\n\033[1;96m{'='*20} LLM Models {'='*20}\033[0m")
-        print("\033[90mChoose at least one LLM/model alias. Examples: codex, gemini, claude\033[0m")
-        models = parse_csv(prompt_text("Models", "codex"))
+        from orchestrator.scripts.common import prompt_checkbox
+        model_options = ["gemini", "claude", "codex", "anthropic", "openai", "openrouter"]
+        models = prompt_checkbox("Choose at least one LLM/model alias:", model_options, defaults=["gemini"], clear_screen=False)
     if not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
         return 1
 
+    prompts_dir = runtime_dir / "prompts"
+    has_custom_prompts = prompts_dir.exists() and any(prompts_dir.iterdir())
+    
     copy_prompts = args.copy_prompt_overrides
     if not copy_prompts and not args.non_interactive:
         print(f"\n\033[1;96m{'='*20} Role Prompts {'='*20}\033[0m")
-        copy_prompts = prompt_yes_no("Copy role prompt .md files into .orchestrator/prompts for project editing?", True)
+        if has_custom_prompts:
+            print(f"✅ Custom prompts already exist in \033[97m{prompts_dir.relative_to(root)}\033[0m.")
+            print("\033[90m(Manage these later via Dev Console -> Configuration -> [I] Manage CLI Instructions)\033[0m")
+        else:
+            print("You can customize the AI's coding style by editing local copies of its instruction prompts.")
+            print("We highly recommend starting with our default templates for Orchestrator projects.")
+            print("\033[90m(You can always do this later via Dev Console -> Configuration -> [I] Manage CLI Instructions)\033[0m")
+            copy_prompts = prompt_yes_no("Copy default role prompt templates into your project now?", True)
+            
     if copy_prompts:
         review_paths.extend(copy_prompt_overrides(root, args.force))
 
@@ -399,20 +394,59 @@ def run_wizard(args: argparse.Namespace) -> int:
     firebase_enabled = args.firebase
     distribution_script_path = args.distribution_script_path
     firebase_plist_path = args.firebase_plist_path
+    team_id = args.team_id
+    method = args.method
+    provisioning_profile = args.provisioning_profile
+    asc_key_id = args.asc_key_id
+    asc_issuer_id = args.asc_issuer_id
+    asc_key_path = args.asc_key_path
+
     if not firebase_enabled and not args.non_interactive:
         print(f"\n\033[1;96m{'='*20} Delivery {'='*20}\033[0m")
         firebase_enabled = prompt_yes_no("Configure Firebase distribution now?", False)
+
     if firebase_enabled:
-        distribution_script_path = distribution_script_path or (
-            None if args.non_interactive else prompt_text("Distribution script path", "scripts/distribute_ios.sh")
-        )
-        firebase_plist_path = firebase_plist_path or (
-            None if args.non_interactive else prompt_text("Firebase plist path", f"{root.name}/GoogleService-Info.plist")
-        )
-        if not distribution_script_path or not firebase_plist_path:
-            print("\033[91mFirebase setup requires --distribution-script-path and --firebase-plist-path.\033[0m")
-            return 1
-    update_firebase_config(project_file, firebase_enabled, distribution_script_path, firebase_plist_path)
+        if not args.non_interactive:
+            import orchestrator.scripts.setup_distribution as sd
+            detected_team, detected_method = sd.detect_identity_info()
+            
+            print("\n\033[1;96m--- iOS Signing Configuration ---\033[0m")
+            print("Orchestrator can use App Store Connect API keys for fully automated, headless signing.")
+            print("1. Create a key at: \033[4;94mhttps://appstoreconnect.apple.com/access/api\033[0m")
+            print("2. Name: 'Orchestrator', Role: 'Developer'")
+            print("3. Download the .p8 file and copy the Issuer ID and Key ID.\n")
+            
+            firebase_plist_path = firebase_plist_path or prompt_text("Firebase plist path", f"{root.name}/GoogleService-Info.plist")
+            team_id = team_id or prompt_text("Apple Development Team ID", getattr(load_project_config(), "development_team", detected_team))
+            method = method or prompt_text("Distribution method (ad-hoc, debugging)", detected_method or "debugging")
+            
+            if prompt_yes_no("Configure App Store Connect API keys for automated signing?", False):
+                asc_key_id = asc_key_id or prompt_text("ASC Key ID")
+                asc_issuer_id = asc_issuer_id or prompt_text("ASC Issuer ID")
+                asc_key_path = asc_key_path or prompt_text("ASC Key Path (.p8)")
+            
+            print("\n\033[1;96m--- Keychain Access ---\033[0m")
+            print("For headless/remote builds, Orchestrator needs to unlock your keychain.")
+            if prompt_yes_no("Configure automated keychain unlocking?", True):
+                run_script("dev_console.py", ["keychain-setup"])
+        
+        script_args = ["--force"]
+        if firebase_plist_path:
+            script_args.extend(["--firebase-plist", firebase_plist_path])
+        if team_id:
+            script_args.extend(["--team-id", team_id])
+        if method:
+            script_args.extend(["--method", method])
+        if provisioning_profile:
+            script_args.extend(["--provisioning-profile", provisioning_profile])
+        if asc_key_id:
+            script_args.extend(["--asc-key-id", asc_key_id])
+        if asc_issuer_id:
+            script_args.extend(["--asc-issuer-id", asc_issuer_id])
+        if asc_key_path:
+            script_args.extend(["--asc-key-path", asc_key_path])
+        
+        run_script("setup_distribution.py", script_args)
 
     print(f"\n\033[1;92m{'='*20} Wizard Complete {'='*20}\033[0m")
     print("\033[90mReview these Markdown/config files before creating jobs:\033[0m")
@@ -469,7 +503,13 @@ def init_project(args: argparse.Namespace) -> int:
         "visual_app_path": None,
         "delivery_provider": None,
         "distribution_script_path": None,
+        "delivery_method": None,
         "firebase_plist_path": None,
+        "provisioning_profile_specifier": None,
+        "development_team": None,
+        "asc_key_id": None,
+        "asc_issuer_id": None,
+        "asc_key_path": None,
         "remote_package_install_path": "~/.orchestrator/package",
         "firebase_distribution": False,
         "notification_display_name": f"{project_name} AI Orchestrator",
@@ -578,6 +618,13 @@ def use_project_command(reference: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")
+        return 1
+
+def _main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     
@@ -599,9 +646,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n\033[1;96m{'='*20} Orchestrator {'='*20}\033[0m")
             print("No initialized project found in current directory.\n")
             print("    [\033[93m1\033[0m] Initialize new project here (Wizard)")
-            for i, p in enumerate(projects, 2):
-                print(f"    [\033[93m{i}\033[0m] Open {p['name']} \033[90m({p['root']})\033[0m")
-            print("    [\033[91mQ\033[0m] Quit")
+            
+            if projects:
+                print("\n  \033[1;90m--- EXISTING PROJECTS ---\033[0m")
+                for i, p in enumerate(projects, 2):
+                    print(f"    [\033[93m{i}\033[0m] Open {p['name']} \033[90m({p['root']})\033[0m")
+                    
+            print("\n    [\033[91mQ\033[0m] Quit")
             
             while True:
                 choice = input("\nChoice: ").strip().lower()
@@ -646,6 +697,12 @@ def main(argv: list[str] | None = None) -> int:
     wizard_parser.add_argument("--firebase", action="store_true")
     wizard_parser.add_argument("--distribution-script-path")
     wizard_parser.add_argument("--firebase-plist-path")
+    wizard_parser.add_argument("--team-id")
+    wizard_parser.add_argument("--method")
+    wizard_parser.add_argument("--provisioning-profile")
+    wizard_parser.add_argument("--asc-key-id")
+    wizard_parser.add_argument("--asc-issuer-id")
+    wizard_parser.add_argument("--asc-key-path")
     wizard_parser.add_argument("--verify", action="store_true", help="Run setup and config checks before exiting")
     wizard_parser.add_argument("--install-workers", action="store_true", help="Run worker install/check for SSH machines added by this wizard")
     wizard_parser.add_argument("--non-interactive", action="store_true")
@@ -714,4 +771,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.")
+        sys.exit(1)

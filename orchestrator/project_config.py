@@ -152,7 +152,13 @@ class ProjectConfig:
     pr_base_branch: str
     delivery_provider: str | None
     distribution_script_path: str | None
+    delivery_method: str | None
     firebase_plist_path: str | None
+    provisioning_profile_specifier: str | None
+    development_team: str | None
+    asc_key_id: str | None
+    asc_issuer_id: str | None
+    asc_key_path: str | None
     visual_app_path: str | None
     remote_package_install_path: str
     firebase_distribution: bool
@@ -161,6 +167,28 @@ class ProjectConfig:
     @property
     def config_dir(self) -> Path:
         return self.runtime_dir / "config"
+
+    def validate_distribution_config(self) -> list[str]:
+        """Returns a list of missing required fields for iOS distribution."""
+        errors = []
+        if not self.development_team:
+            errors.append("Apple Development Team ID (development_team) is not set.")
+        if not self.delivery_method:
+            errors.append("Distribution method (delivery_method) is not set (e.g., 'ad-hoc' or 'development').")
+        
+        # Check for either ASC keys OR a confirmed local account setup via provisioning profile
+        has_asc_keys = all([self.asc_key_id, self.asc_issuer_id, self.asc_key_path])
+        has_manual_profile = bool(self.provisioning_profile_specifier)
+
+        if not has_asc_keys and not has_manual_profile:
+            errors.append(
+                "Neither App Store Connect API keys nor a manual Provisioning Profile Specifier are configured. "
+                "For automated builds, providing ASC API keys is highly recommended to avoid 'No Accounts' errors."
+            )
+        elif any([self.asc_key_id, self.asc_issuer_id, self.asc_key_path]) and not has_asc_keys:
+             errors.append("App Store Connect API keys are partially configured. Please provide all three (ID, Issuer, Path).")
+        
+        return errors
 
     @property
     def prompts_dir(self) -> Path:
@@ -214,7 +242,13 @@ def load_project_config() -> ProjectConfig:
         pr_base_branch=data.get("pr_base_branch", data.get("base_branch", "main")),
         delivery_provider=data.get("delivery_provider"),
         distribution_script_path=data.get("distribution_script_path"),
+        delivery_method=data.get("delivery_method"),
         firebase_plist_path=data.get("firebase_plist_path"),
+        provisioning_profile_specifier=data.get("provisioning_profile_specifier"),
+        development_team=data.get("development_team"),
+        asc_key_id=data.get("asc_key_id"),
+        asc_issuer_id=data.get("asc_issuer_id"),
+        asc_key_path=data.get("asc_key_path"),
         visual_app_path=data.get("visual_app_path"),
         remote_package_install_path=data.get("remote_package_install_path", "~/.orchestrator/package"),
         firebase_distribution=bool(data.get("firebase_distribution", False)),

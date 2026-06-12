@@ -95,6 +95,9 @@ def get_online_machines(allowed: list[str]) -> list[str]:
     return [m for m in allowed if FLEET_AVAILABILITY.get(m, False)]
 
 def clear_screen():
+    # Force reset scroll region and show cursor before clearing to prevent layout bugs
+    sys.stdout.write("\033[r\033[?25h\033[0m\r")
+    sys.stdout.flush()
     os.system("clear" if os.name != "nt" else "cls")
 
 def print_header(text: str):
@@ -330,6 +333,10 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
         print("★"*60 + "\033[0m\n")
 
     try:
+        # Reset terminal state before running any subprocess to avoid layout corruption
+        sys.stdout.write("\033[r\033[?25h")
+        sys.stdout.flush()
+        
         # Pre-flight zombie purge for job execution scripts
         if script_name in ["schedule_job.py", "worker_run.py", "deliver_build.py"]:
             machines = session_machines or (job.get("session_machines", []) if job else [])
@@ -378,11 +385,21 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
 
     except KeyboardInterrupt:
         print("\nProcess interrupted by user.")
+    finally:
+        # Guarantee that terminal line-wrapping and newline translation are restored
+        # in case a crashed subprocess left the tty in raw or cbreak mode.
+        if os.name != "nt":
+            os.system("stty sane 2>/dev/null")
+        sys.stdout.write("\r")
+        sys.stdout.flush()
     
     # Use provided prompt or a descriptive default
     final_prompt = prompt if prompt is not None else "\n\033[96mTap Enter to return to main menu...\033[0m"
     if final_prompt:
-        input(final_prompt)
+        try:
+            input(final_prompt)
+        except (KeyboardInterrupt, EOFError):
+            pass
 
 def handle_new_job(session_allowed_models: list[str] | None = None, session_allowed_machines: list[str] | None = None):
     if not session_allowed_machines:
@@ -1186,7 +1203,7 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
                     pass
 
 def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str], session_allowed_models: list[str]):
-
+    global PROJECT_CONFIG
     error_msg = ""
     while True:
         clear_screen()
@@ -1669,6 +1686,36 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         print("⚠️  No feedback provided. Revision cancelled.")
                         time.sleep(1)
                 else:
+                    dist_errors = PROJECT_CONFIG.validate_distribution_config()
+                    if dist_errors:
+                        print_header("Distribution Setup Needed")
+                        for err in dist_errors:
+                            print(f" \033[91m- {err}\033[0m")
+                        print("\n \033[93mYou must configure signing and accounts before distributing.\033[0m")
+                        if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
+                            print("\n\033[96mStarting Orchestrator Wizard...\033[0m")
+                            # Reset terminal state so the wizard has full access
+                            status_bar.reset_scroll_region(force=True)
+                            sys.stdout.write("\033[?25h")
+                            sys.stdout.flush()
+                            
+                            cli_path = SCRIPTS_DIR.parent / "cli.py"
+                            subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
+                            
+                            # Restore scroll region for this menu
+                            status_bar.set_scroll_region()
+                            
+                            # Reload config to pick up wizard changes
+                            import importlib
+                            import orchestrator.project_config
+                            importlib.reload(orchestrator.project_config)
+                            PROJECT_CONFIG = orchestrator.project_config.PROJECT_CONFIG
+                            print("\n✅ Project configuration reloaded.")
+                            time.sleep(1)
+                        else:
+                            input("\n\033[96mTap Enter to return to menu...\033[0m")
+                        continue
+
                     print_phase("delivery", subtext="firebase distribution")
                     print("This will archive, export, and upload the build to Firebase.")
                     print("Estimated time: 5-10 minutes.")
@@ -2223,6 +2270,39 @@ def handle_fleet_hygiene(session_allowed_machines):
     else:
         print("\nNo processes were harmed.")
         input("\n\033[96mTap Enter to return to menu...\033[0m")
+def handle_cli_instructions():
+    print_header("Manage CLI Instructions (Role Prompts)")
+    print("The Orchestrator uses AI Agents (Planner, Builder, Reviewer, etc.).")
+    print("You can override their default instructions by placing specific .md files")
+    print(f"in your project's \033[97m{PROJECT_CONFIG.runtime_dir.name}/prompts/\033[0m directory.\n")
+    
+    prompts_dir = PROJECT_CONFIG.runtime_dir / "prompts"
+    if prompts_dir.exists() and any(prompts_dir.iterdir()):
+        print(f"✅ Custom prompts are currently active in \033[97m{prompts_dir.relative_to(ROOT)}\033[0m")
+        print("You can edit those files directly to customize the AI's behavior.")
+    else:
+        print("❌ No custom prompts found. Using system defaults.")
+    
+    print("\nActions:")
+    print("  [\033[96m1\033[0m] Copy system default templates to project (to enable editing)")
+    if prompts_dir.exists():
+        print("  [\033[91m2\033[0m] Delete custom prompts (revert to system defaults)")
+    print("  [\033[90mB\033[0m] Back")
+    
+    choice = input("\nChoice: ").strip().lower()
+    if choice == '1':
+        print("\nCopying templates...")
+        cli_path = SCRIPTS_DIR.parent / "cli.py"
+        subprocess.run([sys.executable, str(cli_path), "wizard", "--copy-prompt-overrides", "--non-interactive", "--force"], cwd=str(ROOT))
+        print("\n✅ Templates copied! You can now edit them.")
+        time.sleep(2)
+    elif choice == '2' and prompts_dir.exists():
+        if prompt_confirm("Are you sure you want to delete all custom prompts?", default=False):
+            import shutil
+            shutil.rmtree(prompts_dir)
+            print("✅ Custom prompts deleted. Reverted to system defaults.")
+            time.sleep(2)
+
 def handle_configuration_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> tuple[list[str], list[str]]:
     """Secondary menu for advanced setup, tools, and configuration."""
     while True:
@@ -2901,7 +2981,7 @@ def handle_keychain_setup(status_bar: StatusBar):
         print("\n\033[96mEnter your macOS login password (it will be saved to .secrets/project-secrets.zsh):\033[0m")
         # Use getpass style input if possible, but for simplicity in this console:
         import getpass
-        pwd = getpass.getpass("Password: ")
+        pwd = getpass.getpass("🔑 Password: ")
         if pwd:
             secrets_path = ROOT / ".secrets" / "project-secrets.zsh"
             secrets_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3054,7 +3134,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
 
                     new_smtp = input("\n    Gmail Address: ").strip()
-                    new_pass = input("    App Password:  ").strip()
+                    new_pass = input("    🔑 App Password:  ").strip()
                     if new_smtp: settings["smtp_email"] = new_smtp
                     if new_pass: settings["smtp_password"] = new_pass
                 else:
@@ -3089,6 +3169,10 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
 
 if __name__ == "__main__":
     try:
+        if len(sys.argv) > 1 and sys.argv[1] == "keychain-setup":
+            handle_keychain_setup(None)
+            sys.exit(0)
+            
         main_loop()
     except KeyboardInterrupt:
         print("\nExiting console.")

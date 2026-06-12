@@ -14,10 +14,27 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
 from common import ROOT, JOBS_DIR, write_json, timestamp, prompt_confirm
+from orchestrator.project_config import PROJECT_CONFIG
 
 def run_smoke_delivery():
     print("🚀 Starting Smoke Test: Build & Delivery Pipeline...")
     
+    # 0. Pre-flight check: Ensure signing configuration is present
+    dist_errors = PROJECT_CONFIG.validate_distribution_config()
+    if dist_errors:
+        print("\n\033[91m!!! Error: Distribution configuration is incomplete:\033[0m")
+        for err in dist_errors:
+            print(f"      - {err}")
+        print("\n\033[93mYou must configure signing and accounts before distributing.\033[0m")
+        
+        if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
+            print("\n\033[96mStarting Orchestrator Wizard...\033[0m")
+            cli_path = SCRIPTS_DIR.parent / "cli.py"
+            subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
+            print("\n✅ Wizard complete. Please re-run the smoke test to verify.")
+        
+        sys.exit(1)
+
     # 1. Setup metadata
     test_id = f"smoke-delivery-{timestamp()}"
     # Just use current branch, don't change anything
@@ -60,7 +77,8 @@ def run_smoke_delivery():
             print("      - Build should be appearing on your device soon.")
         else:
             print(f"\n❌ SMOKE TEST FAILED with exit code {res}.")
-
+            # We don't exit immediately because we want to cleanup the mock job
+            
         print("\n\033[96mCheck the logs above for Firebase distribution URLs.\033[0m")
         print("\033[90m(The smoke test creates a temporary mock job in ai/jobs/ for the distribution pipeline.)\033[0m")
         
@@ -75,6 +93,9 @@ def run_smoke_delivery():
             print("      - Done.")
         else:
             print("      - Temporary job file preserved in ai/jobs/.")
+            
+        if res != 0:
+            sys.exit(res)
 
     except Exception as e:
         print(f"\n!!! Error during smoke test: {e}")
@@ -84,4 +105,8 @@ def run_smoke_delivery():
                 print("      - Deleted temporary job file.")
 
 if __name__ == "__main__":
-    run_smoke_delivery()
+    try:
+        run_smoke_delivery()
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        sys.exit(1)

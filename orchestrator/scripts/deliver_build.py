@@ -45,6 +45,15 @@ def deliver_build(job_path: Path):
     print(f"      - Target Branch: {branch}")
     print(f"      - Feature/Bug:   {title}")
     
+    # 0. Pre-flight check: Ensure signing configuration is present
+    dist_errors = PROJECT_CONFIG.validate_distribution_config()
+    if dist_errors:
+        print("\n\033[91m!!! Error: Distribution configuration is incomplete:\033[0m")
+        for err in dist_errors:
+            print(f"      - {err}")
+        print("\n\033[93mPlease run 'orchestrator wizard' to configure iOS distribution and signing.\033[0m")
+        sys.exit(1)
+    
     # 1. Ensure we are on the correct branch
     current_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ROOT)).decode("utf-8").strip()
     if current_branch != branch:
@@ -78,18 +87,55 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
     
     try:
         # Run the bash script and capture output to both console and file
+        project_path = None
         if PROJECT_CONFIG.xcode_project:
             project_path = ROOT / PROJECT_CONFIG.xcode_project
         else:
             project_path = next(iter(sorted(ROOT.glob("*.xcodeproj"))), None)
-        if not project_path:
-            print("!!! Error: No Xcode project configured for distribution.")
+            
+        workspace_path = getattr(PROJECT_CONFIG, "xcode_workspace", None)
+        if workspace_path:
+            workspace_path = ROOT / workspace_path
+            
+        if not project_path and not workspace_path:
+            print("!!! Error: No Xcode project or workspace configured for distribution.")
             return
-        cmd = [
-            "/bin/bash", str(dist_script),
-            "--project", str(project_path),
-            "--release-notes", release_notes
-        ]
+            
+        cmd = ["/bin/bash", str(dist_script)]
+        if project_path:
+            cmd.extend(["--project", str(project_path)])
+        if workspace_path:
+            cmd.extend(["--workspace", str(workspace_path)])
+            
+        if PROJECT_CONFIG.scheme:
+            cmd.extend(["--scheme", PROJECT_CONFIG.scheme])
+            
+        cmd.extend(["--release-notes", release_notes])
+        
+        provisioning_profile = getattr(PROJECT_CONFIG, "provisioning_profile_specifier", None)
+        if provisioning_profile:
+            cmd.extend(["--provisioning-profile", provisioning_profile])
+        
+        team_id = getattr(PROJECT_CONFIG, "development_team", None)
+        if team_id:
+            cmd.extend(["--team-id", team_id])
+            
+        method = getattr(PROJECT_CONFIG, "delivery_method", None)
+        if method:
+            cmd.extend(["--method", method])
+            
+        asc_key_id = getattr(PROJECT_CONFIG, "asc_key_id", None)
+        if asc_key_id:
+            cmd.extend(["--asc-key-id", asc_key_id])
+            
+        asc_issuer_id = getattr(PROJECT_CONFIG, "asc_issuer_id", None)
+        if asc_issuer_id:
+            cmd.extend(["--asc-issuer-id", asc_issuer_id])
+            
+        asc_key_path = getattr(PROJECT_CONFIG, "asc_key_path", None)
+        if asc_key_path:
+            key_path = ROOT / asc_key_path if not Path(asc_key_path).is_absolute() else Path(asc_key_path)
+            cmd.extend(["--asc-key-path", str(key_path)])
         
         if job.get("testers"):
             cmd.extend(["--testers", job["testers"]])

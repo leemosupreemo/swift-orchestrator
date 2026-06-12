@@ -272,6 +272,8 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             # 1. Clear screen (flickery but safe) 
             # 2. OR move cursor back up (smooth but requires knowing height)
             if clear_screen:
+                sys.stdout.write("\033[r\033[?25h\033[0m\r")
+                sys.stdout.flush()
                 os.system("clear" if os.name != "nt" else "cls")
             elif not first_render:
                 # Move up by the number of lines we printed last time
@@ -349,8 +351,16 @@ def prompt_multiline(prompt: str) -> str:
 def get_key(blocking: bool = True) -> str:
     """Reads a single keypress, including multi-byte escape sequences for arrows."""
     import tty, termios
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    try:
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+    except Exception:
+        # If we can't get terminal attributes (e.g., not a tty or terminal is corrupted), fallback to input()
+        try:
+            return sys.stdin.read(1) if not blocking else input()
+        except:
+            return ""
+
     try:
         if not blocking:
             # Set to non-blocking
@@ -437,6 +447,8 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
         while True:
             # Redraw strategy
             if clear_screen:
+                sys.stdout.write("\033[r\033[?25h\033[0m\r")
+                sys.stdout.flush()
                 os.system("clear" if os.name != "nt" else "cls")
             elif not first_render:
                 sys.stdout.write(f"\033[{num_rendered_lines}A")
@@ -796,8 +808,10 @@ class StatusBar:
     def reset_scroll_region(self, force: bool = False):
         if self._scroll_region_set or force:
             _, lines = self._get_size()
-            sys.stdout.write("\033[r")
-            sys.stdout.write(f"\033[{lines};1H\n")
+            # \033[r: reset scroll region
+            # \033[?25h: show cursor
+            # \033[H: move to top-left
+            sys.stdout.write("\033[r\033[?25h")
             sys.stdout.flush()
             self._scroll_region_set = False
 
