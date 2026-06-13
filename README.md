@@ -1,10 +1,29 @@
 # Swift Orchestrator
 
-Standalone package scaffold for the AI dev console and worker orchestration used by Swift/Xcode projects.
+Swift Orchestrator is a standalone, multi-agent AI orchestration platform designed for Swift and Xcode projects. It provides a rich, interactive dev console for automating software engineering tasks—from bug fixes and feature planning to fleet-wide test execution and Firebase distribution.
 
-## Install
+Unlike generic AI coding tools, Orchestrator is built specifically for the complexities of the Apple ecosystem, supporting deep integration with `xcodebuild`, simulators, and remote Mac build farms.
 
-Recommended CLI install:
+---
+
+## 🚀 Key Features
+
+*   **Interactive Dev Console**: A terminal-based UI designed for speed. Single-key shortcuts (`y/n`, `A`/`F`/`Q`) and real-time status bars make orchestration feel like a native tool.
+*   **Structured Multi-Agent Workflow**: Jobs pass through specialized agents:
+    *   **Planner**: Analyzes requirements and drafts a multi-step implementation plan.
+    *   **Builder**: Executes the plan, writing code and running terminal tools.
+    *   **Reviewer**: Performs a technical audit of changes before they are finalized.
+    *   **Verifier**: Validates that the implementation meets the original goal and maintains system integrity.
+*   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote Macs via SSH. The Orchestrator manages code syncing, package installation, and log retrieval automatically.
+*   **Project-Local Intelligence**: Store role-specific prompt overrides (`.orchestrator/prompts/`) and architecture guides (`AGENTS.md`) directly in your repo to keep agents grounded in your project's conventions.
+*   **Interactive AI Login**: Missing an API key or session? Log in to providers (`gemini`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
+*   **Automated PR & Issue Workflow**: Seamlessly integrates with `gh` CLI to create issues, open PRs, and post-automated status updates.
+
+---
+
+## 🛠️ Install
+
+Recommended CLI install via `pipx`:
 
 ```bash
 brew install pipx
@@ -13,155 +32,104 @@ pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
 orchestrator --help
 ```
 
-Upgrade later with:
+### Quick Start (First Project)
 
+1.  **Initialize**: Run the wizard in your project root to detect schemes and set up config.
+    ```bash
+    cd /path/to/MySwiftProject
+    orchestrator wizard
+    ```
+2.  **Verify**: Ensure your environment (CLIs, API keys) is ready.
+    ```bash
+    orchestrator check
+    ```
+3.  **Launch Console**: Start the interactive dev console to create your first job.
+    ```bash
+    orchestrator console
+    ```
+
+---
+
+## 🧩 Agent Hierarchy
+
+| Agent | Role | Output |
+| :--- | :--- | :--- |
+| **Planner** | Strategic analysis & Step-by-step planning | `plan.json` |
+| **Builder** | Code implementation & Tool execution | File changes |
+| **Reviewer** | Technical audit & PR readiness check | Review comments |
+| **Verifier** | Goal validation & regression testing | Pass/Fail status |
+| **Debug Agent** | Iterative fix & test-loop management | Bug fixes |
+| **Build Checker** | Log analysis & error diagnostics | Root cause insights |
+
+---
+
+## 💻 Dev Console UI
+
+The Dev Console is the primary way to interact with the Orchestrator. It features:
+- **Single-Key Control**: Navigate menus and approve actions with instant key presses (no `Enter` required for `y/n` or menu choices).
+- **Interactive AI Discovery**: Automatically detects installed CLIs and guides you through authentication if needed.
+- **Real-time Status Bar**: Tracks machine availability, active models, and job progress.
+- **Context Linking**: Easily attach logs, UI mockups, or previous job context to new requests.
+
+---
+
+## 📡 Remote Workers (Fleet)
+
+Scale your workflow by adding remote Macs as workers. Remote workers can handle:
+- **Builds**: Offload heavy `xcodebuild` tasks.
+- **Tests**: Run exhaustive UI or unit test suites in parallel.
+- **Execution**: The Orchestrator syncs your repository and its own runtime to the worker automatically.
+
+Add workers in `.orchestrator/config/machines.json` and prepare them with:
 ```bash
-pipx upgrade orchestrator
+orchestrator worker-install --machine mac2
+orchestrator worker-check --machine mac2
 ```
 
-## Local Development
+---
 
-```bash
-cd swift_orchestrator
-python3 -m pip install -e .
-orchestrator wizard --root /path/to/SwiftProject
-cd /path/to/SwiftProject
-orchestrator check
-orchestrator check-config
-orchestrator console
-```
+## ⚙️ Project Configuration
 
-Package install smoke:
-
-```bash
-python3 tests/smoke_package_install.py
-```
-
-This creates a temporary virtual environment, installs the package editable, and verifies the installed `orchestrator` command without relying on `PYTHONPATH`.
-
-## External Requirements
-
-Python package dependencies are standard-library only. Runtime functionality depends on external command-line tools:
-
-- Required for Swift/Xcode projects: `xcodebuild`, `xcrun`
-- Required for GitHub issue/PR workflow: `gh`
-- Required for SSH workers: `ssh`, `scp`, `rsync`
-- At least one model provider CLI or API key:
-  - `codex`
-  - `gemini`
-  - `claude`
-  - `opencode`
-  - `ollama`
-- Optional delivery: `firebase` plus a configured distribution script
-
-Use:
-
-```bash
-orchestrator check
-orchestrator check-config
-```
-
-to validate environment and project configuration.
-
-For first-time setup, use:
-
-```bash
-orchestrator wizard --project /path/to/SwiftProject
-```
-
-The wizard initializes project config, chooses at least one model, can copy project-local prompt Markdown overrides, can add SSH workers, and can configure Firebase delivery.
-
-List or switch remembered projects:
-
-```bash
-orchestrator projects
-orchestrator use MyApp
-```
-
-The package stores project-specific runtime files in `.orchestrator/` by default:
-
-- `project.json`
-- `config/machines.json`
-- `config/settings.json`
-- `jobs/`
-- `logs/`
-- `output/`
-- `state/`
-
-The original Thirteen `ai/` directory is not modified by this package.
-
-## Project Config
-
-`orchestrator init` writes `.orchestrator/project.json`. When available, it uses `xcodebuild -list -json` to detect schemes and targets.
-
-Important fields include:
+The core configuration lives in `.orchestrator/project.json`.
 
 ```json
 {
   "project_name": "MyApp",
   "base_branch": "main",
-  "pr_base_branch": "main",
-  "branch_prefix": "ai/issue",
-  "xcode_project": "MyApp.xcodeproj",
-  "xcode_workspace": null,
   "scheme": "MyApp",
   "test_target": "MyAppTests",
-  "build_command": null,
-  "test_command": null,
-  "backend_test_command": null,
-  "app_bundle_id": null,
-  "visual_app_path": null,
-  "delivery_provider": null,
-  "distribution_script_path": null,
-  "firebase_plist_path": null,
-  "remote_package_install_path": "~/.orchestrator/package",
-  "firebase_distribution": false
+  "branch_prefix": "ai/issue",
+  "firebase_distribution": true
 }
 ```
 
-Run this after editing config:
-
+Validate your configuration any time:
 ```bash
 orchestrator check-config
 ```
 
-## Remote Workers
+---
 
-Remote Macs need the package source available on `PYTHONPATH`. The default remote package path is:
+## 📚 Documentation
 
-```text
-~/.orchestrator/package
-```
+- [User Guide](docs/user-guide.md): Comprehensive setup, commands, and troubleshooting.
+- [Migration Guide](docs/migration-guide.md): Transitioning from legacy local scripts.
+- [AI Workflow](docs/ai-workflow.md): Understanding the agentic lifecycle.
 
-Check workers:
+---
 
-```bash
-orchestrator worker-check
-orchestrator worker-check --machine mac2
-```
+## 🛠️ Local Development
 
-Install or refresh the package on an SSH worker:
+For developers contributing to the Orchestrator itself:
 
 ```bash
-orchestrator worker-install --machine mac2
+git clone https://github.com/leemosupreemo/orchestrator.git
+cd orchestrator
+python3 -m pip install -e .
+python3 -m unittest discover tests
 ```
 
-You can override the remote package/runtime locations in `.orchestrator/config/machines.json`:
-
-```json
-{
-  "name": "mac2",
-  "execution_mode": "ssh",
-  "ssh_target": "my-mac",
-  "repo_path": "/Users/me/Documents/MyApp",
-  "orchestrator_package_path": "~/.orchestrator/package",
-  "orchestrator_runtime_dir": ".orchestrator"
-}
+Package install smoke test:
+```bash
+python3 tests/smoke_package_install.py
 ```
-
-Remote dispatch checks that `orchestrator.scripts.worker_run` can be imported before syncing code or uploading a job. If the package is missing, dispatch stops with a `worker-install` hint.
-
-## Guides
-
-- [User guide](docs/user-guide.md): install, initialize a Swift project, configure models/workers, run the console, create jobs, and troubleshoot setup issues.
-- [Migration guide](docs/migration-guide.md): move from Thirteen's repo-local `ai/` directory to the standalone package without deleting existing Thirteen files.
