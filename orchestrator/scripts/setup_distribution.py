@@ -183,28 +183,42 @@ EXPORT_OPTIONS_TEMPLATE = r"""<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 """
 
-def setup_distribution(force=False, firebase_plist=None, provisioning_profile=None, team_id=None, method=None, asc_key_id=None, asc_issuer_id=None, asc_key_path=None):
-    root = Path(os.fspath(ROOT)).resolve()
+def setup_distribution(force=False, firebase_plist=None, provisioning_profile=None, team_id=None, method=None, asc_key_id=None, asc_issuer_id=None, asc_key_path=None, root=None):
+    if root is None:
+        from orchestrator.project_config import find_project_root
+        root = find_project_root()
+
+    root = Path(os.fspath(root)).resolve()
     print(f"🛠️  Setting up distribution for {root.name}...")
     provisioning_profile_specifier = provisioning_profile or detect_provisioning_profile_specifier(root)
-    
+
     detected_team_id, detected_method = detect_identity_info()
-    team_id = team_id or PROJECT_CONFIG.development_team or detected_team_id
-    method = method or PROJECT_CONFIG.delivery_method or detected_method or "ad-hoc"
-    
+
+    # We use a helper to get config values safely without relying on a global PROJECT_CONFIG 
+    # which might be bound to a different root during tests
+    def get_conf_val(key, default=None):
+        project_json = root / ".orchestrator" / "project.json"
+        if project_json.exists():
+            try:
+                return read_json(project_json).get(key, default)
+            except: pass
+        return default
+
+    team_id = team_id or get_conf_val("development_team") or detected_team_id
+    method = method or get_conf_val("delivery_method") or detected_method or "ad-hoc"
+
     if team_id:
         print(f"  ✅ Using Team ID: {team_id}")
     if method:
         print(f"  ✅ Using Method:  {method}")
-    
-    asc_key_id = asc_key_id or PROJECT_CONFIG.asc_key_id
-    asc_issuer_id = asc_issuer_id or PROJECT_CONFIG.asc_issuer_id
-    asc_key_path = asc_key_path or PROJECT_CONFIG.asc_key_path
-    
+
+    asc_key_id = asc_key_id or get_conf_val("asc_key_id")
+    asc_issuer_id = asc_issuer_id or get_conf_val("asc_issuer_id")
+    asc_key_path = asc_key_path or get_conf_val("asc_key_path")
+
     # 1. Create scripts directory
     scripts_dir = root / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
-    
     # 2. Create distribute_ios.sh
     dist_script = scripts_dir / "distribute_ios.sh"
     if not dist_script.exists() or force:
@@ -231,24 +245,26 @@ def setup_distribution(force=False, firebase_plist=None, provisioning_profile=No
             config["firebase_distribution"] = True
             config["delivery_provider"] = "firebase"
             config["distribution_script_path"] = "scripts/distribute_ios.sh"
-            config["delivery_method"] = method
-            config["firebase_plist_path"] = (
-                firebase_plist
-                or config.get("firebase_plist_path")
-                or f"{PROJECT_CONFIG.project_name}/GoogleService-Info.plist"
-            )
+            config["delivery_method"] = method or config.get("delivery_method")
+
+            # App ID resolution
+            firebase_plist_path = firebase_plist or config.get("firebase_plist_path")
+            if not firebase_plist_path:
+                project_name = config.get("project_name") or root.name
+                firebase_plist_path = f"{project_name}/GoogleService-Info.plist"
+
+            config["firebase_plist_path"] = firebase_plist_path
+
             if provisioning_profile_specifier:
                 config["provisioning_profile_specifier"] = provisioning_profile_specifier
-            else:
-                config.pop("provisioning_profile_specifier", None)
-            
+
             if team_id:
                 config["development_team"] = team_id
-                
+
             if asc_key_id: config["asc_key_id"] = asc_key_id
             if asc_issuer_id: config["asc_issuer_id"] = asc_issuer_id
             if asc_key_path: config["asc_key_path"] = asc_key_path
-            
+
             write_json(project_json_path, config)
             print(f"  ✅ Updated {project_json_path.relative_to(root)}")
         except Exception as e:
@@ -257,18 +273,16 @@ def setup_distribution(force=False, firebase_plist=None, provisioning_profile=No
         print(f"  ⚠️  {project_json_path.relative_to(root)} not found. Skipping config update.")
 
     # 5. Check for GoogleService-Info.plist
-    gs_info_path = (
-        firebase_plist
-        or PROJECT_CONFIG.firebase_plist_path
-        or (PROJECT_CONFIG.project_name + "/GoogleService-Info.plist")
-    )
+    # Reload config to get latest values
+    final_config = read_json(project_json_path) if project_json_path.exists() else {}
+    gs_info_path = final_config.get("firebase_plist_path") or (root.name + "/GoogleService-Info.plist")
+
     gs_info = root / gs_info_path
     if not gs_info.exists():
         print(f"\n  \033[93m⚠️  Warning:\033[0m {gs_info_path} not found.")
         print("     You must download this from Firebase Console for distribution to work.")
     else:
         print(f"  ✅ Found {gs_info_path}")
-
     print("\n✨ Setup complete!")
 
 
@@ -372,8 +386,9 @@ if __name__ == "__main__":
     parser.add_argument("--asc-key-id", help="App Store Connect API Key ID")
     parser.add_argument("--asc-issuer-id", help="App Store Connect API Issuer ID")
     parser.add_argument("--asc-key-path", help="Path to App Store Connect API .p8 key file")
+    parser.add_argument("--root", help="Project root directory")
     args = parser.parse_args()
-    
+
     try:
         setup_distribution(
             force=args.force,
@@ -384,7 +399,9 @@ if __name__ == "__main__":
             asc_key_id=args.asc_key_id,
             asc_issuer_id=args.asc_issuer_id,
             asc_key_path=args.asc_key_path,
+            root=args.root,
         )
+
     except KeyboardInterrupt:
         print("\nInterrupted.")
         sys.exit(1)

@@ -319,6 +319,28 @@ def run_wizard(args: argparse.Namespace) -> int:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
         return 1
 
+    # Define variables early for validation and use
+    firebase_enabled = args.firebase
+    team_id = args.team_id
+    method = args.method
+    firebase_plist_path = args.firebase_plist_path
+    provisioning_profile = args.provisioning_profile
+    asc_key_id = args.asc_key_id
+    asc_issuer_id = args.asc_issuer_id
+    asc_key_path = args.asc_key_path
+
+    # Validation: Pre-flight checks before modifying filesystem
+    if firebase_enabled and args.non_interactive:
+        if not team_id:
+            print("Error: --team-id is required for non-interactive Firebase setup.")
+            return 1
+        if not method:
+            print("Error: --method is required for non-interactive Firebase setup.")
+            return 1
+        if not firebase_plist_path:
+            print("Error: --firebase-plist-path is required for non-interactive Firebase setup.")
+            return 1
+
     try:
         ssh_machines = [parse_ssh_machine(value) for value in args.ssh_machine]
     except ValueError as exc:
@@ -391,16 +413,6 @@ def run_wizard(args: argparse.Namespace) -> int:
                 return 1
     update_machine_models(runtime_dir / "config", models, ssh_machines)
 
-    firebase_enabled = args.firebase
-    distribution_script_path = args.distribution_script_path
-    firebase_plist_path = args.firebase_plist_path
-    team_id = args.team_id
-    method = args.method
-    provisioning_profile = args.provisioning_profile
-    asc_key_id = args.asc_key_id
-    asc_issuer_id = args.asc_issuer_id
-    asc_key_path = args.asc_key_path
-
     if not firebase_enabled and not args.non_interactive:
         print(f"\n\033[1;96m{'='*20} Delivery {'='*20}\033[0m")
         firebase_enabled = prompt_yes_no("Configure Firebase distribution now?", False)
@@ -445,6 +457,9 @@ def run_wizard(args: argparse.Namespace) -> int:
             script_args.extend(["--asc-issuer-id", asc_issuer_id])
         if asc_key_path:
             script_args.extend(["--asc-key-path", asc_key_path])
+        
+        if root:
+            script_args.extend(["--root", str(root)])
         
         run_script("setup_distribution.py", script_args)
 

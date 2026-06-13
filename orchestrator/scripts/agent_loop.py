@@ -146,11 +146,11 @@ def main() -> int:
             for i, action in enumerate(actions):
                 a_type = action.get("type")
                 if a_type == "delegate":
-                    print(f"  {i+1}. [DELEGATE] -> \033[96m{action.get('agent')}\033[0m: {action.get('instruction')}")
-                elif a_type == "tool":
+                    print(f"  {i+1}. [DELEGATE] \033[1;94m->\033[0m \033[1;94m{action.get('agent')}\033[0m: {action.get('instruction')}")
+                elif action.get("tool"):
                     tool = action.get("tool")
-                    args_val = action.get("args", {})
-                    print(f"  {i+1}. [TOOL]     -> \033[94m{tool}\033[0m: {json.dumps(args_val)}")
+                    args_val = action.get("args")
+                    print(f"  {i+1}. [TOOL]     \033[1;94m->\033[0m \033[1;94m{tool}\033[0m: {json.dumps(args_val)}")
 
             print("\n\033[1;97mChoices:\033[0m")
             print("  [\033[92mA\033[0m] Approve & Run All")
@@ -186,7 +186,7 @@ def main() -> int:
             if action_type == "delegate":
                 agent_name = action.get("agent")
                 instruction = action.get("instruction")
-                print(f"\n\033[1;96m[ACTION] Delegating to sub-agent '{agent_name}'...\033[0m")
+                print(f"\n\033[1;94m[ACTION] Delegating to sub-agent '{agent_name}'...\033[0m")
                 print(f"Instruction: {instruction}")
                 
                 sub_prompt_path = PROMPTS_DIR / f"{agent_name}.md"
@@ -270,7 +270,7 @@ def main() -> int:
         current_input += "\n\nPlease analyze these results and decide on the next steps."
 
         if args.step_by_step and turn < args.max_turns:
-            input(f"\n\033[96mTurn {turn} complete. Tap Enter to continue to next turn...\033[0m")
+            input(f"\n\033[1;94mTurn {turn} complete. Tap Enter to continue to next turn...\033[0m")
 
     print(f"\n\033[91mReached maximum turns ({args.max_turns}). Stopping.\033[0m")
     return 0

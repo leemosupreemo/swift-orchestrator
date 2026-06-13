@@ -176,6 +176,10 @@ class CliTests(unittest.TestCase):
                 "scripts/distribute_ios.sh",
                 "--firebase-plist-path",
                 "SampleApp/GoogleService-Info.plist",
+                "--team-id",
+                "ABC123DEFG",
+                "--method",
+                "ad-hoc",
                 "--non-interactive",
             ])
 

@@ -146,7 +146,7 @@ def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Opt
         
         print("\n\033[1;97mNEXT STEPS:\033[0m")
         print(f"  1. Review the changes on GitHub: \033[4;94mgh pr view {pr_number} --web\033[0m")
-        print(f"  2. Run the orchestrator console to manage this job: \033[96morchestrator console\033[0m")
+        print(f"  2. Run the orchestrator console to manage this job: \033[1;94morchestrator console\033[0m")
         print(f"  3. Merge and cleanup using dev_console when satisfied.")
     else:
         print("\n\033[91m" + "!"*60)
@@ -168,7 +168,7 @@ def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Opt
         print("\033[0m")
         
         print("\n\033[1;97mNEXT STEPS:\033[0m")
-        print(f"  1. Inspect the logs in: \033[96mai/output/{job['job_id']}/\033[0m")
+        print(f"  1. Inspect the logs in: \033[1;94mai/output/{job['job_id']}/\033[0m")
         print(f"  2. Use the dev_console to link manual logs or provide feedback.")
         print(f"  3. Use the console manual run menu to reproduce issues.")
 

@@ -55,10 +55,20 @@ class VisualDeliveryConfigTests(unittest.TestCase):
             process.stdout = []
             process.wait.return_value = 0
             mock_popen.return_value = process
-            config = SimpleNamespace(
-                distribution_script_path="tools/ship.sh",
-                xcode_project="SampleApp.xcodeproj",
-            )
+            
+            from orchestrator.project_config import ProjectConfig
+            config = MagicMock(spec=ProjectConfig)
+            config.distribution_script_path = "tools/ship.sh"
+            config.xcode_project = "SampleApp.xcodeproj"
+            config.validate_distribution_config.return_value = []
+            config.scheme = None
+            config.xcode_workspace = None
+            config.provisioning_profile_specifier = None
+            config.development_team = None
+            config.delivery_method = None
+            config.asc_key_id = None
+            config.asc_issuer_id = None
+            config.asc_key_path = None
 
             with (
                 patch.object(deliver_build, "ROOT", root),

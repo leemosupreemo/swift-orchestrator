@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = PACKAGE_ROOT / "orchestrator" / "scripts"
+
+# Add current dir to sys.path so we can import orchestrator and common
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+class E2EWorkflowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Create a temporary project root
+        self.test_dir = tempfile.TemporaryDirectory(prefix="orchestrator-e2e-")
+        self.root = Path(self.test_dir.name)
+        
+        # Mock a git repo
+        subprocess.run(["git", "init"], cwd=str(self.root), capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(self.root))
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(self.root))
+        (self.root / "README.md").write_text("# Test Project")
+        subprocess.run(["git", "add", "README.md"], cwd=str(self.root))
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(self.root))
+        
+        # Initialize orchestrator in this project
+        from orchestrator import cli
+        cli.main(["init", "--root", str(self.root), "--project-name", "TestProject", "--base-branch", "master"])
+        
+        # Set environment variables to use this project
+        self.old_env = os.environ.copy()
+        os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(self.root)
+        
+        # Mock some required files for new_job.py
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs" / "build-test-commands.md").write_text("## iOS app build\n```bash\necho build\n```\n## iOS app tests\n```bash\necho test\n```")
+
+    def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self.old_env)
+        self.test_dir.cleanup()
+
+    @patch("orchestrator.scripts.new_job.run_llm")
+    @patch("orchestrator.scripts.new_job.create_issue")
+    def test_new_job_branch_mode_mapping(self, mock_create_issue, mock_llm):
+        """
+        Tests that branch mode choice in dev_console.py is correctly mapped 
+        when passed to new_job.py.
+        """
+        mock_create_issue.return_value = 123
+        mock_llm.return_value = (json.dumps({
+            "title": "E2E Test Job",
+            "summary": "Summary",
+            "assumptions": [],
+            "constraints": [],
+            "risks": [],
+            "tasks": [{"title": "Task 1", "description": "Desc", "acceptance_criteria": ["AC"], "likely_files": [], "tests": [], "complexity": "low"}]
+        }), "mock-model")
+
+        args = ["feature", "--branch-mode", "manual", "--no-dispatch", "--yolo"]
+        input_data = "E2E Test Job\nAC1\n\nConstraints\n\n"
+        
+        from orchestrator.scripts import new_job, common
+        
+        # Define a mock make_job_paths that uses our test root
+        def mock_make_paths(job_id):
+            jobs_dir = self.root / ".orchestrator" / "jobs"
+            output_dir = self.root / ".orchestrator" / "output" / job_id
+            jobs_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            return common.JobPaths(
+                job_file=jobs_dir / f"{job_id}.json",
+                brief_file=output_dir / "brief.md",
+                output_dir=output_dir
+            )
+
+        with patch("orchestrator.scripts.new_job.ROOT", self.root):
+          with patch("orchestrator.scripts.new_job.make_job_paths", side_effect=mock_make_paths):
+            with patch("sys.stdin", io.StringIO(input_data)):
+                new_job.main(args)
+        
+        # Check the created job file
+        jobs_dir = self.root / ".orchestrator" / "jobs"
+        job_files = list(jobs_dir.glob("*.json"))
+        self.assertEqual(len(job_files), 1)
+        job_data = json.loads(job_files[0].read_text())
+        self.assertEqual(job_data["branch_mode"], "manual")
+        self.assertIsNone(job_data["branch"])
+
+    @patch("orchestrator.scripts.new_job.flush_stdin")
+    @patch("orchestrator.scripts.new_job.run_llm")
+    @patch("orchestrator.scripts.new_job.create_issue")
+    def test_stdin_flushing_is_called(self, mock_create_issue, mock_llm, mock_flush):
+        """
+        Tests that flush_stdin is called before multiline prompts.
+        """
+        mock_create_issue.return_value = 124
+        mock_llm.return_value = (json.dumps({
+            "title": "Flush Test",
+            "summary": "Summary",
+            "assumptions": [],
+            "constraints": [],
+            "risks": [],
+            "tasks": [{"title": "Task 1", "description": "Desc", "acceptance_criteria": ["AC"], "likely_files": [], "tests": [], "complexity": "low"}]
+        }), "mock-model")
+
+        args = ["feature", "--branch-mode", "new", "--no-dispatch", "--yolo"]
+        input_data = "Flush Test Job\nAC1\n\n\n"
+        
+        from orchestrator.scripts import new_job
+        with patch("orchestrator.scripts.new_job.ROOT", self.root):
+            with patch("sys.stdin", io.StringIO(input_data)):
+                new_job.main(args)
+        
+        # Verify flush_stdin was called
+        self.assertTrue(mock_flush.called)
+
+    @patch("orchestrator.scripts.dev_console.prompt_radio")
+    @patch("orchestrator.scripts.dev_console.prompt_confirm")
+    @patch("orchestrator.scripts.dev_console.run_script")
+    def test_dev_console_mapping_logic(self, mock_run_script, mock_confirm, mock_radio):
+        """
+        Tests the mapping logic inside dev_console.handle_new_job.
+        """
+        from orchestrator.scripts import dev_console
+        
+        # Mock UI interactions
+        mock_radio.side_effect = [
+            "feature", # Job type
+            "manual (no git actions)" # Branch choice
+        ]
+        mock_confirm.return_value = False # No Stitch, No Spec, No Advanced, No YOLO
+        
+        dev_console.handle_new_job(session_allowed_models=["gpt-5.5"], session_allowed_machines=["local"])
+        
+        # Verify run_script was called with mapped branch mode
+        args_passed = mock_run_script.call_args[0][1]
+        self.assertIn("--branch-mode", args_passed)
+        idx = args_passed.index("--branch-mode")
+        self.assertEqual(args_passed[idx+1], "manual")
+
+if __name__ == "__main__":
+    unittest.main()

@@ -152,17 +152,17 @@ class ProjectConfig:
     pr_base_branch: str
     delivery_provider: str | None
     distribution_script_path: str | None
-    delivery_method: str | None
-    firebase_plist_path: str | None
-    provisioning_profile_specifier: str | None
-    development_team: str | None
-    asc_key_id: str | None
-    asc_issuer_id: str | None
-    asc_key_path: str | None
-    visual_app_path: str | None
-    remote_package_install_path: str
-    firebase_distribution: bool
-    notification_display_name: str
+    delivery_method: str | None = None
+    firebase_plist_path: str | None = None
+    provisioning_profile_specifier: str | None = None
+    development_team: str | None = None
+    asc_key_id: str | None = None
+    asc_issuer_id: str | None = None
+    asc_key_path: str | None = None
+    visual_app_path: str | None = None
+    remote_package_install_path: str = "~/.orchestrator/package"
+    firebase_distribution: bool = False
+    notification_display_name: str = ""
 
     @property
     def config_dir(self) -> Path:

@@ -21,6 +21,7 @@ from common import (
     OUTPUT_DIR,
     prompt_checkbox,
     prompt_confirm,
+    flush_stdin,
 )
 from llm import run_llm, SUPPORTED_MODELS, DEFAULT_FALLBACKS
 from model_router import ModelRole, get_prioritized_models
@@ -44,15 +45,15 @@ PRESETS = {
     "fast": {"planner": "gemini-3-flash-preview", "builder": "codex", "reviewer": "gemini-3.1-flash-lite-preview"},
 }
 
-BRANCH_MODE_CHOICES = ["new", "current-branch (git pull)", "manual (no git actions)"]
+BRANCH_MODE_CHOICES = ["new", "current", "manual"]
 
 
 def normalize_branch_mode(branch_mode: str | None) -> str:
     if not branch_mode:
         return "new"
-    if branch_mode == "current-branch (git pull)" or branch_mode == "current":
+    if "current" in branch_mode:
         return "current"
-    if branch_mode == "manual (no git actions)" or branch_mode == "manual":
+    if "manual" in branch_mode:
         return "manual"
     return branch_mode
 
@@ -241,7 +242,7 @@ def build_quick_issue_body(plan: dict) -> str:
     return f"## Summary\n{plan['summary']}\n\n## Instructions\n{plan['instructions']}"
 
 
-def main() -> None:
+def main(args_override: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("job_type", choices=["bug", "feature", "design", "coverage", "quick"])
     parser.add_argument("--planner")
@@ -258,7 +259,7 @@ def main() -> None:
     parser.add_argument("--stitch", action="store_true", help="Enable Google Stitch AI design phase")
     parser.add_argument("--feedback", help="User feedback for design or plan revision")
     parser.add_argument("--update", help="Path to an existing job JSON to update/re-plan")
-    args = parser.parse_args()
+    args = parser.parse_args(args_override)
 
     existing_job = None
     if args.update:
@@ -344,7 +345,12 @@ def main() -> None:
 
     branch_mode = args.branch_mode
     if not branch_mode:
-        branch_mode = prompt_radio("Branch selection:", BRANCH_MODE_CHOICES, "new")
+        labels = [
+            "new (creates a new branch automatically)",
+            "current (use existing branch + git pull)",
+            "manual (no git actions; skip checkout/pull)"
+        ]
+        branch_mode = prompt_radio("Branch selection:", labels, labels[0])
     branch_mode = normalize_branch_mode(branch_mode)
 
     selected_branch = args.branch
@@ -373,6 +379,7 @@ def main() -> None:
         print(f"   CREATING QUICK PROMPT JOB")
         print("="*40)
         
+        flush_stdin()
         instructions = prompt_multiline("What would you like to change or improve?")
         if not instructions.strip():
             raise ValueError("No input provided.")
@@ -405,24 +412,47 @@ def main() -> None:
     else:
         if file_spec_content:
             print("\nSpec loaded successfully.")
+            flush_stdin()
             additional = prompt_multiline("Additional Context / Overrides (optional):")
             if additional.strip():
                 raw_input_text = f"{file_spec_content}\n\n### ADDITIONAL CONTEXT / OVERRIDES ###\n{additional}"
             else:
                 raw_input_text = file_spec_content
         else:
-            summary = prompt_multiline("Summary / Area of Focus:")
+            flush_stdin()
             if args.job_type == "bug":
+                summary = prompt_multiline("Summary / Area of Focus:")
                 repro = prompt_multiline("Repro steps (one per line, optional):")
                 expected = prompt_multiline("Expected behavior (optional):")
                 raw_input_text = f"SUMMARY: {summary}\n\nREPRO STEPS:\n{repro}\n\nEXPECTED BEHAVIOR:\n{expected}"
             elif args.job_type == "coverage":
+                summary = prompt_multiline("Summary / Area of Focus:")
                 subsystems = prompt_multiline("Specific Subsystems to Audit (optional):")
                 raw_input_text = f"COVERAGE FOCUS: {summary}\n\nSUBSYSTEMS: {subsystems}"
+            elif args.stitch or args.job_type == "design":
+                vision = prompt_multiline("Design Vision & Requirements (describe the feature, UX goals, and any specific constraints):")
+                
+                vibe_options = [
+                    "minimalist (clean, focused, white space)",
+                    "glassmorphism (frosted glass, depth, vibrant colors)",
+                    "brutalist (bold, raw, high contrast)",
+                    "high-energy (animations, playful, dynamic)",
+                    "gothic-noir (dark, moody, elegant)",
+                    "custom (type your own vibe)"
+                ]
+                vibe_choice = prompt_radio("Select Aesthetic Vibe:", vibe_options, "minimalist (clean, focused, white space)", clear_screen=False)
+                
+                vibe = "minimalist"
+                if "custom" in vibe_choice:
+                    print("\n    (Enter a custom design style, e.g., 'Cyberpunk 2077', 'Soft UI')")
+                    vibe = input("\033[1;94m    Custom Vibe:\033[0m ").strip()
+                else:
+                    vibe = vibe_choice.split(" ")[0]
+                
+                raw_input_text = f"DESIGN VISION: {vision}\nPREFERRED VIBE: {vibe}"
             else:
-                ac = prompt_multiline("Acceptance Criteria (one per line, optional):")
-                constraints = prompt_multiline("Constraints / Technical Requirements (optional):")
-                raw_input_text = f"SUMMARY: {summary}\n\nACCEPTANCE CRITERIA:\n{ac}\n\nCONSTRAINTS:\n{constraints}"
+                vision = prompt_multiline("Feature Vision & Requirements (describe the feature and acceptance criteria):")
+                raw_input_text = f"VISION: {vision}"
 
         if title_input.strip():
             extra_input += f"\n\nTITLE OVERRIDE: {title_input}"
@@ -480,8 +510,8 @@ def main() -> None:
     clarification = plan.get("clarification_needed")
     if clarification:
         print("\n" + "!"*60)
-        print(f"\033[93mPAUSED: Planner needs clarification\033[0m")
-        print(f"\033[96mQuestion:\033[0m {clarification}")
+        print(f"\033[1;93mPAUSED: Planner needs clarification\033[0m")
+        print(f"\033[1;94mQuestion:\033[0m {clarification}")
         print("!"*60 + "\n")
 
     # --- VERIFICATION STEP ---
@@ -668,6 +698,23 @@ def main() -> None:
     
     write_json(paths.job_file, job)
     write_text(paths.brief_file, body)
+
+    # --- DESIGN PREVIEW ---
+    if (args.stitch or args.job_type == "design") and not clarification:
+        print("\n" + "\033[1;94m🎨 \033[0m" * 15)
+        print(f"\033[1;94mDESIGN SPEC READY: {plan.get('title', 'Untitled')}\033[0m")
+        print(f"\033[1;94mSummary:\033[0m {plan.get('summary', 'N/A')}")
+        print(f"\033[1;94mVibe:\033[0m    \033[1;97m{plan.get('vibe', 'N/A')}\033[0m")
+        
+        comps = plan.get('visual_components', [])
+        if comps:
+            print("\033[1;94mKey Components:\033[0m")
+            for comp in comps[:3]:
+                print(f"  - {comp}")
+            if len(comps) > 3:
+                print(f"  \033[90m...and {len(comps)-3} more\033[0m")
+        
+        print("\033[1;94m🎨 \033[0m" * 15 + "\n")
 
     try:
         job_file_display = str(paths.job_file.relative_to(ROOT))

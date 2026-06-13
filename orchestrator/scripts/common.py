@@ -251,6 +251,14 @@ def run_shell(cmd: str, cwd: Path | None = None, check: bool = True, capture: bo
     if check and res.returncode != 0: raise subprocess.CalledProcessError(res.returncode, cmd, res.stdout, res.stderr)
     return res
 
+def flush_stdin():
+    """Clears any pending input from stdin."""
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+
 def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True) -> str:
     """Displays interactive radio buttons navigated by arrow keys."""
     if not sys.stdin.isatty():
@@ -281,17 +289,19 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
 
             output = []
             output.append(f"\n{label}")
-            output.append("\033[96m(Arrows: navigate, Enter: save, B: back)\033[0m")
+            output.append("\033[1;94m(Arrows: navigate, Enter: save, B: back)\033[0m")
             
             for i, opt in enumerate(options):
                 cursor = "> " if i == idx else "  "
                 icon = "(*)" if i == idx else "( )"
                 line = f"{cursor}{icon} {opt}"
+                if i == idx:
+                    line = f"\033[1;94m{line}\033[0m"
                 output.append(line)
             
             # Print current choice placeholder at the bottom
             output.append("-" * 40)
-            output.append(f"Choice: {options[idx]}\033[K")
+            output.append(f"Choice: \033[1;94m{options[idx]}\033[0m\033[K")
             
             final_output = "\n".join(output)
             if not clear_screen:
@@ -307,10 +317,20 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             key = get_key()
 
             if key == "enter":
-                if not clear_screen: sys.stdout.write("\n")
+                if not clear_screen:
+                    # Clear the lines we printed
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write("\n")
                 break
             elif len(key) == 1 and key.lower() == "b": # Back
-                if not clear_screen: sys.stdout.write("\n")
+                if not clear_screen:
+                    # Clear the lines we printed
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write("\n")
                 raise BackException()
             elif key == "up" or key == "k":
                 idx = (idx - 1) % len(options)
@@ -332,16 +352,17 @@ def prompt_confirm(question: str, default: bool = True) -> bool:
     if question.startswith("Would you Would you"):
         question = "Would you" + question[len("Would you Would you"):]
     
-    # Add Cyan formatting to match other dev console prompts
-    formatted_question = f"\033[96m{question}\033[0m"
+    # Add Blue formatting to match other dev console prompts
+    formatted_question = f"\033[1;94m{question}\033[0m"
     
     default_str = "yes" if default else "no"
     choice = prompt_radio(formatted_question, ["yes", "no"], default_str, clear_screen=False)
     return choice == "yes"
 
 def prompt_multiline(prompt: str) -> str:
-    print(f"\n{prompt}")
-    print("\033[90m(Press Ctrl-D on a new line when finished)\033[0m")
+    flush_stdin()
+    print(f"\n\033[1;94m{prompt}\033[0m", flush=True)
+    print("\033[90m(Type your input. To finish, press Enter then \033[1;97mCtrl-D\033[0m\033[90m on a new line)\033[0m", flush=True)
     try:
         content = sys.stdin.read()
         return content.strip()
@@ -421,7 +442,7 @@ def format_job_id(job_id: str) -> str:
     return f"\033[1;97m{job_id}\033[0m"
 
 def format_index(i: int) -> str:
-    return f"[\033[96m{i}\033[0m]"
+    return f"[\033[1;94m{i}\033[0m]"
 
 def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None = None, extra_keys: list[str] | None = None, footer: str | None = None, details_map: dict[str, list[str]] | None = None, status_bar: StatusBar | None = None, clear_screen: bool = True, max_selections: int | None = None) -> list[str]:
     """Displays interactive checkboxes navigated by arrow keys, toggled by space (vertical)."""
@@ -457,7 +478,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             # 1. Print Header
             output.append(f"\n{label}")
             sub_label = "(Arrows: navigate, Space: toggle, Enter: save, B: back)"
-            output.append(f"\033[96m{sub_label}\033[0m")
+            output.append(f"\033[1;94m{sub_label}\033[0m")
             
             if error_msg:
                 output.append(f"\033[91m      ⚠️  {error_msg}\033[0m")
@@ -469,9 +490,11 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     output.append(f"  \033[1;90m{opt}\033[0m")
                     continue
                 cursor = "> " if i == idx else "  "
-                checked = "[\033[92mx\033[0m]" if i in selected_indices else "[ ]"
+                checked = "[\033[1;94mx\033[0m]" if i in selected_indices else "[ ]"
                 line = f"{cursor}{checked} {opt}"
-                if i == idx:
+                if i in selected_indices:
+                    line = f"\033[1;94m{line}\033[0m"
+                elif i == idx:
                     line = f"\033[1;94m{line}\033[0m"
                 output.append(line)
             
@@ -522,13 +545,28 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             key = get_key()
 
             if key == "enter":
-                if not clear_screen: sys.stdout.write("\n")
+                if not clear_screen:
+                    # Clear the lines we printed
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write("\n")
                 break
             elif len(key) == 1 and key.lower() == "b": # Back
-                if not clear_screen: sys.stdout.write("\n")
+                if not clear_screen:
+                    # Clear the lines we printed
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write("\n")
                 raise BackException()
             elif key.lower() in extra_keys:
-                if not clear_screen: sys.stdout.write("\n")
+                if not clear_screen:
+                    # Clear the lines we printed
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.flush()
+                else:
+                    sys.stdout.write("\n")
                 raise KeyInterruptException(key.lower(), index=idx, value=options[idx])
             elif key == "space": # Space
                 if idx in selected_indices:
@@ -725,7 +763,7 @@ class ProgressIndicator:
 
         spinner = self.frames[self.frame_idx]
         self.frame_idx = (self.frame_idx + 1) % len(self.frames)
-        return f"\033[96m{spinner}\033[0m {self.label}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
+        return f"\033[1;94m{spinner}\033[0m {self.label}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
 
     def render(self, force: bool = False, last_activity_time: float | None = None):
         if self.is_silent: return
@@ -864,7 +902,7 @@ class StatusBar:
         else:
             content = content + (" " * (cols - len(content)))
 
-        bar = f"\033[1;48;5;94;97m{content}\033[0m"
+        bar = f"\033[1;48;5;18;97m{content}\033[0m"
         divider = "\033[90m" + ("-" * cols) + "\033[0m"
         
         if at_bottom:
@@ -903,7 +941,7 @@ def cleanup_terminal():
 def get_choice_prompt(label: str, hint: str) -> str:
     """Returns a styled prompt with a dark grey background and positional offset."""
     placeholder = f" {hint} "
-    return f"{label} \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
+    return f"\033[1;94m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
 
 def print_choice_prompt(label: str, hint: str) -> None:
     """Prints a choice prompt at the current cursor position."""
