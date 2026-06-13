@@ -20,8 +20,18 @@ import common  # noqa: E402
 class CommonTests(unittest.TestCase):
     @patch("common.get_best_simulator_destination", return_value="platform=iOS Simulator,id=TEST_SIM")
     def test_extract_commands_reads_ios_app_tests_section(self, _mock_destination) -> None:
+        project_config = SimpleNamespace(
+            build_command=None,
+            test_command=None,
+            xcode_project="App.xcodeproj",
+            xcode_workspace=None,
+            scheme="App",
+            derived_data_path="/tmp/dd",
+            root=common.ROOT,
+            runtime_dir=common.AI_RUNTIME_DIR,
+        )
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(common, "DOCS_DIR", Path(tmp)):
+            with patch.object(common, "DOCS_DIR", Path(tmp)), patch.object(common, "PROJECT_CONFIG", project_config):
                 build_command, test_command = common.extract_commands()
 
         self.assertIn("xcodebuild build", build_command)
@@ -31,6 +41,16 @@ class CommonTests(unittest.TestCase):
 
     @patch("common.get_best_simulator_destination", return_value="platform=iOS Simulator,id=TEST_SIM")
     def test_extract_commands_no_duplicate_destination(self, _mock_destination) -> None:
+        project_config = SimpleNamespace(
+            build_command=None,
+            test_command=None,
+            xcode_project="App.xcodeproj",
+            xcode_workspace=None,
+            scheme="App",
+            derived_data_path="/tmp/dd",
+            root=common.ROOT,
+            runtime_dir=common.AI_RUNTIME_DIR,
+        )
         with tempfile.TemporaryDirectory() as tmp:
             docs_dir = Path(tmp)
             (docs_dir / "build-test-commands.md").write_text(
@@ -46,7 +66,7 @@ xcodebuild test -destination 'platform=iOS Simulator,id=EXISTING'
 """,
                 encoding="utf-8",
             )
-            with patch.object(common, "DOCS_DIR", docs_dir):
+            with patch.object(common, "DOCS_DIR", docs_dir), patch.object(common, "PROJECT_CONFIG", project_config):
                 build_command, test_command = common.extract_commands()
         
         # Count occurrences of -destination
@@ -55,6 +75,16 @@ xcodebuild test -destination 'platform=iOS Simulator,id=EXISTING'
 
     @patch("common.get_best_simulator_destination", return_value="platform=iOS Simulator,id=TEST_SIM")
     def test_extract_commands_resolves_pwd_before_shell_quoting(self, _mock_destination) -> None:
+        project_config = SimpleNamespace(
+            build_command=None,
+            test_command=None,
+            xcode_project="App.xcodeproj",
+            xcode_workspace=None,
+            scheme="App",
+            derived_data_path="/tmp/dd",
+            root=common.ROOT,
+            runtime_dir=common.AI_RUNTIME_DIR,
+        )
         with tempfile.TemporaryDirectory() as tmp:
             docs_dir = Path(tmp)
             (docs_dir / "build-test-commands.md").write_text(
@@ -70,7 +100,7 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
 """,
                 encoding="utf-8",
             )
-            with patch.object(common, "DOCS_DIR", docs_dir):
+            with patch.object(common, "DOCS_DIR", docs_dir), patch.object(common, "PROJECT_CONFIG", project_config):
                 build_command, test_command = common.extract_commands()
 
         expected_cache_path = f"CLANG_MODULE_CACHE_PATH={common.ROOT}/.clang-module-cache"
@@ -79,6 +109,7 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertNotIn("$(pwd)", test_command)
         self.assertIn(expected_cache_path, build_command)
         self.assertIn(expected_cache_path, test_command)
+
 
     def test_extract_commands_does_not_add_xcode_flags_to_custom_commands(self) -> None:
         project_config = SimpleNamespace(

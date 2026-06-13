@@ -25,6 +25,9 @@ class E2EWorkflowTests(unittest.TestCase):
         # Create a temporary project root
         self.test_dir = tempfile.TemporaryDirectory(prefix="orchestrator-e2e-")
         self.root = Path(self.test_dir.name)
+        self.state_dir = tempfile.TemporaryDirectory(prefix="orchestrator-user-state-")
+        self.old_env = os.environ.copy()
+        os.environ["ORCHESTRATOR_USER_STATE_DIR"] = self.state_dir.name
         
         # Mock a git repo
         subprocess.run(["git", "init"], cwd=str(self.root), capture_output=True)
@@ -38,8 +41,6 @@ class E2EWorkflowTests(unittest.TestCase):
         from orchestrator import cli
         cli.main(["init", "--root", str(self.root), "--project-name", "TestProject", "--base-branch", "master"])
         
-        # Set environment variables to use this project
-        self.old_env = os.environ.copy()
         os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(self.root)
         
         # Mock some required files for new_job.py
@@ -49,7 +50,21 @@ class E2EWorkflowTests(unittest.TestCase):
     def tearDown(self) -> None:
         os.environ.clear()
         os.environ.update(self.old_env)
+        self.state_dir.cleanup()
         self.test_dir.cleanup()
+
+    def make_job_paths(self, job_id):
+        from orchestrator.scripts import common
+
+        jobs_dir = self.root / ".orchestrator" / "jobs"
+        output_dir = self.root / ".orchestrator" / "output" / job_id
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return common.JobPaths(
+            job_file=jobs_dir / f"{job_id}.json",
+            brief_file=output_dir / "brief.md",
+            output_dir=output_dir
+        )
 
     @patch("orchestrator.scripts.new_job.run_llm")
     @patch("orchestrator.scripts.new_job.create_issue")
@@ -71,22 +86,10 @@ class E2EWorkflowTests(unittest.TestCase):
         args = ["feature", "--branch-mode", "manual", "--no-dispatch", "--yolo"]
         input_data = "E2E Test Job\nAC1\n\nConstraints\n\n"
         
-        from orchestrator.scripts import new_job, common
-        
-        # Define a mock make_job_paths that uses our test root
-        def mock_make_paths(job_id):
-            jobs_dir = self.root / ".orchestrator" / "jobs"
-            output_dir = self.root / ".orchestrator" / "output" / job_id
-            jobs_dir.mkdir(parents=True, exist_ok=True)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            return common.JobPaths(
-                job_file=jobs_dir / f"{job_id}.json",
-                brief_file=output_dir / "brief.md",
-                output_dir=output_dir
-            )
+        from orchestrator.scripts import new_job
 
         with patch("orchestrator.scripts.new_job.ROOT", self.root):
-          with patch("orchestrator.scripts.new_job.make_job_paths", side_effect=mock_make_paths):
+          with patch("orchestrator.scripts.new_job.make_job_paths", side_effect=self.make_job_paths):
             with patch("sys.stdin", io.StringIO(input_data)):
                 new_job.main(args)
         
@@ -97,6 +100,7 @@ class E2EWorkflowTests(unittest.TestCase):
         job_data = json.loads(job_files[0].read_text())
         self.assertEqual(job_data["branch_mode"], "manual")
         self.assertIsNone(job_data["branch"])
+        mock_create_issue.assert_called_once()
 
     @patch("orchestrator.scripts.new_job.flush_stdin")
     @patch("orchestrator.scripts.new_job.run_llm")
@@ -120,11 +124,52 @@ class E2EWorkflowTests(unittest.TestCase):
         
         from orchestrator.scripts import new_job
         with patch("orchestrator.scripts.new_job.ROOT", self.root):
-            with patch("sys.stdin", io.StringIO(input_data)):
-                new_job.main(args)
+            with patch("orchestrator.scripts.new_job.make_job_paths", side_effect=self.make_job_paths):
+                with patch("sys.stdin", io.StringIO(input_data)):
+                    new_job.main(args)
         
         # Verify flush_stdin was called
         self.assertTrue(mock_flush.called)
+        mock_create_issue.assert_called_once()
+
+    @patch("orchestrator.scripts.new_job.run_llm")
+    @patch("orchestrator.scripts.new_job.create_issue")
+    def test_malformed_verifier_output_is_ignored(self, mock_create_issue, mock_llm):
+        mock_create_issue.return_value = 125
+        mock_llm.side_effect = [
+            (json.dumps({
+                "title": "Verifier Fallback",
+                "summary": "Summary",
+                "assumptions": [],
+                "constraints": [],
+                "risks": [],
+                "tasks": [{"title": "Task 1", "description": "Desc", "acceptance_criteria": ["AC"], "likely_files": [], "tests": [], "complexity": "low"}]
+            }), "gemini-3.1-pro-preview"),
+            (json.dumps({"comments": "Missing status"}), "gemini-3.1-pro-preview"),
+        ]
+
+        args = [
+            "feature",
+            "--branch-mode", "manual",
+            "--no-dispatch",
+            "--allowed-models", "gemini,codex",
+            "--allowed-machines", "local",
+        ]
+        input_data = "Verifier fallback\n\n"
+
+        from orchestrator.scripts import new_job
+        with patch("orchestrator.scripts.new_job.ROOT", self.root):
+            with patch("orchestrator.scripts.new_job.make_job_paths", side_effect=self.make_job_paths):
+                with patch("sys.stdin", io.StringIO(input_data)):
+                    new_job.main(args)
+
+        jobs_dir = self.root / ".orchestrator" / "jobs"
+        job_files = list(jobs_dir.glob("*.json"))
+        self.assertEqual(len(job_files), 1)
+        job_data = json.loads(job_files[0].read_text())
+        self.assertIsNone(job_data["verification"])
+        self.assertEqual(job_data["status"], "planned")
+        mock_create_issue.assert_called_once()
 
     @patch("orchestrator.scripts.dev_console.prompt_radio")
     @patch("orchestrator.scripts.dev_console.prompt_confirm")

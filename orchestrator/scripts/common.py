@@ -165,6 +165,26 @@ def gh_json(*args: str) -> Any:
 def gh_text(*args: str) -> str:
     return run(["gh", *args], cwd=ROOT).stdout.strip()
 
+def gh_comment(issue_number: int, body: str) -> None:
+    if not shutil.which("gh"): return
+    run(["gh", "issue", "comment", str(issue_number), "--body", body], cwd=ROOT, check=False)
+
+def update_issue_status(issue_number: int, labels_to_add: str | list[str], labels_to_remove: str | list[str] | None = None) -> None:
+    if not shutil.which("gh"): return
+    
+    cmd = ["gh", "issue", "edit", str(issue_number)]
+    
+    if isinstance(labels_to_add, str): labels_to_add = [labels_to_add]
+    for l in labels_to_add:
+        cmd.extend(["--add-label", l])
+        
+    if labels_to_remove:
+        if isinstance(labels_to_remove, str): labels_to_remove = [labels_to_remove]
+        for l in labels_to_remove:
+            cmd.extend(["--remove-label", l])
+            
+    run(cmd, cwd=ROOT, check=False)
+
 @dataclass
 class JobPaths:
     job_file: Path

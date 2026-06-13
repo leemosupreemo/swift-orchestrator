@@ -23,7 +23,24 @@ except:
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
-from common import OUTPUT_DIR, ROOT, LOGS_DIR, now_iso, read_json, run, run_shell, slugify, write_json, print_phase, get_repo_state, format_job_id, StatusBar, is_firebase_configured
+from common import (
+    LOGS_DIR,
+    OUTPUT_DIR,
+    ROOT,
+    StatusBar,
+    format_job_id,
+    get_repo_state,
+    gh_comment,
+    is_firebase_configured,
+    now_iso,
+    print_phase,
+    read_json,
+    run,
+    run_shell,
+    slugify,
+    update_issue_status,
+    write_json,
+)
 from open_or_update_pr import open_or_update_pr
 from run_builder import BuilderClarificationNeeded, run_builder
 from orchestrator.project_config import PROJECT_CONFIG
@@ -95,16 +112,6 @@ def prepare_git_branch(job: dict, issue_number: int) -> Tuple[str, str]:
         run(["git", "checkout", "-f", "-b", branch], cwd=ROOT)
 
     return branch, base_branch
-
-
-def update_issue_status(issue_number: int, label_to_add: str, labels_to_remove: Optional[List[str]] = None) -> None:
-    if not shutil.which("gh"):
-        print("      - Skipping GitHub issue label update; gh is not installed on this machine.")
-        return
-    labels_to_remove = labels_to_remove or []
-    for label in labels_to_remove:
-        run_shell(f'gh issue edit {issue_number} --remove-label "{label}"', cwd=ROOT, check=False)
-    run_shell(f'gh issue edit {issue_number} --add-label "{label_to_add}"', cwd=ROOT, check=False)
 
 
 def mark_human_needed(job_path: Path, job: dict, question: str) -> None:
@@ -262,6 +269,11 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
             "status:executing",
             ["status:planned", "status:fix-requested", "status:debugging"]
         )
+        
+        # Add comment about worker start
+        machine_name = os.environ.get("MACHINE_NAME", "local")
+        start_msg = f"🚀 **Worker Started** on `{machine_name}`\n\n- **Job ID**: `{job['job_id']}`\n- **Branch**: `{branch}`"
+        gh_comment(issue_number, start_msg)
 
         # Capture state before builder
         pre_state = get_repo_state()
@@ -510,6 +522,10 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
                 "status:review-needed",
                 ["status:executing"]
             )
+            
+            # Post success comment
+            success_msg = f"✅ **Implementation Complete**\n\n- **PR**: #{pr_number}\n- **Status**: Ready for review/merge."
+            gh_comment(issue_number, success_msg)
 
         print_phase("review")
         status_bar.render()
@@ -572,6 +588,10 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
         print_clarification_report(job)
         update_issue_status(issue_number, "status:human-needed", ["status:executing"])
         
+        # Post pause comment
+        pause_msg = f"⏸️ **Execution Paused**\n\nThe Builder requires human clarification to proceed:\n> {e.question}"
+        gh_comment(issue_number, pause_msg)
+        
         job_summary = job.get("plan", {}).get("summary")
         send_notifications(
             job,
@@ -596,6 +616,10 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
         # Update GitHub too
         try:
             update_issue_status(issue_number, "status:human-needed", ["status:executing"])
+            
+            # Post error comment
+            err_msg = f"❌ **Execution Failed**\n\nA critical error occurred during implementation:\n```\n{e}\n```"
+            gh_comment(issue_number, err_msg)
         except:
             pass
 

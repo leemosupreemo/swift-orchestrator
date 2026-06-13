@@ -109,20 +109,34 @@ def read_machine_state(machine_name: str) -> dict[str, Any]:
 
 def probe_hardware_specs() -> dict[str, Any]:
     """Gathers detailed hardware specifications."""
-    def get_sysctl(name: str) -> str:
+    def get_sysctl(name: str, default: str = "0") -> str:
         try:
-            return subprocess.check_output(["sysctl", "-n", name], text=True).strip()
+            result = subprocess.run(
+                ["sysctl", "-n", name],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
         except:
-            return "0"
+            pass
+        return default
 
-    cpu_model = get_sysctl("machdep.cpu.brand_string")
+    def get_sysctl_int(name: str, default: int) -> int:
+        try:
+            return int(get_sysctl(name, str(default)))
+        except ValueError:
+            return default
+
+    cpu_model = get_sysctl("machdep.cpu.brand_string", "unknown")
     if "Apple" in cpu_model:
         # Simplification for Apple Silicon
         cpu_model = cpu_model.split("Apple ")[-1]
     
-    logical_cores = int(get_sysctl("hw.ncpu"))
-    physical_cores = int(get_sysctl("hw.physicalcpu") or logical_cores)
-    total_mem_bytes = int(get_sysctl("hw.memsize"))
+    logical_cores = get_sysctl_int("hw.ncpu", 4)
+    physical_cores = get_sysctl_int("hw.physicalcpu", logical_cores)
+    total_mem_bytes = get_sysctl_int("hw.memsize", 0)
     total_mem_gb = round(total_mem_bytes / (1024**3))
 
     return {

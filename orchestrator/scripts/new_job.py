@@ -46,6 +46,7 @@ PRESETS = {
 }
 
 BRANCH_MODE_CHOICES = ["new", "current", "manual"]
+VERIFICATION_STATUSES = {"approved", "rejected", "concerns"}
 
 
 def normalize_branch_mode(branch_mode: str | None) -> str:
@@ -75,9 +76,69 @@ def create_issue(title: str, body: str, labels: list[str]) -> int:
     return issue_number
 
 
-def build_bug_issue_body(plan: dict, verification: dict | None = None) -> str:
+def normalize_verification(payload: dict, verifier_model: str) -> dict | None:
+    status = str(payload.get("status", "")).lower()
+    comments = payload.get("comments")
+    if status not in VERIFICATION_STATUSES or not isinstance(comments, str):
+        return None
+    return {
+        "status": status,
+        "comments": comments,
+        "suggested_additions": payload.get("suggested_additions") or [],
+        "risks_identified": payload.get("risks_identified") or [],
+        "verifier_model": verifier_model,
+    }
+
+
+def issue_payload_for_job(
+    requested_job_type: str,
+    plan: dict,
+    verification: dict | None,
+    clarification: str | None,
+    stitch: bool,
+    yolo: bool = False,
+) -> tuple[str, str, list[str], str, str]:
+    if requested_job_type == "bug":
+        title = plan["title"]
+        body = build_bug_issue_body(plan, verification, yolo)
+        labels = ["job:bug", "source:manual", "status:planned"]
+        if clarification:
+            labels = ["job:bug", "source:manual", "status:human-needed"]
+        return title, body, labels, "bug", plan["recommended_job_type"]
+
+    if requested_job_type == "coverage":
+        title = plan["title"]
+        body = build_coverage_issue_body(plan, verification, yolo)
+        labels = ["job:coverage", "status:planned"]
+        if clarification:
+            labels = ["job:coverage", "status:human-needed"]
+        return title, body, labels, "coverage", "test-audit"
+
+    if requested_job_type == "design" or stitch:
+        title = plan["title"]
+        body = build_design_issue_body(plan, verification, yolo)
+        labels = ["job:design", "status:designing"]
+        if clarification:
+            labels = ["job:design", "status:human-needed"]
+        return title, body, labels, "design", "feature-design"
+
+    title = plan["title"]
+    body = build_feature_issue_body(plan, verification, yolo)
+    labels = ["job:feature", "status:planned"]
+    if clarification:
+        labels = ["job:feature", "status:human-needed"]
+    return title, body, labels, "feature", "feature-plan"
+
+
+def build_bug_issue_body(plan: dict, verification: dict | None = None, yolo: bool = False) -> str:
+    yolo_status = "✅ ON (Automated)" if yolo else "❌ OFF (Manual Step Mode)"
     lines = [
         f"## Summary\n{plan['summary']}",
+        "",
+        "## Metadata",
+        f"- **YOLO Mode**: {yolo_status}",
+        f"- **Complexity**: {plan.get('complexity', 'unknown')}",
+        f"- **Recommended Job Type**: {plan.get('recommended_job_type', 'bug-fix')}",
         "",
         "## Repro steps",
         *[f"- {x}" for x in plan["repro_steps"]],
@@ -89,10 +150,6 @@ def build_bug_issue_body(plan: dict, verification: dict | None = None) -> str:
         "",
         "## Constraints",
         *[f"- {x}" for x in plan["constraints"]],
-        "",
-        f"## Complexity\n{plan['complexity']}",
-        "",
-        f"## Recommended job type\n{plan['recommended_job_type']}",
         "",
         "## Likely files",
         *[f"- {x}" for x in plan["likely_files"]],
@@ -117,9 +174,13 @@ def build_bug_issue_body(plan: dict, verification: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-def build_feature_issue_body(plan: dict, verification: dict | None = None) -> str:
+def build_feature_issue_body(plan: dict, verification: dict | None = None, yolo: bool = False) -> str:
+    yolo_status = "✅ ON (Automated)" if yolo else "❌ OFF (Manual Step Mode)"
     lines = [
         f"## Summary\n{plan['summary']}",
+        "",
+        "## Metadata",
+        f"- **YOLO Mode**: {yolo_status}",
         "",
         "## Assumptions",
         *[f"- {x}" for x in plan["assumptions"]],
@@ -166,9 +227,14 @@ def build_feature_issue_body(plan: dict, verification: dict | None = None) -> st
     return "\n".join(lines)
 
 
-def build_coverage_issue_body(plan: dict, verification: dict | None = None) -> str:
+def build_coverage_issue_body(plan: dict, verification: dict | None = None, yolo: bool = False) -> str:
+    yolo_status = "✅ ON (Automated)" if yolo else "❌ OFF (Manual Step Mode)"
     lines = [
         f"## Summary\n{plan.get('summary', '')}",
+        "",
+        "## Metadata",
+        f"- **YOLO Mode**: {yolo_status}",
+        f"- **Complexity**: {plan.get('complexity', 'simple')}",
         "",
         "## Audit Goals",
         *[f"- {x}" for x in plan.get("audit_goals", [])],
@@ -181,8 +247,6 @@ def build_coverage_issue_body(plan: dict, verification: dict | None = None) -> s
         "",
         "## Acceptance Criteria",
         *[f"- {x}" for x in plan.get("acceptance_criteria", [])],
-        "",
-        f"## Complexity\n{plan.get('complexity', 'simple')}",
         "",
         "## Likely Files",
         *[f"- {x}" for x in plan.get('likely_files', [])],
@@ -204,9 +268,14 @@ def build_coverage_issue_body(plan: dict, verification: dict | None = None) -> s
     return "\n".join(lines)
 
 
-def build_design_issue_body(plan: dict, verification: dict | None = None) -> str:
+def build_design_issue_body(plan: dict, verification: dict | None = None, yolo: bool = False) -> str:
+    yolo_status = "✅ ON (Automated)" if yolo else "❌ OFF (Manual Step Mode)"
     lines = [
         f"## Summary\n{plan.get('summary', '')}",
+        "",
+        "## Metadata",
+        f"- **YOLO Mode**: {yolo_status}",
+        f"- **Aesthetic Vibe**: {plan.get('vibe', 'modern')}",
         "",
         "## Design System",
         *[f"- {x}" for x in plan.get("design_system", [])],
@@ -219,8 +288,6 @@ def build_design_issue_body(plan: dict, verification: dict | None = None) -> str
         "",
         "## Acceptance Criteria (UI/UX)",
         *[f"- {x}" for x in plan.get("acceptance_criteria", [])],
-        "",
-        f"## Aesthetic Vibe\n{plan.get('vibe', 'modern')}",
         "",
         "## Implementation Notes",
         *[f"- {x}" for x in plan.get('implementation_notes', [])],
@@ -238,8 +305,9 @@ def build_design_issue_body(plan: dict, verification: dict | None = None) -> str
     return "\n".join(lines)
 
 
-def build_quick_issue_body(plan: dict) -> str:
-    return f"## Summary\n{plan['summary']}\n\n## Instructions\n{plan['instructions']}"
+def build_quick_issue_body(plan: dict, yolo: bool = False) -> str:
+    yolo_status = "✅ ON (Automated)" if yolo else "❌ OFF (Manual Step Mode)"
+    return f"## Summary\n{plan['summary']}\n\n## Metadata\n- **YOLO Mode**: {yolo_status}\n\n## Instructions\n{plan['instructions']}"
 
 
 def main(args_override: list[str] | None = None) -> None:
@@ -396,7 +464,7 @@ def main(args_override: list[str] | None = None) -> None:
         }
         
         title = plan["title"]
-        body = build_quick_issue_body(plan)
+        body = build_quick_issue_body(plan, yolo=args.yolo)
         labels = ["job:quick", "status:planned"]
         
         print(f"[1/2] Creating GitHub issue: {title}...", flush=True)
@@ -531,8 +599,9 @@ def main(args_override: list[str] | None = None) -> None:
             
             try:
                 v_output, actual_verifier = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
-                verification = json.loads(v_output)
-                verification["verifier_model"] = actual_verifier
+                verification = normalize_verification(json.loads(v_output), actual_verifier)
+                if not verification:
+                    raise ValueError("Verifier output missing required status/comments fields")
                 print(f"      - Verification complete: {verification['status'].upper()}")
                 
                 if verification["status"] in ["rejected", "concerns"]:
@@ -567,47 +636,17 @@ def main(args_override: list[str] | None = None) -> None:
                         clarification = clarification or f"Architect {status_str}: {verification['comments']}"
             except Exception as e:
                 print(f"⚠️  Verification failed: {e}. Proceeding with unverified plan.")
+                verification = None
 
-    print(f"[2/3] Creating GitHub issue: {plan['title']}...", flush=True)
-    if args.job_type == "bug":
-        title = plan["title"]
-        body = build_bug_issue_body(plan, verification)
-        labels = ["job:bug", "source:manual", "status:planned"]
-        if clarification:
-            labels = ["job:bug", "source:manual", "status:human-needed"]
-        issue_number = create_issue(title, body, labels)
-        job_id = f"{timestamp()}-bug-{issue_number}"
-        job_type = plan["recommended_job_type"]
-    elif args.job_type == "coverage":
-        title = plan["title"]
-        body = build_coverage_issue_body(plan, verification)
-        labels = ["job:coverage", "status:planned"]
-        if clarification:
-            labels = ["job:coverage", "status:human-needed"]
-        issue_number = create_issue(title, body, labels)
-        job_id = f"{timestamp()}-coverage-{issue_number}"
-        job_type = "test-audit"
-    elif args.job_type == "design" or args.stitch:
-        title = plan["title"]
-        body = build_design_issue_body(plan, verification)
-        labels = ["job:design", "status:designing"]
-        if clarification:
-            labels = ["job:design", "status:human-needed"]
-        issue_number = create_issue(title, body, labels)
-        job_id = f"{timestamp()}-design-{issue_number}"
-        job_type = "feature-design"
-    else:
-        title = plan["title"]
-        body = build_feature_issue_body(plan, verification)
-        labels = ["job:feature", "status:planned"]
-        if clarification:
-            labels = ["job:feature", "status:human-needed"]
-        issue_number = create_issue(title, body, labels)
-        job_id = f"{timestamp()}-feature-{issue_number}"
-        job_type = "feature-plan"
-    
     last_manual_logs = [] # Initialized but handled inside bug block above if needed
-
+    title, body, labels, job_id_kind, job_type = issue_payload_for_job(
+        args.job_type,
+        plan,
+        verification,
+        clarification,
+        args.stitch,
+        yolo=args.yolo,
+    )
 
     if existing_job:
         job_id = existing_job["job_id"]
@@ -618,44 +657,9 @@ def main(args_override: list[str] | None = None) -> None:
         print(f"[2/3] Updating GitHub issue: #{issue_number}...", flush=True)
         gh_text("issue", "edit", str(issue_number), "--body", body)
     else:
-        print(f"[2/3] Creating GitHub issue: {plan['title']}...", flush=True)
-        if args.job_type == "bug":
-            title = plan["title"]
-            body = build_bug_issue_body(plan, verification)
-            labels = ["job:bug", "source:manual", "status:planned"]
-            if clarification:
-                labels = ["job:bug", "source:manual", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-bug-{issue_number}"
-            job_type = plan["recommended_job_type"]
-        elif args.job_type == "coverage":
-            title = plan["title"]
-            body = build_coverage_issue_body(plan, verification)
-            labels = ["job:coverage", "status:planned"]
-            if clarification:
-                labels = ["job:coverage", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-coverage-{issue_number}"
-            job_type = "test-audit"
-        elif args.job_type == "design" or args.stitch:
-            title = plan["title"]
-            body = build_design_issue_body(plan, verification)
-            labels = ["job:design", "status:designing"]
-            if clarification:
-                labels = ["job:design", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-design-{issue_number}"
-            job_type = "feature-design"
-        else:
-            title = plan["title"]
-            body = build_feature_issue_body(plan, verification)
-            labels = ["job:feature", "status:planned"]
-            if clarification:
-                labels = ["job:feature", "status:human-needed"]
-            issue_number = create_issue(title, body, labels)
-            job_id = f"{timestamp()}-feature-{issue_number}"
-            job_type = "feature-plan"
-        
+        print(f"[2/3] Creating GitHub issue: {title}...", flush=True)
+        issue_number = create_issue(title, body, labels)
+        job_id = f"{timestamp()}-{job_id_kind}-{issue_number}"
         paths = make_job_paths(job_id)
 
     status = "planned"

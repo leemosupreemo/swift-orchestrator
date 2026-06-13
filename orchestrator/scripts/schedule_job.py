@@ -538,8 +538,9 @@ def main() -> None:
     if not args.dry_run:
         write_json(job_path, job)
 
+    action = "Would schedule" if args.dry_run else "Scheduled"
     print(
-        f"Scheduled {job['job_id']} group {group['group_id']} "
+        f"{action} {job['job_id']} group {group['group_id']} "
         f"to {assignment['machine']} using {assignment['model']}"
     )
 

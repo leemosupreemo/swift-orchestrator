@@ -1312,6 +1312,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 error = job.get("last_error")
                 if question:
                     print(f" \033[93mQuestion:\033[0m {question}")
+                    print("[\033[1;94mA\033[0m] Answer Question & Re-plan")
+                    if "a" not in actions: actions.append("a")
                 elif error:
                     print(f" \033[91mError:\033[0m {error}")
                 else:
@@ -1754,6 +1756,56 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 handle_merge_cleanup(job)
                 break
             elif choice == "a" and "a" in actions:
+                # 1. Answer Clarification Question
+                question = job.get("human_clarification_question")
+                if status == "human-needed" and question:
+                    print_header("Answer Clarification Question")
+                    print(f"\n \033[93mQuestion:\033[0m {question}\n")
+                    answer = input("\033[1;94mYour Answer:\033[0m ").strip()
+                    if answer:
+                        # Clear old question to avoid re-triggering if planning fails
+                        job["human_clarification_question"] = None
+                        save_job(job)
+                        
+                        # Trigger re-plan with the answer as feedback
+                        feedback = f"### USER CLARIFICATION ###\n{answer}"
+                        
+                        # Determine which job type to use for re-planning
+                        job_type_map = {
+                            "bug-fix": "bug",
+                            "bug-investigate": "bug",
+                            "feature-plan": "feature",
+                            "test-audit": "coverage",
+                            "feature-design": "design"
+                        }
+                        requested_type = job_type_map.get(job.get("type"), "feature")
+                        
+                        run_script("new_job.py", [requested_type, "--no-dispatch", "--update", str(job["_path"]), "--feedback", feedback], sub_menu=True)
+                        job = refresh_job(job)
+                    continue
+
+                # 2. Accept Architect Suggestions
+                verification = job.get("verification")
+                if status == "human-needed" and verification and verification.get("status") in ["rejected", "concerns"]:
+                    print_header("Integrating Architect Suggestions")
+                    feedback = f"Please re-plan and incorporate the Senior Architect's suggestions:\n"
+                    feedback += f"Comments: {verification.get('comments')}\n"
+                    if verification.get("suggested_additions"):
+                        feedback += "Suggested Additions:\n- " + "\n- ".join(verification["suggested_additions"])
+                    
+                    job_type_map = {
+                        "bug-fix": "bug",
+                        "bug-investigate": "bug",
+                        "feature-plan": "feature",
+                        "test-audit": "coverage",
+                        "feature-design": "design"
+                    }
+                    requested_type = job_type_map.get(job.get("type"), "feature")
+                    
+                    run_script("new_job.py", [requested_type, "--no-dispatch", "--update", str(job["_path"]), "--feedback", feedback], sub_menu=True)
+                    job = refresh_job(job)
+                    continue
+
                 if status == "designing":
                     print("\n🎨 \033[1;92mDESIGN APPROVED!\033[0m")
                     print("Transitioning to Implementation Planning phase...")
@@ -2299,25 +2351,25 @@ def handle_fleet_hygiene(session_allowed_machines):
     else:
         print("\nNo processes were harmed.")
         input("\n\033[1;94mTap Enter to return to menu...\033[0m")
-def handle_cli_instructions():
+def handle_role_prompts():
     print_header("Manage CLI Instructions (Role Prompts)")
     print("The Orchestrator uses AI Agents (Planner, Builder, Reviewer, etc.).")
     print("You can override their default instructions by placing specific .md files")
     print(f"in your project's \033[97m{PROJECT_CONFIG.runtime_dir.name}/prompts/\033[0m directory.\n")
-    
+
     prompts_dir = PROJECT_CONFIG.runtime_dir / "prompts"
     if prompts_dir.exists() and any(prompts_dir.iterdir()):
         print(f"✅ Custom prompts are currently active in \033[97m{prompts_dir.relative_to(ROOT)}\033[0m")
         print("You can edit those files directly to customize the AI's behavior.")
     else:
         print("❌ No custom prompts found. Using system defaults.")
-    
+
     print("\nActions:")
     print("  [\033[1;94m1\033[0m] Copy system default templates to project (to enable editing)")
     if prompts_dir.exists():
         print("  [\033[1;94m2\033[0m] Delete custom prompts (revert to system defaults)")
     print("  [\033[90mB\033[0m] Back")
-    
+
     choice = input("\nChoice: ").strip().lower()
     if choice == '1':
         print("\nCopying templates...")
@@ -2362,6 +2414,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print("    [\033[1;94mC\033[0m] Change Target Project")
             print("    [\033[1;94mA\033[0m] Manage Archived Jobs")
             print("    [\033[1;94mI\033[0m] Manage CLI Instructions (.md files)")
+            print("    [\033[1;94mE\033[0m] Email Notification Settings")
             print("    [\033[1;94mS\033[0m] Setup & Architecture Guide")
 
             print("    [\033[1;94mD\033[0m] Firebase App Distro (Delivery)")
@@ -2456,18 +2509,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             elif choice == "a":
                 handle_archived_jobs_menu(session_allowed_machines, session_allowed_models)
             elif choice == "i":
-                handle_cli_instructions()
-            elif choice == "a" and "a" in actions:
-                # Construct feedback automatically from the verification
-                v = job.get("verification", {})
-                feedback = f"Please re-plan and incorporate the Senior Architect's suggestions:\n"
-                feedback += f"Comments: {v.get('comments')}\n"
-                if v.get("suggested_additions"):
-                    feedback += "Suggested Additions:\n- " + "\n- ".join(v["suggested_additions"])
-                
-                # Trigger a re-run with this feedback
-                handle_full_rerun(job, feedback_override=feedback)
-                break
+                handle_instruction_files()
             elif choice == "d":
                 handle_firebase_distro(session_allowed_machines, session_allowed_models)
             elif choice == "s":
@@ -2732,7 +2774,7 @@ def main_loop():
         except BackException:
             continue
 
-def handle_cli_instructions():
+def handle_instruction_files():
     cli_files = {
         "Gemini CLI": "GEMINI.md",
         "Claude Code": "CLAUDE.md",
@@ -2812,7 +2854,9 @@ Read these files first and treat them as authoritative:
             print("    [\033[1;94mA\033[0m] Create All Missing Files")
             if any(s == "invalid" for s in file_statuses.values()):
                 print("    [\033[1;94mR\033[0m] Repair Misconfigured Files (Append required links)")
-            print("    [\033[1;94mB\033[0m] Back to Main Menu")
+            
+            print("    [\033[1;94mP\033[0m] Manage Agent Role Prompts (internal)")
+            print("    [\033[1;94mB\033[0m] Back to Configuration")
             
             print_divider()
             print_choice_prompt("Choice:", "(index or letter)")
@@ -2822,6 +2866,8 @@ Read these files first and treat them as authoritative:
             
             if choice == "b":
                 break
+            elif choice == "p":
+                handle_role_prompts()
             elif choice == "a":
                 created = 0
                 for name, status in file_statuses.items():
