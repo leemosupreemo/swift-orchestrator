@@ -31,7 +31,14 @@ def write_text_file(path: Path, content: str, force: bool) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-    print(f"Created {path}")
+    
+    # Try to make the path relative to ROOT if possible, otherwise use name
+    try:
+        from orchestrator.scripts.common import ROOT
+        display_path = path.relative_to(ROOT)
+    except Exception:
+        display_path = path.name
+    print(f"  ✅ Created {display_path}")
 
 
 def run_json_command(args: list[str], root: Path) -> dict:
@@ -182,7 +189,8 @@ def write_starter_docs(root: Path, config: dict, force: bool) -> list[Path]:
 def write_helper_script(root: Path, force: bool) -> Path:
     script_path = root / "scripts" / "orchestrator"
     write_text_file(script_path, helper_script(), force)
-    script_path.chmod(script_path.stat().st_mode | 0o111)
+    if script_path.exists():
+        script_path.chmod(script_path.stat().st_mode | 0o111)
     return script_path
 
 
@@ -535,7 +543,7 @@ def init_project(args: argparse.Namespace) -> int:
         print(f"Project config already exists: {project_file}")
     else:
         project_file.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-        print(f"Created {project_file}")
+        print(f"  ✅ Created {project_file.relative_to(root)}")
 
     machines_file = config_dir / "machines.json"
     if not machines_file.exists() or args.force:
@@ -561,7 +569,7 @@ def init_project(args: argparse.Namespace) -> int:
                 }
             ],
         }, indent=2) + "\n", encoding="utf-8")
-        print(f"Created {machines_file}")
+        print(f"  ✅ Created {machines_file.relative_to(root)}")
 
     settings_file = config_dir / "settings.json"
     if not settings_file.exists() or args.force:
@@ -569,12 +577,12 @@ def init_project(args: argparse.Namespace) -> int:
             "notification_emails": [],
             "notification_provider": "resend",
         }, indent=2) + "\n", encoding="utf-8")
-        print(f"Created {settings_file}")
+        print(f"  ✅ Created {settings_file.relative_to(root)}")
 
     gitignore_file = runtime_dir / ".gitignore"
     if not gitignore_file.exists() or args.force:
         gitignore_file.write_text(RUNTIME_GITIGNORE, encoding="utf-8")
-        print(f"Created {gitignore_file}")
+        print(f"  ✅ Created {gitignore_file.relative_to(root)}")
 
     if args.with_starter_docs:
         write_starter_docs(root, config, args.force)
