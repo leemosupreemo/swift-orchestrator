@@ -479,7 +479,12 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
         likely_files = job.get("plan", {}).get("likely_files", [])
         is_ios = any(f.endswith(".swift") or f.endswith(".storyboard") or f.endswith(".plist") for f in likely_files)
 
-        if PROJECT_CONFIG.firebase_distribution and is_ios and (job.get("yolo") or job.get("type") in {"bug-fix", "feature-task"}):
+        is_yolo = job.get("yolo", False)
+        tasks = job.get("plan", {}).get("tasks", [])
+        completed = job.get("completed_task_indices", [])
+        all_tasks_done = len(completed) >= len(tasks)
+
+        if PROJECT_CONFIG.firebase_distribution and is_ios and (not is_yolo or all_tasks_done):
             print("\n🚀 Automated build delivery triggered after verification...")
             try:
                 subprocess.run([sys.executable, str(SCRIPTS_DIR / "deliver_build.py"), str(job_path)], cwd=str(ROOT))
@@ -545,18 +550,6 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
         tasks = job.get("plan", {}).get("tasks", [])
         completed = job.get("completed_task_indices", [])
         all_tasks_done = len(completed) >= len(tasks)
-        
-        # Automatic Delivery to Device (if Firebase is setup)
-        # Skip intermediate distributions in YOLO mode
-        if is_firebase_configured() and (not is_yolo or all_tasks_done):
-            print_phase("delivery", subtext="auto-distribute")
-            try:
-                # Trigger the canonical distribution script
-                run_shell("./scripts/distribute_ios.sh", cwd=ROOT, check=True, capture=False)
-                print("\n✅ Auto-delivery successful.")
-            except Exception as e:
-                print(f"\n⚠️  Auto-delivery failed: {e}")
-                print("   (The job succeeded, only the delivery failed)")
 
         # Send completion notification
         job_summary = job.get("plan", {}).get("summary")

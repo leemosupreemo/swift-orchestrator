@@ -41,6 +41,24 @@ PLANNER_OUTPUT = {
     ],
 }
 
+PLANNER_FEATURE_OUTPUT = {
+    "title": "Add dark mode toggle to settings",
+    "summary": "Implement a toggle in the settings view to switch between light and dark modes.",
+    "assumptions": ["App uses a central theme manager."],
+    "constraints": ["Must support iOS 15+."],
+    "risks": ["Potential UI flickering on switch."],
+    "tasks": [
+        {
+            "title": "Add toggle to SettingsView",
+            "description": "Insert a Toggle component in the SettingsView.",
+            "acceptance_criteria": ["Toggle appears in settings.", "Toggle state is persisted."],
+            "likely_files": ["MyApp/SettingsView.swift"],
+            "tests": ["testTogglePersistence"],
+            "complexity": "simple"
+        }
+    ]
+}
+
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
@@ -52,6 +70,7 @@ def write_executable(path: Path, content: str) -> None:
 
 def create_fake_binaries(fake_bin_dir: Path) -> None:
     planner_json = json.dumps(PLANNER_OUTPUT)
+    feature_planner_json = json.dumps(PLANNER_FEATURE_OUTPUT)
     verifier_json = json.dumps({
         "status": "approved",
         "comments": "The plan looks solid. All architectural considerations are met.",
@@ -80,7 +99,10 @@ def create_fake_binaries(fake_bin_dir: Path) -> None:
                     handle.write("gemini " + prompt[:120].replace("\\n", " ") + "\\n")
 
             if "Raw input:" in prompt:
-                print({planner_json!r})
+                if "VISION:" in prompt:
+                    print({feature_planner_json!r})
+                else:
+                    print({planner_json!r})
             elif "Role: Senior System Architect" in prompt:
                 print({verifier_json!r})
             elif "You are the build-analysis agent" in prompt:
@@ -264,22 +286,32 @@ def create_fake_binaries(fake_bin_dir: Path) -> None:
                     handle.write("ssh " + " ".join(args) + "\\n")
 
             mode = os.environ.get("FAKE_SSH_MODE", "fail_probes")
-            command = args[1] if len(args) > 1 else ""
+            full_command = " ".join(args)
 
-            if "probe_machine.py --probe-local" in command:
+            if "probe_machine.py --probe-local" in full_command:
                 if mode == "remote_ok":
                     payload = {
                         "machine": "mac2-ssh",
+                        "reachable": True,
+                        "hw": {"cpu_model": "M1", "logical_cores": 8, "physical_cores": 8, "total_mem_gb": 16},
                         "cpu_load_1m": 0.4,
                         "cpu_load_5m": 0.4,
                         "mem_free_mb": 14000,
                         "mem_pressure": "normal",
+                        "disk_free_gb": 100,
+                        "disk_total_gb": 100,
                         "active_xcodebuild_count": 0,
                         "active_simulator_count": 0,
                         "active_ai_jobs": 0,
                         "repo_exists": True,
                         "repo_path_ok": True,
-                        "timestamp": "2026-04-23T21:00:00-05:00"
+                        "git_branch": "main",
+                        "git_head_hash": "abc",
+                        "git_dirty": False,
+                        "binaries": {"gemini": True, "claude": True, "codex": True, "gh": True, "ollama": True, "opencode": True, "xcodebuild": True, "firebase": True},
+                        "stale_processes": [],
+                        "timestamp": "2026-04-23T21:00:00-05:00",
+                        "supports_xcode": True
                     }
                     print(json.dumps(payload))
                     sys.exit(0)
@@ -383,6 +415,16 @@ xcodebuild test -project MyApp.xcodeproj -scheme MyApp
         "import XCTest\nfinal class SettingsViewModelTests: XCTestCase {}\n",
         encoding="utf-8",
     )
+
+    # Add distribution scripts for Firebase verification
+    scripts_dir = project_root / "scripts"
+    scripts_dir.mkdir(exist_ok=True)
+    (scripts_dir / "ExportOptions.plist").write_text("<plist></plist>", encoding="utf-8")
+    write_executable(
+        scripts_dir / "distribute_ios.sh",
+        "#!/bin/bash\necho 'Mock distribution successful'\nexit 0\n"
+    )
+
     return project_root
 
 
@@ -489,6 +531,40 @@ def run_local_bug_scenario(name: str, xcode_mode: str, expected_status: str) -> 
         assert_log_contains(log_path, "codex")
 
         print(f"Scenario {name} passed. Final status: {job['status']}.")
+
+
+def run_local_feature_scenario() -> None:
+    name = "local-feature-success"
+    with tempfile.TemporaryDirectory(prefix=f"{name}-") as temp_dir_str:
+        temp_dir = Path(temp_dir_str)
+        runtime_dir = temp_dir / "runtime"
+        project_root = create_fixture_project(temp_dir)
+        fake_bin_dir = temp_dir / "fake-bin"
+        log_path = temp_dir / "commands.log"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        fake_bin_dir.mkdir(parents=True, exist_ok=True)
+        create_fake_binaries(fake_bin_dir)
+
+        env = scenario_env(os.environ, project_root, runtime_dir, fake_bin_dir, log_path)
+        env["FAKE_SSH_MODE"] = "fail_probes"
+        env["FAKE_XCODEBUILD_MODE"] = "success"
+
+        result = run_subprocess(
+            [sys.executable, str(SCRIPTS_DIR / "new_job.py"), "feature"],
+            env=env,
+            cwd=project_root,
+            stdin_text="Add a dark mode toggle to the settings screen.",
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"{name} failed\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
+
+        job = read_single_job(runtime_dir)
+        assert job["issue_number"] == 9001, job
+        assert job["type"] == "feature-plan", job
+        assert job["status"] == "review-needed", job
+        assert job["pr_number"] == 7001, job
+
+        print("Scenario local-feature-success passed.")
 
 
 def run_remote_dispatch_scenario() -> None:
@@ -622,13 +698,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["local-success", "local-build-fail", "local-test-fail", "remote-dispatch", "resume", "all"],
+        choices=["local-success", "local-feature-success", "local-build-fail", "local-test-fail", "remote-dispatch", "resume", "all"],
         default="all",
     )
     args = parser.parse_args()
 
     scenarios = [args.scenario] if args.scenario != "all" else [
         "local-success",
+        "local-feature-success",
         "local-build-fail",
         "local-test-fail",
         "remote-dispatch",
@@ -638,10 +715,12 @@ def main() -> None:
     for scenario in scenarios:
         if scenario == "local-success":
             run_local_bug_scenario("local-success", "success", "review-needed")
+        elif scenario == "local-feature-success":
+            run_local_feature_scenario()
         elif scenario == "local-build-fail":
-            run_local_bug_scenario("local-build-fail", "build_fail", "human-needed")
+            run_local_bug_scenario("local-build-fail", "build_fail", "debugging")
         elif scenario == "local-test-fail":
-            run_local_bug_scenario("local-test-fail", "test_fail", "human-needed")
+            run_local_bug_scenario("local-test-fail", "test_fail", "debugging")
         elif scenario == "remote-dispatch":
             run_remote_dispatch_scenario()
         elif scenario == "resume":

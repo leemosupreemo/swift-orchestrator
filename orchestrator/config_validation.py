@@ -24,14 +24,14 @@ def validate_project_config(config: ProjectConfig) -> list[str]:
         if config.delivery_provider and config.delivery_provider != "firebase":
             errors.append("Only delivery_provider='firebase' is currently supported.")
         if not config.distribution_script_path:
-            errors.append("firebase_distribution requires distribution_script_path.")
+            errors.append("firebase_distribution requires distribution_script_path. Run 'orchestrator wizard' to set this up.")
         elif not (config.root / config.distribution_script_path).exists():
-            errors.append(f"distribution_script_path does not exist: {config.distribution_script_path}")
+            errors.append(f"distribution_script_path does not exist: {config.distribution_script_path}. Run 'orchestrator wizard' to generate it.")
         plist_path = config.firebase_plist_path
         if not plist_path:
-            errors.append("firebase_distribution requires firebase_plist_path.")
+            errors.append("firebase_distribution requires firebase_plist_path. Run 'orchestrator wizard' to set this up.")
         elif not (config.root / plist_path).exists():
-            errors.append(f"firebase_plist_path does not exist: {plist_path}")
+            errors.append(f"firebase_plist_path does not exist: {plist_path}. Download this from Firebase Console.")
     if config.visual_app_path and not Path(config.visual_app_path).is_absolute() and not (config.root / config.visual_app_path).exists():
         errors.append(f"visual_app_path does not exist: {config.visual_app_path}")
     if config.visual_app_path and not config.app_bundle_id:

@@ -283,7 +283,7 @@ def run_propose(job: dict, job_path: Path, logs_path: str | None, feedback: str 
         job["debug_phase"] = "implement"
         
         # Record iteration in history
-        job["debug_history"].append({
+        job.setdefault("debug_history", []).append({
             "iteration": job["iteration"],
             "model": actual_model,
             "hypothesis": plan.get("hypothesis"),

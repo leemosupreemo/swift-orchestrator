@@ -35,6 +35,8 @@ from orchestrator.project_config import PROJECT_CONFIG
 
 FLEET_AVAILABILITY: dict[str, bool] = {}
 
+import shutil
+
 def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, list[str]]]:
     """
     Returns (options, value_map, details_map) for an intelligent model selection UI.
@@ -71,7 +73,14 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         tier_str = m.tier.name.capitalize()
         alias_info = f" (Standard)" if m.aliases else ""
         effort_info = f" ({m.reasoning_effort})" if m.reasoning_effort else ""
-        label = f"{m.id}{alias_info}{effort_info} [{tier_str}]"
+        
+        # Check if the required CLI is installed
+        missing_clis = [cli for cli in m.required_clis if not shutil.which(cli)]
+        install_warning = ""
+        if missing_clis:
+            install_warning = f" \033[91m[Requires '{missing_clis[0]}' CLI]\033[0m"
+            
+        label = f"{m.id}{alias_info}{effort_info} [{tier_str}]{install_warning}"
         
         options.append(label)
         value_map[label] = m.id
@@ -82,6 +91,8 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
             f"Cost:     {m.cost_factor:.1f}x",
             f"Capabilities: {', '.join([c.value.capitalize() for c in m.capabilities])}"
         ]
+        if missing_clis:
+            details.append(f"\033[91mWarning: Missing required CLI '{missing_clis[0]}'\033[0m")
         if m.reasoning_effort:
             details.append(f"Effort:   {m.reasoning_effort}")
         if m.aliases:
