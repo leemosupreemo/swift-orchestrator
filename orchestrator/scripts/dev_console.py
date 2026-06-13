@@ -33,6 +33,8 @@ from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
 from orchestrator.project_config import PROJECT_CONFIG
 
+from orchestrator import __version__
+
 FLEET_AVAILABILITY: dict[str, bool] = {}
 
 import shutil
@@ -418,9 +420,22 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
             pass
 
 def handle_new_job(session_allowed_models: list[str] | None = None, session_allowed_machines: list[str] | None = None):
+    # 1. Critical Pre-requisite Checks
     if not session_allowed_machines:
         print("\n\033[1;91m⚠️  ERROR: No active machines selected for this session.\033[0m")
-        print("Please go to [\033[1;94mC\033[0m] Configuration \033[1;94m->\033[0m [\033[1;94mF\033[0m] Manage Machine Fleet and select at least one machine.")
+        print("A job requires at least one worker machine to execute build and test tasks.")
+        print("\n\033[1;97mTo fix this:\033[0m")
+        print("1. Go to [\033[1;94mC\033[0m] Configuration \033[1;94m->\033[0m [\033[1;94mF\033[0m] Manage Machine Fleet")
+        print("2. Ensure at least one machine is enabled and reachable (green checkmark).")
+        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
+        return
+
+    if not session_allowed_models:
+        print("\n\033[1;91m⚠️  ERROR: No AI models selected for this session.\033[0m")
+        print("A job requires at least one LLM to perform planning and code generation.")
+        print("\n\033[1;97mTo fix this:\033[0m")
+        print("1. Go to [\033[1;94mC\033[0m] Configuration \033[1;94m->\033[0m [\033[1;94mM\033[0m] Manage Model Selection")
+        print("2. Select at least one AI model. Ensure you have the required CLI tools logged in.")
         input("\n\033[1;94mTap Enter to return to menu...\033[0m")
         return
 
@@ -699,13 +714,14 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
 
             print("\n  \033[1;90m--- SCRIPT LOGIC (Python Unit) ---\033[0m")
             print("  [\033[1;94m4\033[0m] Full Python Test Suite  (All isolated unit tests)")
-            print("  [\033[1;94m5\033[0m] Routing & Fallbacks     (LLM model selection logic)")
+            print("  [\033[1;94m5\033[0m] Console UI Smoke Tests  (Menu navigation & UI logic)")
+            print("  [\033[1;94m6\033[0m] Routing & Fallbacks     (LLM model selection logic)")
 
             print("\n  \033[1;90m--- FLEET OPERATIONS (Live) ---\033[0m")
-            print("  [\033[1;94m6\033[0m] Fleet Health Report     (all machines report)")
-            print("  [\033[1;94m7\033[0m] GitHub Metadata Sync    (status & PR cleanup)")
-            print("  [\033[1;94m8\033[0m] Live Model Pings        (connectivity & logs)")
-            print("  [\033[1;94m9\033[0m] Build & Delivery        (Live Firebase upload)")
+            print("  [\033[1;94m7\033[0m] Fleet Health Report     (all machines report)")
+            print("  [\033[1;94m8\033[0m] GitHub Metadata Sync    (status & PR cleanup)")
+            print("  [\033[1;94m9\033[0m] Live Model Pings        (connectivity & logs)")
+            print("  [\033[1;94m10\033[0m] Build & Delivery       (Live Firebase upload)")
 
             print("\n  \033[1;90m--- ENVIRONMENT & SETUP ---\033[0m")
             print("  [\033[1;94mP\033[0m] Plug & Play Self-Tests  (Setup logic verification)")
@@ -744,25 +760,28 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
                 run_script("smoke_test_cli_workflow.py", ["--scenario", "resume"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "4":
                 print_header("Running ALL Tooling Tests")
-                run_script("-m unittest discover", ["ai/tests"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                run_script("-m unittest discover", ["tests"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "5":
-                print_header("Running LLM Model Selection & Fallbacks Tests")
-                run_script("-m unittest", ["ai/tests/test_model_selection.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                print_header("Running Console UI Smoke Tests")
+                run_script("-m unittest", ["tests/test_console_smoke.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "6":
+                print_header("Running LLM Model Selection & Fallbacks Tests")
+                run_script("-m unittest", ["tests/test_model_selection.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+            elif choice == "7":
                 print_header("Running Fleet-Wide LLM Connectivity Check")
                 run_script("fleet_llm_check.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "7":
+            elif choice == "8":
                 print_header("Running Fleet Github Synchronization")
                 run_script("sync_fleet.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "8":
-                print_header("Running Model Connectivity Ping Tests")
-                run_script("-m unittest", ["ai/tests/test_model_connectivity.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "9":
+                print_header("Running Model Connectivity Ping Tests")
+                run_script("-m unittest", ["tests/test_model_connectivity.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+            elif choice == "10":
                 print_header("Running Build & Delivery Smoke Test")
                 run_script("smoke_test_delivery.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "p":
                 print_header("Plug & Play Self-Tests")
-                run_script("-m unittest", ["ai/tests/test_check_setup.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                run_script("-m unittest", ["tests/test_check_setup.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             else:
                 error_msg = f"'{choice}'"
 
@@ -2677,7 +2696,7 @@ def main_loop():
   _   _   _   _   _   _   _   _   _   _   _   _ 
  / \ |_) /   |_| |_  (_   |  |_) /_\  |  / \ |_)
  \_/ | \ \__ | | |_  __)  |  | \ | |  |  \_/ | \
-                """ + "\033[0m")
+                """ + f"v{__version__}\033[0m")
                 print_header("AI Job History")
                 jobs = list_jobs()
                 if not jobs:

@@ -381,8 +381,10 @@ def main(args_override: list[str] | None = None) -> None:
         allowed_models = prompt_checkbox("Select allowed models:", all_models, DEFAULT_FALLBACKS)
     
     if not allowed_models:
-        print("Warning: No models selected. Defaulting to all supported models.")
-        allowed_models = list(SUPPORTED_MODELS)
+        print("\n\033[1;91m⚠️  ERROR: No AI models selected.\033[0m")
+        print("A job requires at least one LLM to perform planning and code generation.")
+        print("\033[90m(Run with --allowed-models <ids> or select models in the interactive prompt.)\033[0m")
+        sys.exit(1)
         
     # Ensure initial choices are within allowed set (resolve aliases first)
     p_meta = get_model(planner)
@@ -399,6 +401,12 @@ def main(args_override: list[str] | None = None) -> None:
 
     # Machine Selection
     machines_config = load_machines()
+    if not machines_config:
+        print("\n\033[1;91m⚠️  ERROR: No worker machines configured or enabled.\033[0m")
+        print("A job requires at least one worker machine to execute build and test tasks.")
+        print("\033[90m(Configure machines in .orchestrator/config/machines.json or use the wizard.)\033[0m")
+        sys.exit(1)
+
     machine_names = sorted([m["name"] for m in machines_config])
     if args.allowed_machines:
         allowed_machines = args.allowed_machines.split(",")
@@ -408,8 +416,10 @@ def main(args_override: list[str] | None = None) -> None:
         allowed_machines = prompt_checkbox("Select allowed machines:", machine_names, initial_machines)
     
     if not allowed_machines:
-        print("Warning: No machines selected. Defaulting to all available machines.")
-        allowed_machines = machine_names
+        print("\n\033[1;91m⚠️  ERROR: No machines selected.\033[0m")
+        print("A job requires at least one machine to be selected for the fleet.")
+        print("\033[90m(Run with --allowed-machines <names> or select machines in the interactive prompt.)\033[0m")
+        sys.exit(1)
 
     branch_mode = args.branch_mode
     if not branch_mode:
