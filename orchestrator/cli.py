@@ -418,7 +418,14 @@ def run_wizard(args: argparse.Namespace) -> int:
         else:
             print("You can customize the AI's coding style by editing local copies of its instruction prompts.")
             print("We highly recommend starting with our default templates for Orchestrator projects.")
-            print("\033[90m(You can always do this later via Dev Console -> Configuration -> [I] Manage CLI Instructions)\033[0m")
+            
+            prompts_source = Path(__file__).resolve().parent / "prompts"
+            if prompts_source.exists():
+                print("\nAvailable Templates:")
+                for prompt_file in sorted(prompts_source.glob("*.md")):
+                    print(f"  - \033[97m{prompt_file.name}\033[0m")
+            
+            print("\n\033[90m(You can always do this later via Dev Console -> Configuration -> [I] Manage CLI Instructions)\033[0m")
             copy_prompts = prompt_yes_no("Copy default role prompt templates into your project now?", True)
             
     if copy_prompts:

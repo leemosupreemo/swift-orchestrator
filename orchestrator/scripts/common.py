@@ -316,7 +316,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 icon = "(*)" if i == idx else "( )"
                 line = f"{cursor}{icon} {opt}"
                 if i == idx:
-                    line = f"\033[1;94m{line}\033[0m"
+                    line = f"\033[1;96m{line}\033[0m"
                 output.append(line)
             
             # Print current choice placeholder at the bottom
@@ -510,12 +510,13 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     output.append(f"  \033[1;90m{opt}\033[0m")
                     continue
                 cursor = "> " if i == idx else "  "
-                checked = "[\033[1;94mx\033[0m]" if i in selected_indices else "[ ]"
+                checked = "[\033[1;96mx\033[0m]" if i in selected_indices else "[ ]"
                 line = f"{cursor}{checked} {opt}"
-                if i in selected_indices:
-                    line = f"\033[1;94m{line}\033[0m"
-                elif i == idx:
-                    line = f"\033[1;94m{line}\033[0m"
+                
+                # Only highlight the entire row if it is currently hovered (idx)
+                if i == idx:
+                    line = f"\033[1;96m{cursor}{checked} {opt}\033[0m"
+                    
                 output.append(line)
             
             # Max selections disclaimer
