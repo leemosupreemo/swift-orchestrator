@@ -554,8 +554,11 @@ def main(args_override: list[str] | None = None) -> None:
     
     llm_input = f"{prompt_template}\n\nRaw input:\n{raw_input_text}{extra_input}{revision_context}\n"
     
+    llm_sessions = []
+    
     print(f"\n[1/3] Planning {args.job_type} (Stitch AI Mode: {'Enabled' if args.stitch else 'Off'}) using {planner}...", flush=True)
-    llm_output, actual_planner = run_llm(planner, llm_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+    llm_output, actual_planner, sid = run_llm(planner, llm_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+    llm_sessions.append({"id": sid, "model": actual_planner})
 
     try:
         plan = json.loads(llm_output)
@@ -598,7 +601,8 @@ def main(args_override: list[str] | None = None) -> None:
             verifier_input = f"{verifier_prompt}\n\n### ORIGINAL REQUEST ###\n{raw_input_text}\n\n### GENERATED PLAN ###\n{llm_output}"
             
             try:
-                v_output, actual_verifier = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
+                v_output, actual_verifier, sid = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
+                llm_sessions.append({"id": sid, "model": actual_verifier})
                 verification = normalize_verification(json.loads(v_output), actual_verifier)
                 if not verification:
                     raise ValueError("Verifier output missing required status/comments fields")
@@ -620,7 +624,8 @@ def main(args_override: list[str] | None = None) -> None:
                         recursive_input += "Please update the plan JSON to address the architect's feedback while fulfilling the original request."
                         
                         print(f"      - Re-planning with {actual_planner}...", flush=True)
-                        new_llm_output, _ = run_llm(planner, recursive_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+                        new_llm_output, actual_planner, sid = run_llm(planner, recursive_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+                        llm_sessions.append({"id": sid, "model": actual_planner})
                         
                         try:
                             plan = json.loads(new_llm_output)
@@ -691,7 +696,9 @@ def main(args_override: list[str] | None = None) -> None:
         "updated_at": now_iso(),
         "raw_input": raw_input_text,
         "plan": plan,
-    })
+        "llm_sessions": llm_sessions,
+    }
+)
     
     # Special override for design-to-feature transition
     if existing_job and args.job_type == "feature":

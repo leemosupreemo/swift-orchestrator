@@ -93,7 +93,12 @@ Diff:
             allowed_models = job.get("allowed_models")
             
     try:
-        review, actual_reviewer = run_llm(args.reviewer, prompt, cwd=ROOT, timeout=300, role=ModelRole.REVIEWER, allowed_models=allowed_models)
+        review, actual_reviewer, session_id = run_llm(args.reviewer, prompt, cwd=ROOT, timeout=300, role=ModelRole.REVIEWER, allowed_models=allowed_models)
+        
+        # Track session IDs in the job
+        if "llm_sessions" not in job:
+            job["llm_sessions"] = []
+        job["llm_sessions"].append({"id": session_id, "model": actual_reviewer})
         print(f"Reviewer used: {actual_reviewer}")
     except Exception as e:
         print(f"❌ Review failed: {e}")

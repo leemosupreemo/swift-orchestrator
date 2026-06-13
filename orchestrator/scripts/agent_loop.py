@@ -81,7 +81,7 @@ def main() -> int:
 
     for turn in range(1, args.max_turns + 1):
         print(f"\n\033[1;95m" + "="*60)
-        print(f" TURN {turn} | STATUS: \033[1;94mAGENT THINKING\033[1;95m")
+        print(f" TURN {turn} | STATUS: \033[1;97mAGENT THINKING\033[0m")
         print("="*60 + "\033[0m")
         
         full_prompt = f"{lead_prompt}\n\n{current_input}"
@@ -89,7 +89,7 @@ def main() -> int:
             full_prompt += "\n\n### CONVERSATION HISTORY ###\n" + "\n".join(history)
 
         with ProgressIndicator(f"Consulting {args.model}..."):
-            llm_output, actual_model = run_llm(args.model, full_prompt, role=ModelRole.PLANNER, stream=True)
+            llm_output, actual_model, session_id = run_llm(args.model, full_prompt, role=ModelRole.PLANNER, stream=True)
         
         print("\033[0m") # Reset color and ensure newline after stream
         
@@ -146,23 +146,27 @@ def main() -> int:
             for i, action in enumerate(actions):
                 a_type = action.get("type")
                 if a_type == "delegate":
-                    print(f"  {i+1}. [DELEGATE] \033[1;94m->\033[0m \033[1;94m{action.get('agent')}\033[0m: {action.get('instruction')}")
+                    print(f"  {i+1}. [DELEGATE] \033[1;97m->\033[0m \033[1;97m{action.get('agent')}\033[0m: {action.get('instruction')}")
                 elif action.get("tool"):
                     tool = action.get("tool")
                     args_val = action.get("args")
-                    print(f"  {i+1}. [TOOL]     \033[1;94m->\033[0m \033[1;94m{tool}\033[0m: {json.dumps(args_val)}")
+                    print(f"  {i+1}. [TOOL]     \033[1;97m->\033[0m \033[1;97m{tool}\033[0m: {json.dumps(args_val)}")
 
             print("\n\033[1;97mChoices:\033[0m")
             print("  [\033[92mA\033[0m] Approve & Run All")
             print("  [\033[93mF\033[0m] Provide Feedback (Steer the Agent)")
             print("  [\033[91mQ\033[0m] Abort / Quit")
             
-            user_choice = input("\n  \033[1;97mChoice:\033[0m ").strip().lower()
-            
+            from orchestrator.scripts.common import get_key
+            print("\n  \033[1;97mChoice:\033[0m ", end="", flush=True)
+            user_choice = get_key().strip().lower()
+
             if user_choice == "q":
+                print("\033[91mabort\033[0m")
                 print("\nAborting orchestration loop.")
                 return 0
             elif user_choice == "f":
+                print("\033[93mfeedback\033[0m")
                 feedback = input("\n  \033[1;97mFeedback for Agent:\033[0m ").strip()
                 if feedback:
                     history.append(f"USER FEEDBACK (TURN {turn}): {feedback}")
@@ -171,10 +175,12 @@ def main() -> int:
                 else:
                     print("  No feedback provided. Cancelling turn.")
                     return 0
-            elif user_choice != "a":
+            elif user_choice in {"a", "enter"}:
+                print("\033[92mapprove\033[0m")
+            else:
+                print(f"\033[91m{user_choice}\033[0m")
                 print("  Invalid choice. Aborting for safety.")
                 return 0
-
         print(f"\n\033[1;92m" + "-"*60)
         print(f" STATUS: EXECUTING APPROVED PLAN")
         print("-"*60 + "\033[0m")
@@ -186,7 +192,7 @@ def main() -> int:
             if action_type == "delegate":
                 agent_name = action.get("agent")
                 instruction = action.get("instruction")
-                print(f"\n\033[1;94m[ACTION] Delegating to sub-agent '{agent_name}'...\033[0m")
+                print(f"\n\033[1;97m[ACTION] Delegating to sub-agent '{agent_name}'...\033[0m")
                 print(f"Instruction: {instruction}")
                 
                 sub_prompt_path = PROMPTS_DIR / f"{agent_name}.md"
@@ -200,7 +206,7 @@ def main() -> int:
                 sub_input = f"{sub_prompt}\n\nINSTRUCTION: {instruction}"
                 
                 with ProgressIndicator(f"Running {agent_name}..."):
-                    sub_output, _ = run_llm(args.model, sub_input)
+                    sub_output, actual_model, session_id = run_llm(args.model, sub_input)
                 
                 print(f"Result from {agent_name} received.")
                 turn_results.append(f"### Result from sub-agent {agent_name} ###\n{sub_output}")
@@ -217,13 +223,17 @@ def main() -> int:
                     elif tool_name == "dispatch":
                         print(f"  Job Goal: \033[97m{args_dict.get('goal')}\033[0m")
                     
-                    user_ok = input("\n  Proceed? (y/n): ").strip().lower()
-                    if user_ok != "y":
+                    from orchestrator.scripts.common import get_key
+                    print(f"\n  Proceed? (y/n): ", end="", flush=True)
+                    user_ok = get_key().strip().lower()
+                    if user_ok not in {"y", "yes"}:
+                        print("\033[91mno\033[0m")
                         print("  Skipping tool execution.")
                         turn_results.append(f"### Result from system tool {tool_name} ###\nUSER CANCELLED: Execution was denied by the user.")
                         continue
+                    print("\033[92myes\033[0m")
 
-                print(f"\n\033[1;94m[ACTION] Executing system tool '{tool_name}'...\033[0m")
+                print(f"\n\033[1;97m[ACTION] Executing system tool '{tool_name}'...\033[0m")
                 
                 tool_result = ""
                 try:

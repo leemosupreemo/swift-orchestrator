@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 from common import CONFIG_DIR, ROOT, append_log, ProgressIndicator, colorize_diff_line
@@ -93,7 +94,7 @@ def is_quota_error(error_msg: str) -> bool:
     return any(x in error_msg.lower() for x in keywords)
 
 
-def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300, allowed_models: list[str] | None = None, role: str | None = None) -> tuple[str, str]:
+def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300, allowed_models: list[str] | None = None, role: str | None = None, session_id: str | None = None, stream: bool = False) -> tuple[str, str, str]:
     # Resolve actual model ID if it's an alias or generic name
     resolved_model = get_model(model)
     primary_id = resolved_model.id if resolved_model else model
@@ -120,10 +121,13 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
         attempts.insert(0, primary_id)
 
     last_error = None
+    
+    # Use provided session_id or generate a new one
+    actual_session_id = session_id or str(uuid.uuid4())
 
     for current_model in attempts:
         try:
-            output = _run_llm_single(current_model, prompt, cwd, timeout, role=role)
+            output = _run_llm_single(current_model, prompt, cwd, timeout, role=role, session_id=actual_session_id)
             
             # Validation: if role expects JSON, verify we have it
             if role in [ModelRole.PLANNER, ModelRole.BUILDER, ModelRole.DEBUGGER, ModelRole.VERIFIER]:
@@ -135,7 +139,7 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
                     last_error = RuntimeError(f"{current_model} produced invalid JSON:\n{output}\nError: {exc}")
                     continue
             
-            return output, current_model
+            return output, current_model, actual_session_id
         except LLMTimeoutError as exc:
             # High-visibility colored timeout report
             print("\n" + "!"*60)
@@ -164,7 +168,7 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
 
 import selectors
 
-def get_llm_command(model: str, prompt_file: str, role: str | None = None) -> str:
+def get_llm_command(model: str, prompt_file: str, role: str | None = None, session_id: str | None = None) -> str:
     # Resolve actual model ID
     m_meta = get_model(model)
     model_id = m_meta.id if m_meta else model
@@ -187,16 +191,24 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None) -> st
         if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
             safe_tools += ",replace,write_file"
         cmd_base = f"gemini --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+        if session_id:
+            cmd_base += f" --session-id {session_id}"
     elif model_id == "gemini":
         safe_servers = "context7,exa,swiftlens"
         safe_tools = "read_file,grep_search,glob"
         if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
             safe_tools += ",replace,write_file"
         cmd_base = f"gemini --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+        if session_id:
+            cmd_base += f" --session-id {session_id}"
     elif model_id.startswith("claude-"):
         cmd_base = f"claude -p --model {model_id}"
+        if session_id:
+            cmd_base += f" --session-id {session_id}"
     elif model_id == "claude":
         cmd_base = "claude -p --model claude-sonnet-4-6"
+        if session_id:
+            cmd_base += f" --session-id {session_id}"
     elif model_id == "deepseek":
         cmd_base = "ollama run deepseek-coder"
     elif model_id == "copilot":
@@ -253,7 +265,7 @@ def get_llm_env() -> dict[str, str]:
     return env
 
 
-def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300, role: str | None = None) -> str:
+def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300, role: str | None = None, session_id: str | None = None) -> str:
     source = os.environ.get("AI_REQUEST_SOURCE")
     if source:
         prompt = f"[SOURCE: {source}]\n\n{prompt}"
@@ -262,7 +274,8 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
         f.write(prompt)
         prompt_file = f.name
 
-    cmd = get_llm_command(model, prompt_file, role=role)
+    actual_session_id = session_id or str(uuid.uuid4())
+    cmd = get_llm_command(model, prompt_file, role=role, session_id=actual_session_id)
     env = get_llm_env()
 
     prompt_chars = len(prompt)
@@ -324,6 +337,7 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
                     f"PROMPT:\n{prompt}\n\n"
                     f"MODEL: {model}\n"
                     f"CMD: {cmd}\n"
+                    f"SESSION_ID: {actual_session_id}\n"
                     f"RETURN CODE: TIMEOUT\n\n"
                     f"STDOUT:\n{full_stdout}\n\n"
                     f"STDERR:\n{full_stderr}\n"
@@ -419,6 +433,7 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
         f"PROMPT:\n{prompt}\n\n"
         f"MODEL: {model}\n"
         f"CMD: {cmd}\n"
+        f"SESSION_ID: {actual_session_id}\n"
         f"RETURN CODE: {process.returncode}\n\n"
         f"STDOUT:\n{full_stdout}\n\n"
         f"STDERR:\n{full_stderr}\n"

@@ -235,11 +235,21 @@ def prompt_text(label: str, default: str | None = None) -> str:
 
 
 def prompt_yes_no(label: str, default: bool = False) -> bool:
+    from orchestrator.scripts.common import get_key
     suffix = "Y/n" if default else "y/N"
-    value = input(f"{label} [{suffix}]: ").strip().lower()
-    if not value:
+    print(f"{label} [{suffix}]: ", end="", flush=True)
+    
+    # Non-blocking key press
+    key = get_key().strip().lower()
+    
+    # If it's a newline (enter), return default
+    if key in {"enter", ""}:
+        print("\033[90m(yes)\033[0m" if default else "\033[90m(no)\033[0m")
         return default
-    return value in {"y", "yes", "true", "1"}
+        
+    res = key in {"y", "yes", "true", "1"}
+    print("\033[92myes\033[0m" if res else "\033[91mno\033[0m")
+    return res
 
 
 def parse_csv(value: str | None) -> list[str]:
@@ -385,6 +395,7 @@ def run_wizard(args: argparse.Namespace) -> int:
         print(f"\n\033[1;96m{'='*20} AI Model Discovery {'='*20}\033[0m")
         print("Detecting installed AI CLIs and authentication status...\n")
         
+        from orchestrator.scripts.check_setup import check_cli_auth, get_auth_command
         from orchestrator.scripts.model_registry import get_all_models
         all_models = get_all_models()
         
@@ -407,7 +418,71 @@ def run_wizard(args: argparse.Namespace) -> int:
                 models.append(m.id)
                 
         print("\n\033[90m(You can change active models and default families later in the Dev Console)\033[0m")
-        
+
+        # Interactive Login Loop
+        while not args.non_interactive:
+            not_logged_in = [cli for cli, ready in cli_status.items() if not ready and shutil.which(cli)]
+            if not not_logged_in:
+                break
+                
+            if not models:
+                print(f"\n\033[1;91mNo AI models are ready.\033[0m")
+            
+            prompt = "\033[1;97m[L] Log in to a provider\033[0m"
+            if models:
+                prompt += " | \033[1;97m[Enter] Continue\033[0m"
+            else:
+                prompt += " | \033[1;91m[C] Cancel\033[0m"
+            
+            from orchestrator.scripts.common import get_key
+            print(f"\n{prompt}")
+            print("Choice: ", end="", flush=True)
+            choice = get_key().strip().lower()
+            
+            if choice == 'l':
+                print("\033[97mlogin\033[0m")
+                print("\nInstalled but unauthenticated providers:")
+                for i, cli in enumerate(not_logged_in, 1):
+                    print(f"  {i}. {cli}")
+                
+                sub_choice = input("\nSelect number to log in (or Enter to go back): ").strip()
+                if not sub_choice: continue
+                try:
+                    idx = int(sub_choice) - 1
+                    if 0 <= idx < len(not_logged_in):
+                        target_cli = not_logged_in[idx]
+                        auth_cmd = get_auth_command(target_cli)
+                        if auth_cmd:
+                            print(f"\nRunning: \033[97m{auth_cmd}\033[0m")
+                            subprocess.run(auth_cmd.split(), check=False)
+                            
+                            # Re-check status
+                            is_ready, msg = check_cli_auth(target_cli)
+                            cli_status[target_cli] = is_ready
+                            print(f"  {target_cli.ljust(10)} : {msg}")
+                            
+                            if is_ready:
+                                # Update models list
+                                for m in all_models:
+                                    if m.id in models: continue
+                                    if not m.required_clis: continue
+                                    if all(cli_status.get(c, False) for c in m.required_clis):
+                                        models.append(m.id)
+                        else:
+                            print(f"No auth command known for {target_cli}.")
+                except ValueError:
+                    print("Invalid choice.")
+            elif choice == 'c' and not models:
+                print("\033[91mcancel\033[0m")
+                return 1
+            elif choice in {'enter', ''} and models:
+                print("\033[97mcontinue\033[0m")
+                break
+            else:
+                if models: 
+                    print("\033[97mcontinue\033[0m")
+                    break
+
     if not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
         return 1

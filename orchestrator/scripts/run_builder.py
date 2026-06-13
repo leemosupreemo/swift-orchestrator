@@ -217,7 +217,7 @@ Brief:
 
         print_phase("agent_thinking")
         status_bar.render()
-        output, actual_builder = run_llm(
+        output, actual_builder, session_id = run_llm(
             job["builder"], 
             full_prompt, 
             cwd=ROOT, 
@@ -225,6 +225,11 @@ Brief:
             allowed_models=job.get("allowed_models"),
             role=ModelRole.BUILDER
         )
+
+        # Track session IDs in the job
+        if "llm_sessions" not in job:
+            job["llm_sessions"] = []
+        job["llm_sessions"].append({"id": session_id, "model": actual_builder})
     
     print_phase("implementation")
     status_bar.render()

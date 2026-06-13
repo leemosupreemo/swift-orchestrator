@@ -81,6 +81,44 @@ def check_file_content(path: Path, pattern: str) -> bool:
     content = path.read_text(encoding="utf-8")
     return re.search(pattern, content) is not None
 
+def check_cli_auth(cli_name: str) -> tuple[bool, str]:
+    """Checks if a CLI is installed and authenticated."""
+    if shutil.which(cli_name) is None:
+        return False, "\033[91mNOT INSTALLED\033[0m"
+    
+    try:
+        if cli_name == "claude":
+            res = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=5)
+            ready = res.returncode == 0
+        elif cli_name == "codex":
+            res = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=5)
+            ready = res.returncode == 0
+        elif cli_name == "gemini":
+            # Gemini CLI doesn't have a status command yet, so we assume if it's installed it's ready
+            ready = True
+        elif cli_name == "opencode":
+            res = subprocess.run(["opencode", "auth", "status"], capture_output=True, text=True, timeout=5)
+            ready = res.returncode == 0
+        elif cli_name == "ollama":
+            ready = True
+        else:
+            ready = True
+            
+        return ready, "\033[92mREADY\033[0m" if ready else "\033[91mNOT LOGGED IN\033[0m"
+    except Exception as e:
+        return True, f"INSTALLED (Error checking status: {e})"
+
+def get_auth_command(cli_name: str) -> str | None:
+    """Returns the auth command for a given CLI binary name."""
+    mapping = {
+        "gh": "gh auth login",
+        "gemini": "gemini",
+        "claude": "claude auth login",
+        "codex": "codex login",
+        "opencode": "opencode auth login"
+    }
+    return mapping.get(cli_name)
+
 def check():
     print("📋 Starting AI Agent 'Plug & Play' Verification...\n")
     settings_path = CONFIG_DIR / "settings.json"

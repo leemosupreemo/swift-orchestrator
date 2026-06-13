@@ -310,14 +310,15 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
 
             output = []
             output.append(f"\n{label}")
-            output.append("\033[1;94m(Arrows: navigate, Enter: save, B: back)\033[0m")
+            output.append("\033[90m(Arrows: navigate, Enter: save, B: back)\033[0m")
             
             for i, opt in enumerate(options):
                 cursor = "> " if i == idx else "  "
                 icon = "(*)" if i == idx else "( )"
                 line = f"{cursor}{icon} {opt}"
                 if i == idx:
-                    line = f"\033[1;96m{line}\033[0m"
+                    # White text on Blue background for the active row
+                    line = f"\033[1;97;44m{line}\033[0m"
                 output.append(line)
             
             # Print current choice placeholder at the bottom
@@ -373,16 +374,18 @@ def prompt_confirm(question: str, default: bool = True) -> bool:
     if question.startswith("Would you Would you"):
         question = "Would you" + question[len("Would you Would you"):]
     
-    # Add Blue formatting to match other dev console prompts
-    formatted_question = f"\033[1;94m{question}\033[0m"
-    
+    # Use standard white/gray for questions to follow conventions
+    # Blue is reserved for highlighted options in multiselect menus
+    formatted_question = f"\033[1;97m{question}\033[0m"
+
     default_str = "yes" if default else "no"
+
     choice = prompt_radio(formatted_question, ["yes", "no"], default_str, clear_screen=False)
     return choice == "yes"
 
 def prompt_multiline(prompt: str) -> str:
     flush_stdin()
-    print(f"\n\033[1;94m{prompt}\033[0m", flush=True)
+    print(f"\n\033[1;97m{prompt}\033[0m", flush=True)
     print("\033[90m(Type your input. To finish, press Enter then \033[1;97mCtrl-D\033[0m\033[90m on a new line)\033[0m", flush=True)
     try:
         content = sys.stdin.read()
@@ -499,7 +502,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             # 1. Print Header
             output.append(f"\n{label}")
             sub_label = "(Arrows: navigate, Space: toggle, Enter: save, B: back)"
-            output.append(f"\033[1;94m{sub_label}\033[0m")
+            output.append(f"\033[90m{sub_label}\033[0m")
             
             if error_msg:
                 output.append(f"\033[91m      ⚠️  {error_msg}\033[0m")
@@ -516,7 +519,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 
                 # Only highlight the entire row if it is currently hovered (idx)
                 if i == idx:
-                    line = f"\033[1;96m{cursor}{checked} {opt}\033[0m"
+                    line = f"\033[1;97;44m{cursor}{checked} {opt}\033[0m"
                     
                 output.append(line)
             

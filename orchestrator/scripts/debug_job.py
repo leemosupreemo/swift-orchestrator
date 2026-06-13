@@ -267,7 +267,7 @@ def run_propose(job: dict, job_path: Path, logs_path: str | None, feedback: str 
 
     # Call LLM
     print_phase("agent_thinking", subtext="proposing debug fix")
-    output, actual_model = run_llm(
+    output, actual_model, session_id = run_llm(
         job["reviewer"], 
         full_prompt, 
         cwd=ROOT, 
@@ -275,6 +275,11 @@ def run_propose(job: dict, job_path: Path, logs_path: str | None, feedback: str 
         allowed_models=job.get("allowed_models"),
         role=ModelRole.DEBUGGER
     )
+
+    # Track session IDs in the job
+    if "llm_sessions" not in job:
+        job["llm_sessions"] = []
+    job["llm_sessions"].append({"id": session_id, "model": actual_model})
     write_text(iter_dir / "llm_response.json", output)
 
     try:

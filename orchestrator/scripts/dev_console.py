@@ -421,7 +421,7 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
     if not session_allowed_machines:
         print("\n\033[1;91m⚠️  ERROR: No active machines selected for this session.\033[0m")
         print("Please go to [\033[1;94mC\033[0m] Configuration \033[1;94m->\033[0m [\033[1;94mF\033[0m] Manage Machine Fleet and select at least one machine.")
-        input("\n\033[1;94mTap Enter to return to main menu...\033[0m")
+        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
         return
 
     print_header("Create New Job")
@@ -664,10 +664,10 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                                 session_allowed_machines.append(new_name)
                             
                             print(f"✅ Machine renamed to: \033[97m{new_name}\033[0m")
-                            time.sleep(1)
+                            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     else:
                         print("⚠️  No changes made.")
-                        time.sleep(1)
+                        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     continue
                 elif exc.key == "z":
                     handle_fleet_hygiene(session_allowed_machines)
@@ -710,15 +710,15 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
             print("\n  \033[1;90m--- ENVIRONMENT & SETUP ---\033[0m")
             print("  [\033[1;94mP\033[0m] Plug & Play Self-Tests  (Setup logic verification)")
 
-            print("\n[\033[1;94mB\033[0m] Back to Main Menu")
+            print("\n[\033[1;94mB\033[0m] Back")
             
             if error_msg:
                 print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                 error_msg = ""
 
-            print_divider()
-            print_choice_prompt("Choice:", "(number or letter)")
-            status_bar.render(at_bottom=True)
+            # Anchor prompt to bottom
+            prompt = get_choice_prompt("Choice:", "(number or letter)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
             choice = get_key().strip().lower()
             clear_choice_placeholder()
             
@@ -804,15 +804,15 @@ def handle_app_tests(session_allowed_machines: list[str], session_allowed_models
             print("\n  Visual Checks:")
             print("    [\033[1;94mV\033[0m] Simulator Visual Check (build, launch, screenshots)")
 
-            print("\n[\033[1;94mB\033[0m] Back to Main Menu")
+            print("\n[\033[1;94mB\033[0m] Back")
             
             if error_msg:
                 print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                 error_msg = ""
 
-            print_divider()
-            print_choice_prompt("Choice:", "(number or letter)")
-            status_bar.render(at_bottom=True)
+            # Anchor prompt to bottom
+            prompt = get_choice_prompt("Choice:", "(number or letter)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
             choice = get_key().strip().lower()
             clear_choice_placeholder()
             
@@ -864,7 +864,7 @@ def handle_cleanup_closed(silent: bool = False):
     if not jobs:
         print("No active jobs to check.")
         if not silent:
-            input("\n\033[1;94mTap Enter to return to main menu...\033[0m")
+            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
         return
 
     print(f"Checking {len(jobs)} jobs...")
@@ -879,7 +879,7 @@ def handle_cleanup_closed(silent: bool = False):
     except Exception as e:
         print(f"!!! Error fetching closed issues: {e}")
         if not silent:
-            input("\n\033[1;94mTap Enter to return to main menu...\033[0m")
+            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
         return
 
     archived_count = 0
@@ -1129,7 +1129,7 @@ def handle_discard_job(job: dict[str, Any]):
     # Archive with discarded status
     archive_path = archive_job(job, status="discarded")
     print(f"\n✅ Job discarded and AI changes surgically reverted.")
-    input("\n\033[1;94mPress Enter to return to main menu...\033[0m")
+    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
 
 def handle_merge_cleanup(job: dict[str, Any]):
     pr_number = job.get("pr_number")
@@ -1148,7 +1148,7 @@ def handle_merge_cleanup(job: dict[str, Any]):
         if is_draft:
             print("\n\033[1;91m!!! Error: PR is still a DRAFT.\033[0m")
             print("Please mark the PR as 'Ready for Review' on GitHub before merging.")
-            input("\n\033[1;94mPress Enter to return to main menu...\033[0m")
+            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             return
     except Exception as e:
         print(f"      - Note: Could not verify PR draft status: {e}")
@@ -1161,7 +1161,7 @@ def handle_merge_cleanup(job: dict[str, Any]):
         print("\n\033[1;91m!!! Error: PR merge failed.\033[0m")
         print("The merge was blocked by GitHub (check draft status, CI failures, or conflicts).")
         print("\033[93mLocal branch cleanup ABORTED to preserve your work.\033[0m")
-        input("\n\033[1;94mPress Enter to return to main menu...\033[0m")
+        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
         return
 
     # 3. Local branch cleanup (ONLY if merge succeeded and AI-managed)
@@ -1184,7 +1184,7 @@ def handle_merge_cleanup(job: dict[str, Any]):
     archive_path = archive_job(job)
 
     print(f"\n✅ Successfully merged and archived to {archive_path.name}")
-    input("\n\033[1;94mPress Enter to return to main menu...\033[0m")
+    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
 
 def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
     while True:
@@ -1219,8 +1219,9 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
 
             print("\n    Actions:")
             print("    [\033[1;94mU\033[0m] Un-archive (Restore to main menu)")
-            print("    [\033[1;94mB\033[0m] Back to Configuration")
+            print("    [\033[1;94mB\033[0m] Back")
 
+            # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(letter)")
             status_bar.render(at_bottom=True, force=True, prompt=prompt)
             choice = get_key().strip().lower()
@@ -1238,7 +1239,7 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
                         import shutil
                         shutil.move(str(src), str(dest))
                         print(f"\n✅ Job restored: \033[97m{src.name}\033[0m")
-                        time.sleep(1)
+                        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                 except ValueError:
                     pass
 
@@ -1292,7 +1293,21 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("\033[92mStatus: Feature complete!\033[0m")
                 
             print(f"Status: {job.get('status')}")
+
+            # LLM SESSIONS
+            sessions = job.get("llm_sessions", [])
+            # Fallback to old format for compatibility during transition
+            if not sessions and "llm_session_ids" in job:
+                sessions = [{"id": sid, "model": "unknown"} for sid in job["llm_session_ids"]]
+                
+            if sessions:
+                print(f"\033[1;94mLLM Sessions:\033[0m {', '.join([s['id'][:8] for s in sessions])}")
+                if len(sessions) > 1:
+                    print("[\033[1;94mJ\033[0m] List all LLM session IDs")
+                    actions.append("j")
+
             references = job.get("reference_artifacts", [])
+
             if references:
                 print(f"References: \033[92m{len(references)} attached\033[0m")
                 for ref in references[:3]:
@@ -1540,85 +1555,84 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             # 2. Status-Specific Actions
             if status == "planned":
                 if job_type == "feature-plan":
-                    print("[\033[1;94mA\033[0m] Approve / Create Sub-tasks")
+                    print("[\033[92mA\033[0m] Approve / Create Sub-tasks")
                     actions.append("a")
                 else:
-                    print("[\033[1;94mS\033[0m] Schedule & Dispatch")
+                    print("[\033[92mS\033[0m] Schedule & Dispatch")
                     actions.append("s")
             elif status == "scheduled":
-                print("[\033[1;94mE\033[0m] Execute (Worker Run)")
+                print("[\033[92mE\033[0m] Execute (Worker Run)")
                 actions.append("e")
             elif status == "debugging":
                 if phase == "propose" or phase == "paused":
-                    print("[\033[1;94mD\033[0m] Fix Failing Tests")
+                    print("[\033[92mD\033[0m] Fix Failing Tests")
                     actions.append("d")
                 elif phase == "verify":
-                    print("[\033[1;94mD\033[0m] Verify Fix")
+                    print("[\033[92mD\033[0m] Verify Fix")
                     actions.append("d")
                 
                 # Broaden Resume Availability: Let users escape debugging loops
-                print("[\033[1;94mU\033[0m] Resume Job (Next Task)")
+                print("[\033[93mU\033[0m] Resume Job (Next Task)")
                 actions.append("u")
                 
             elif status == "review-needed":
-                print("[\033[1;94mM\033[0m] Merge & Mark Completed")
+                print("[\033[92mM\033[0m] Merge & Mark Completed")
                 actions.append("m")
-                print("[\033[1;94mF\033[0m] Deliver to Device (Firebase distribution)")
+                print("[\033[93mF\033[0m] Deliver to Device (Firebase distribution)")
                 actions.append("f")
                 
                 # If there are tasks remaining, allow Resuming to the next task
                 if tasks and len(completed) < len(tasks):
-                    print("[\033[1;94mU\033[0m] Resume Job (Next Task)")
+                    print("[\033[93mU\033[0m] Resume Job (Next Task)")
                     actions.append("u")
             elif status == "human-needed":
                 if job.get("branch"):
-                    print("[\033[1;94mF\033[0m] Deliver to Device (Firebase distribution)")
+                    print("[\033[93mF\033[0m] Deliver to Device (Firebase distribution)")
                     actions.append("f")
-                print("[\033[1;94mU\033[0m] Resume Job")
+                print("[\033[92mU\033[0m] Resume Job")
                 actions.append("u")
             elif status == "executing" or is_stalled:
-                print("[\033[1;94mU\033[0m] Resume Job")
+                print("[\033[93mU\033[0m] Resume Job")
                 actions.append("u")
                 
             # Global actions available for most non-archived states
             if status not in ["completed", "discarded", "planned"]:
                 if "d" not in actions:
-                    print("[\033[1;94mD\033[0m] Auto-Fix / Iterate")
+                    print("[\033[93mD\033[0m] Auto-Fix / Iterate")
                     actions.append("d")
                 if "r" not in actions:
-                    print("[\033[1;94mR\033[0m] Full Re-run \033[91m(Deletes existing changes & resets to Planned)\033[0m")
+                    print("[\033[91mR\033[0m] Full Re-run \033[91m(Deletes existing changes & resets to Planned)\033[0m")
                     actions.append("r")
             
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
             if ai_modified or ai_untracked:
-                print("[\033[1;94mI\033[0m] View AI Changes (Files)")
+                print("[\033[96mI\033[0m] View AI Changes (Files)")
                 actions.append("i")
                 
-            print("[\033[1;94mL\033[0m] Link Logs (Update Context)")
-            print("[\033[1;94mK\033[0m] Attach UI Mockup / Reference")
-            print("[\033[1;94mQ\033[0m] Ask AI (Questions about changes)")
+            print("[\033[93mL\033[0m] Link Logs (Update Context)")
+            print("[\033[93mK\033[0m] Attach UI Mockup / Reference")
+            print("[\033[93mQ\033[0m] Ask AI (Questions about changes)")
             actions.extend(["l", "k", "q"])
 
-            print("[\033[1;94mO\033[0m] Select LLM Models (Override)")
-            print("[\033[1;94mT\033[0m] Export Context (Logs, Progress, Plan)")
-            print("[\033[1;94mV\033[0m] View Brief / Summary")
-            print("[\033[1;94mG\033[0m] View in GitHub")
-            print("[\033[1;94mC\033[0m] Close Issue in GitHub")
-            print("[\033[1;94mX\033[0m] Discard & Revert Changes")
-            print("[\033[1;94mB\033[0m] Back to Main Menu")
+            print("[\033[93mO\033[0m] Select LLM Models (Override)")
+            print("[\033[93mT\033[0m] Export Context (Logs, Progress, Plan)")
+            print("[\033[93mV\033[0m] View Brief / Summary")
+            print("[\033[96mG\033[0m] View in GitHub")
+            print("[\033[91mC\033[0m] Close Issue in GitHub")
+            print("[\033[91mX\033[0m] Discard & Revert Changes")
+            print("[\033[91mB\033[0m] Back to Main Menu")
             actions.extend(["v", "g", "c", "r", "x", "m", "f", "o", "b", "u", "t"])
             
             if error_msg:
                 print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                 error_msg = ""
 
-            # Standard layout (floating prompt) to reduce gap
-            print_divider()
-            status_bar.render(at_bottom=True)
-            print_choice_prompt("Choice:", "(action)")
-            
+            # Anchor prompt to bottom
+            prompt = get_choice_prompt("Choice:", "(action)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
             choice = get_key().strip().lower()
+            clear_choice_placeholder()
             
             if not choice:
                 clear_choice_placeholder()
@@ -1696,6 +1710,26 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             elif choice == "q":
                 handle_ask_ai(job, session_allowed_models)
                 job = refresh_job(job)
+            elif choice == "j":
+                print_header("LLM Session Tracking")
+                sessions = job.get("llm_sessions", [])
+                if not sessions and "llm_session_ids" in job:
+                    sessions = [{"id": sid, "model": "unknown"} for sid in job["llm_session_ids"]]
+                
+                if not sessions:
+                    print("  No sessions recorded.")
+                else:
+                    # Table Header
+                    print(f"  {'#':3} | {'Model Name':30} | {'Session ID (UUID)':40}")
+                    print(f"  {'-'*3:3}-+-{'-'*30:30}-+-{'-'*40:40}")
+                    
+                    for i, s in enumerate(sessions):
+                        model = s.get("model", "unknown")
+                        sid = s.get("id", "unknown")
+                        print(f"  {i:3} | {model:30} | \033[97m{sid}\033[0m")
+                
+                print("\n  Tip: You can resume these in the Gemini CLI using: gemini --resume <ID>")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "i" and "i" in actions:
                 print_header("AI Modified Files")
                 ai_modified = job.get("ai_modified_files", [])
@@ -1726,7 +1760,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         job = refresh_job(job)
                     else:
                         print("⚠️  No feedback provided. Revision cancelled.")
-                        time.sleep(1)
+                        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                 else:
                     dist_errors = PROJECT_CONFIG.validate_distribution_config()
                     if dist_errors:
@@ -1753,7 +1787,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             importlib.reload(orchestrator.project_config)
                             PROJECT_CONFIG = orchestrator.project_config.PROJECT_CONFIG
                             print("\n✅ Project configuration reloaded.")
-                            time.sleep(1)
+                            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                         else:
                             input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                         continue
@@ -1844,7 +1878,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     # Re-read to get the new tasks and status
                     job = refresh_job(job)
                     print(f"\n✅ Design transitioned to Feature Plan with {len(job.get('plan', {}).get('tasks', []))} tasks.")
-                    time.sleep(2)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     continue
 
                 if not session_allowed_machines:
@@ -1867,7 +1901,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     save_job(job)
                     job = refresh_job(job)
                     print("\n✅ Job status reset to Planned.")
-                    time.sleep(1)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "r":
                 warning = "\033[1;91m⚠️  WARNING: THIS WILL PERMANENTLY DELETE ALL LOCAL PROGRESS & CODE CHANGES.\033[0m\n"
                 warning += "Are you sure you want to reset status to 'planned' and start over?"
@@ -2094,7 +2128,13 @@ You MUST NOT propose or perform any code changes. Be concise, accurate, and focu
         try:
             print_phase("agent_thinking")
             # We don't pass a role so it doesn't try to parse JSON
-            output, actual_model = run_llm(model, full_prompt, allowed_models=session_allowed_models)
+            output, actual_model, session_id = run_llm(model, full_prompt, allowed_models=session_allowed_models)
+            
+            # Record session ID in job if present
+            if job:
+                if "llm_sessions" not in job:
+                    job["llm_sessions"] = []
+                job["llm_sessions"].append({"id": session_id, "model": actual_model})
             
             print(f"\n\033[1;97mAI Response ({actual_model}):\033[0m")
             print("-" * 60)
@@ -2109,172 +2149,184 @@ You MUST NOT propose or perform any code changes. Be concise, accurate, and focu
 def handle_api_keys(session_allowed_machines, session_allowed_models):
     while True:
         clear_screen()
-        print_header("AI Authentication & Model Access")
-        settings_path = CONFIG_DIR / "settings.json"
-        settings = read_json(settings_path) if settings_path.exists() else {}
+        # Setup status bar
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
 
-        print("\033[90mAccess to models is provided via logged-in CLIs (preferred) or manual keys.\033[0m\n")
+            print_header("AI Provider API Keys & Logins")
+            settings_path = CONFIG_DIR / "settings.json"
+            settings = read_json(settings_path) if settings_path.exists() else {}
 
-        def get_cli_status(cmd_args):
-            import shutil
-            if not shutil.which(cmd_args[0]):
-                return "Not Installed"
-            try:
-                res = subprocess.run(cmd_args, capture_output=True, text=True, timeout=3)
-                if res.returncode == 0:
-                    combined = (res.stdout + res.stderr).lower()
-                    if "logged in" in combined or "account:" in combined or "email:" in combined:
-                        return "Logged In"
-                    return "Ready"
+            print("\033[90mAccess to models is provided via logged-in CLIs (preferred) or manual keys.\033[0m\n")
+
+            def get_cli_status(cmd_args):
+                import shutil
+                if not shutil.which(cmd_args[0]):
+                    return "Not Installed"
+                try:
+                    res = subprocess.run(cmd_args, capture_output=True, text=True, timeout=3)
+                    if res.returncode == 0:
+                        combined = (res.stdout + res.stderr).lower()
+                        if "logged in" in combined or "account:" in combined or "email:" in combined:
+                            return "Logged In"
+                        return "Ready"
+                    return "Not Logged In"
+                except:
+                    return "Unknown"
+
+            def get_gemini_status():
+                import shutil
+                import os
+                if not shutil.which("gemini"): return "Not Installed"
+                if os.path.exists(os.path.expanduser("~/.gemini/oauth_creds.json")) or os.path.exists(os.path.expanduser("~/.gemini/google_accounts.json")):
+                    return "Logged In"
                 return "Not Logged In"
-            except:
-                return "Unknown"
 
-        def get_gemini_status():
-            import shutil
-            import os
-            if not shutil.which("gemini"): return "Not Installed"
-            if os.path.exists(os.path.expanduser("~/.gemini/oauth_creds.json")) or os.path.exists(os.path.expanduser("~/.gemini/google_accounts.json")):
-                return "Logged In"
-            return "Not Logged In"
+            def get_ollama_status():
+                import shutil
+                if not shutil.which("ollama"): return "Not Installed"
+                try:
+                    res = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=2)
+                    return "Running" if res.returncode == 0 else "Offline"
+                except:
+                    return "Offline"
 
-        def get_ollama_status():
-            import shutil
-            if not shutil.which("ollama"): return "Not Installed"
-            try:
-                res = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=2)
-                return "Running" if res.returncode == 0 else "Offline"
-            except:
-                return "Offline"
+            def get_opencode_status():
+                import shutil
+                if not shutil.which("opencode"): return "Not Installed"
+                try:
+                    # OpenCode is ready if 'opencode models' returns models
+                    res = subprocess.run(['opencode', 'models'], capture_output=True, text=True, timeout=3)
+                    if res.returncode == 0 and res.stdout.strip():
+                        return "Ready"
+                    return "Not Logged In"
+                except:
+                    return "Offline"
 
-        def get_opencode_status():
-            import shutil
-            if not shutil.which("opencode"): return "Not Installed"
-            try:
-                # OpenCode is ready if 'opencode models' returns models
-                res = subprocess.run(['opencode', 'models'], capture_output=True, text=True, timeout=3)
-                if res.returncode == 0 and res.stdout.strip():
-                    return "Ready"
-                return "Not Logged In"
-            except:
-                return "Offline"
+            # Gather Status Data
+            providers = [
+                {"label": "Gemini CLI", "cli": "gemini", "key_id": "gemini_api_key", "status": get_gemini_status()},
+                {"label": "Claude Code", "cli": "claude", "key_id": "anthropic_api_key", "status": get_cli_status(['claude', 'auth', 'status'])},
+                {"label": "Codex / GPT-5", "cli": "codex", "key_id": "openai_api_key", "status": get_cli_status(['codex', 'login', 'status'])},
+                {"label": "GitHub CLI", "cli": "gh", "key_id": None, "status": get_cli_status(['gh', 'auth', 'status'])},
+                {"label": "OpenCode CLI", "cli": "opencode", "key_id": None, "status": get_opencode_status()},
+                {"label": "Ollama (Local)", "cli": "ollama", "key_id": None, "status": get_ollama_status()},
+            ]
 
-        # Gather Status Data
-        providers = [
-            {"label": "Gemini CLI", "cli": "gemini", "key_id": "gemini_api_key", "status": get_gemini_status()},
-            {"label": "Claude Code", "cli": "claude", "key_id": "anthropic_api_key", "status": get_cli_status(['claude', 'auth', 'status'])},
-            {"label": "Codex / GPT-5", "cli": "codex", "key_id": "openai_api_key", "status": get_cli_status(['codex', 'login', 'status'])},
-            {"label": "GitHub CLI", "cli": "gh", "key_id": None, "status": get_cli_status(['gh', 'auth', 'status'])},
-            {"label": "OpenCode CLI", "cli": "opencode", "key_id": None, "status": get_opencode_status()},
-            {"label": "Ollama (Local)", "cli": "ollama", "key_id": None, "status": get_ollama_status()},
-        ]
+            # Table Header
+            header = f"{'Provider / Tool':20} | {'CLI Status':15} | {'Manual Key':15} | {'Access'}"
+            print(f"\033[1;97m{header}\033[0m")
+            print("\033[90m" + "-" * len(header) + "\033[0m")
 
-        # Table Header
-        header = f"{'Provider / Tool':20} | {'CLI Status':15} | {'Manual Key':15} | {'Access'}"
-        print(f"\033[1;97m{header}\033[0m")
-        print("\033[90m" + "-" * len(header) + "\033[0m")
+            for p in providers:
+                status = p["status"]
+                
+                # 1. CLI Column
+                if status in ["Logged In", "Ready", "Running"]:
+                    cli_display = f"\033[92m{status:15}\033[0m"
+                    cli_ready = True
+                elif status == "Not Installed":
+                    cli_display = f"\033[90m{status:15}\033[0m"
+                    cli_ready = False
+                else:
+                    cli_display = f"\033[91m{status:15}\033[0m"
+                    cli_ready = False
 
-        for p in providers:
-            status = p["status"]
-            
-            # 1. CLI Column
-            if status in ["Logged In", "Ready", "Running"]:
-                cli_display = f"\033[92m{status:15}\033[0m"
-                cli_ready = True
-            elif status == "Not Installed":
-                cli_display = f"\033[90m{status:15}\033[0m"
-                cli_ready = False
-            else:
-                cli_display = f"\033[91m{status:15}\033[0m"
-                cli_ready = False
+                # 2. Key Column
+                key_ready = False
+                raw_key_status = "Not Set"
+                key_color = "\033[90m" # Default grey
 
-            # 2. Key Column
-            key_ready = False
-            raw_key_status = "Not Set"
-            key_color = "\033[90m" # Default grey
+                if p["key_id"]:
+                    current_key = settings.get(p["key_id"], "")
+                    if current_key:
+                        raw_key_status = "Active"
+                        key_color = "\033[92m" # Green
+                        key_ready = True
+                    elif p["key_id"].upper() in os.environ:
+                        raw_key_status = "Environment"
+                        key_color = "\033[94m" # Blue
+                        key_ready = True
+                    elif cli_ready:
+                        raw_key_status = "Delegated"
+                        key_color = "\033[1;94m" # Cyan
+                        key_ready = False
+                else:
+                    raw_key_status = "N/A"
+                    key_color = "\033[90m"
 
-            if p["key_id"]:
-                current_key = settings.get(p["key_id"], "")
-                if current_key:
-                    raw_key_status = "Active"
-                    key_color = "\033[92m" # Green
-                    key_ready = True
-                elif p["key_id"].upper() in os.environ:
-                    raw_key_status = "Environment"
-                    key_color = "\033[94m" # Blue
-                    key_ready = True
-                elif cli_ready:
-                    raw_key_status = "Delegated"
-                    key_color = "\033[1;94m" # Cyan
-                    key_ready = False
-            else:
-                raw_key_status = "N/A"
-                key_color = "\033[90m"
+                key_display = f"{key_color}{raw_key_status:15}\033[0m"
 
-            key_display = f"{key_color}{raw_key_status:15}\033[0m"
+                # 3. Overall Ready Column
+                if cli_ready or key_ready:
+                    ready_display = "\033[1;92m✓ READY\033[0m"
+                else:
+                    ready_display = "\033[91m✗ LOCKED\033[0m"
 
-            # 3. Overall Ready Column
-            if cli_ready or key_ready:
-                ready_display = "\033[1;92m✓ READY\033[0m"
-            else:
-                ready_display = "\033[91m✗ LOCKED\033[0m"
+                print(f"{p['label']:20} | {cli_display} | {key_display} | {ready_display}")
 
-            print(f"{p['label']:20} | {cli_display} | {key_display} | {ready_display}")
+            print("\n  \033[1;97mActions:\033[0m")
+            print("    \033[1;94mManual Key Updates\033[0m")
+            print("      [\033[1;94mG\033[0m] Update Gemini Key    [\033[1;94mA\033[0m] Update Anthropic Key    [\033[1;94mO\033[0m] Update OpenAI Key")
 
-        print("\n  \033[1;97mActions:\033[0m")
-        print("    \033[1;94mManual Key Updates\033[0m")
-        print("      [\033[1;94mG\033[0m] Update Gemini Key    [\033[1;94mA\033[0m] Update Anthropic Key    [\033[1;94mO\033[0m] Update OpenAI Key")
+            print("\n    \033[1;96mBrowser Logins (OAuth)\033[0m")
+            print("      [\033[1;94m1\033[0m] Login Gemini        [\033[1;94m2\033[0m] Login Claude           [\033[1;94m3\033[0m] Login Codex")
+            print("      [\033[1;94m4\033[0m] Login GitHub        [\033[1;94m5\033[0m] Login OpenCode")
 
-        print("\n    \033[1;96mBrowser Logins (OAuth)\033[0m")
-        print("      [\033[1;94m1\033[0m] Login Gemini        [\033[1;94m2\033[0m] Login Claude           [\033[1;94m3\033[0m] Login Codex")
-        print("      [\033[1;94m4\033[0m] Login GitHub        [\033[1;94m5\033[0m] Login OpenCode")
+            print("\n    \033[1;97mOptions\033[0m")
+            print("      [\033[1;94mC\033[0m] Clear Saved Keys    [\033[1;94mB\033[0m] Back")
 
-        print("\n    \033[1;97mOptions\033[0m")
-        print("      [\033[1;94mC\033[0m] Clear Saved Keys    [\033[90mB\033[0m] Back to Menu")
+            # Anchor prompt to bottom
+            prompt = get_choice_prompt("Choice:", "(action)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
 
-        print_choice_prompt("\n  Choice:", "(action)")
-        choice = get_key().strip().lower()
-        clear_choice_placeholder()
+            if choice == "b": break
 
-        if choice == "b": break
+            key_to_update = None
+            login_cmd = None
 
-        key_to_update = None
-        login_cmd = None
+            if choice == "g": key_to_update = "gemini_api_key"
+            elif choice == "a": key_to_update = "anthropic_api_key"
+            elif choice == "o": key_to_update = "openai_api_key"
+            elif choice == "1": login_cmd = ["gemini"]
+            elif choice == "2": login_cmd = ["claude", "auth", "login"]
+            elif choice == "3": login_cmd = ["codex", "login"]
+            elif choice == "4": login_cmd = ["gh", "auth", "login"]
+            elif choice == "5": login_cmd = ["opencode", "auth", "login"]
+            elif choice == "c":
+                warning = "\033[1;91m⚠️  DANGER: THIS WILL PERMANENTLY REMOVE ALL MANUAL API KEYS FROM YOUR CONFIG.\033[0m\n"
+                warning += "You will have to re-enter them manually. Are you sure?"
+                if prompt_confirm(warning, default=False):
+                    for kid in ["gemini_api_key", "anthropic_api_key", "openai_api_key"]: settings.pop(kid, None)
+                    write_json(settings_path, settings)
+                    print("✅ Saved keys cleared.")
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
+                continue
 
-        if choice == "g": key_to_update = "gemini_api_key"
-        elif choice == "a": key_to_update = "anthropic_api_key"
-        elif choice == "o": key_to_update = "openai_api_key"
-        elif choice == "1": login_cmd = ["gemini"]
-        elif choice == "2": login_cmd = ["claude", "auth", "login"]
-        elif choice == "3": login_cmd = ["codex", "login"]
-        elif choice == "4": login_cmd = ["gh", "auth", "login"]
-        elif choice == "5": login_cmd = ["opencode", "auth", "login"]
-        elif choice == "c":
-            warning = "\033[1;91m⚠️  DANGER: THIS WILL PERMANENTLY REMOVE ALL MANUAL API KEYS FROM YOUR CONFIG.\033[0m\n"
-            warning += "You will have to re-enter them manually. Are you sure?"
-            if prompt_confirm(warning, default=False):
-                for kid in ["gemini_api_key", "anthropic_api_key", "openai_api_key"]: settings.pop(kid, None)
-                write_json(settings_path, settings)
-                print("✅ Saved keys cleared.")
-                time.sleep(1)
-            continue
-
-        if key_to_update:
-            print(f"\n  Updating: \033[97m{key_to_update}\033[0m")
-            new_val = input(f"  Enter new key \033[90m(or Enter to cancel)\033[0m: ").strip()
-            if new_val:
-                settings[key_to_update] = new_val
-                write_json(settings_path, settings)
-                print("✅ Key saved.")
-            else:
-                print("⚠️  No changes made.")
-            time.sleep(1)
-        elif login_cmd:
-            print_header(f"Launching {' '.join(login_cmd)}")
-            print("The CLI will open your browser for authentication.")
-            print("Follow the prompts and return here when finished.\n")
-            subprocess.run(login_cmd)
-            input("\n\033[1;94mPress Enter to return to Key Management...\033[0m")
+            if key_to_update:
+                print(f"\n  Updating: \033[97m{key_to_update}\033[0m")
+                # Use getpass for security
+                import getpass
+                new_val = getpass.getpass("  🔑 Key (invisible): ").strip()
+                if new_val:
+                    settings[key_to_update] = new_val
+                    write_json(settings_path, settings)
+                    print("✅ Key saved.")
+                else:
+                    print("⚠️  No changes made.")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
+            elif login_cmd:
+                print_header(f"Launching {' '.join(login_cmd)}")
+                print("The CLI will open your browser for authentication.")
+                print("Follow the prompts and return here when finished.\n")
+                subprocess.run(login_cmd)
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
 def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str]):
     print_header("System Health & Diagnostic Check")
     print("\033[90mPerforming a comprehensive audit of prerequisites, files, and fleet dependencies...\033[0m\n")
@@ -2379,7 +2431,7 @@ def handle_role_prompts():
     print("  [\033[1;94m1\033[0m] Copy system default templates to project (to enable editing)")
     if prompts_dir.exists():
         print("  [\033[1;94m2\033[0m] Delete custom prompts (revert to system defaults)")
-    print("  [\033[90mB\033[0m] Back")
+    print("  [\033[1;94mB\033[0m] Back")
 
     choice = input("\nChoice: ").strip().lower()
     if choice == '1':
@@ -2387,13 +2439,13 @@ def handle_role_prompts():
         cli_path = SCRIPTS_DIR.parent / "cli.py"
         subprocess.run([sys.executable, str(cli_path), "wizard", "--copy-prompt-overrides", "--non-interactive", "--force"], cwd=str(ROOT))
         print("\n✅ Templates copied! You can now edit them.")
-        time.sleep(2)
+        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
     elif choice == '2' and prompts_dir.exists():
         if prompt_confirm("Are you sure you want to delete all custom prompts?", default=False):
             import shutil
             shutil.rmtree(prompts_dir)
             print("✅ Custom prompts deleted. Reverted to system defaults.")
-            time.sleep(2)
+            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
 
 def handle_configuration_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> tuple[list[str], list[str]]:
     """Secondary menu for advanced setup, tools, and configuration."""
@@ -2417,21 +2469,21 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 except:
                     pass
 
-            print("    [\033[1;94mM\033[0m] LLM Models (Session Defaults)")
-            print("    [\033[1;94mK\033[0m] Manage LLM API Keys")
-            print("    [\033[1;94mF\033[0m] Manage Machine Fleet")
-            print("    [\033[1;94mP\033[0m] System Health Check")
-            print(f"    [\033[1;94mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
-            print("    [\033[1;94mC\033[0m] Change Target Project")
-            print("    [\033[1;94mA\033[0m] Manage Archived Jobs")
-            print("    [\033[1;94mI\033[0m] Manage CLI Instructions (.md files)")
-            print("    [\033[1;94mE\033[0m] Email Notification Settings")
-            print("    [\033[1;94mS\033[0m] Setup & Architecture Guide")
+            print("    [\033[93mM\033[0m] LLM Models (Session Defaults)")
+            print("    [\033[93mK\033[0m] Manage LLM API Keys")
+            print("    [\033[93mF\033[0m] Manage Machine Fleet")
+            print("    [\033[93mP\033[0m] System Health Check")
+            print(f"    [\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
+            print("    [\033[93mC\033[0m] Change Target Project")
+            print("    [\033[93mA\033[0m] Manage Archived Jobs")
+            print("    [\033[93mI\033[0m] Manage CLI Instructions (.md files)")
+            print("    [\033[93mE\033[0m] Email Notification Settings")
+            print("    [\033[93mS\033[0m] Setup & Architecture Guide")
 
-            print("    [\033[1;94mD\033[0m] Firebase App Distro (Delivery)")
+            print("    [\033[93mD\033[0m] Firebase App Distro (Delivery)")
 
-            print("    [\033[1;94mT\033[0m] Orchestrator Self-Tests")
-            print("    [\033[1;94mB\033[0m] Back to Main Menu")
+            print("    [\033[93mT\033[0m] Orchestrator Self-Tests")
+            print("    [\033[91mB\033[0m] Back")
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(letter)")
             status_bar.render(at_bottom=True, force=True, prompt=prompt)
@@ -2489,10 +2541,10 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                         settings["global_base_branch"] = new_base
                         write_json(settings_path, settings)
                         print(f"\n✅ Base branch set to: \033[97m{new_base}\033[0m")
-                        time.sleep(1)
+                        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                 except Exception as ex:
                     print(f"\033[91mError updating base branch: {ex}\033[0m")
-                    time.sleep(2)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "c":
                 from orchestrator.project_config import load_recent_projects, remember_project
                 recent = load_recent_projects()
@@ -2513,7 +2565,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     remember_project(Path(selected["root"]), selected["name"], active=True)
                     print(f"\nChanged target project to {selected['name']}.")
                     print("Restarting console...")
-                    time.sleep(1)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
                         del os.environ["ORCHESTRATOR_PROJECT_ROOT"]
                     os.execvp("orchestrator", ["orchestrator", "console"])
@@ -2647,19 +2699,19 @@ def main_loop():
                         print(format_job_row(i, job, title_width=title_width))
                 
                 print_header("Actions")
-                print("[\033[1;94mN\033[0m] New Job")
-                print("[\033[1;94mU\033[0m] Run your unit tests")
-                print("[\033[1;94mC\033[0m] Configuration & Tools")
-                print("[\033[1;94mR\033[0m] Refresh & Sync (GitHub)")
-                print("[\033[1;94mQ\033[0m] Quit")
+                print("[\033[96mN\033[0m] New Job")
+                print("[\033[93mU\033[0m] Run your unit tests")
+                print("[\033[93mC\033[0m] Configuration & Tools")
+                print("[\033[93mR\033[0m] Refresh & Sync (GitHub)")
+                print("[\033[91mQ\033[0m] Quit")
                 
                 if error_msg:
                     print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                     error_msg = ""
 
                 # Anchor prompt to bottom
-                status_bar.render(at_bottom=True)
-                print_choice_prompt("Choice:", "(number or letter)")
+                prompt = get_choice_prompt("Choice:", "(number or letter)")
+                status_bar.render(at_bottom=True, force=True, prompt=prompt)
                 
                 try:
                     choice = get_key().strip().lower()
@@ -2867,11 +2919,11 @@ Read these files first and treat them as authoritative:
                 print("    [\033[1;94mR\033[0m] Repair Misconfigured Files (Append required links)")
             
             print("    [\033[1;94mP\033[0m] Manage Agent Role Prompts (internal)")
-            print("    [\033[1;94mB\033[0m] Back to Configuration")
+            print("    [\033[1;94mB\033[0m] Back")
             
-            print_divider()
-            print_choice_prompt("Choice:", "(index or letter)")
-            status_bar.render(at_bottom=True)
+            # Anchor prompt to bottom
+            prompt = get_choice_prompt("Choice:", "(index or letter)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
             choice = get_key().strip().lower()
             clear_choice_placeholder()
             
@@ -2889,7 +2941,7 @@ Read these files first and treat them as authoritative:
                         path.write_text(template.format(filename=filename, name=name), encoding="utf-8")
                         created += 1
                 print(f"\n    ✅ Created {created} missing instruction files.")
-                input("    \033[1;94mTap Enter to return to menu...\033[0m")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "r" and any(s == "invalid" for s in file_statuses.values()):
                 repaired = 0
                 for name, status in file_statuses.items():
@@ -2903,7 +2955,7 @@ Read these files first and treat them as authoritative:
                         path.write_text(content + append_text, encoding="utf-8")
                         repaired += 1
                 print(f"\n    ✅ Repaired {repaired} files by appending required links.")
-                input("    \033[1;94mTap Enter to return to menu...\033[0m")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice.isdigit():
                 idx = int(choice)
                 if 0 <= idx < len(keys):
@@ -2914,13 +2966,13 @@ Read these files first and treat them as authoritative:
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_text(template.format(filename=filename, name=name), encoding="utf-8")
                         print(f"\n    ✅ Created {filename}.")
-                        input("    \033[1;94mTap Enter to return to menu...\033[0m")
+                        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     else:
                         print(f"\n    Opening {filename} in editor...")
                         if file_statuses[name] == "invalid":
                             print("    \033[93mRemember to add references to universal docs (docs/architecture.md, etc.)\033[0m")
                             import time
-                            time.sleep(2)
+                            input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                         editor = os.environ.get("EDITOR", "nano")
                         subprocess.run([editor, str(path)])
 
@@ -3032,7 +3084,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
             print("    [\033[1;94mL\033[0m] Login to Firebase (Browser)")
             print("    [\033[1;94mK\033[0m] Configure Headless Signing (Keychain Auto-Unlock)")
             print("    [\033[1;94mT\033[0m] Test Distribution Script (Dry Run via build delivery)")
-            print("    [\033[1;94mB\033[0m] Back to Main Menu")
+            print("    [\033[1;94mB\033[0m] Back")
             
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -3047,7 +3099,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                 print("The CLI will open your browser for authentication.")
                 print("Follow the prompts and return here when finished.\n")
                 subprocess.run(["firebase", "login"])
-                input("\n\033[1;94mPress Enter to return...\033[0m")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "k":
                 handle_keychain_setup(status_bar)
             elif choice == "t":
@@ -3142,7 +3194,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print("    [\033[1;94mR\033[0m] Remove recipient address")
                 print("    [\033[1;94mT\033[0m] Send Test Email")
             print("    [\033[1;94mC\033[0m] Configure Email Sender")
-            print("    [\033[1;94mB\033[0m] Back to Main Menu")
+            print("    [\033[1;94mB\033[0m] Back")
             
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -3163,7 +3215,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     settings["notification_emails"] = emails
                     write_json(settings_path, settings)
                     print(f"✅ Added: {email}")
-                    time.sleep(1)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "i":
                 import re
                 print("\n    \033[1;96m--- Import Recipients from CSV ---\033[0m")
@@ -3172,7 +3224,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 csv_path = input("\n    Enter path to CSV file \033[90m(or Enter to cancel)\033[0m: ").strip()
                 if not csv_path:
                     print("⚠️  Import cancelled.")
-                    time.sleep(1)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     continue
 
                 # Remove quotes if user dragged/dropped file
@@ -3180,7 +3232,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 path = Path(csv_path)
                 if not path.exists():
                     print(f"\033[91m    Error: File not found at {path}\033[0m")
-                    time.sleep(2)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                     continue
                 
                 try:
@@ -3200,10 +3252,10 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                         print(f"\033[92m    Successfully imported {added_count} new email(s).\033[0m")
                     else:
                         print("\033[93m    No new unique email addresses found in file.\033[0m")
-                    time.sleep(2)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
                 except Exception as ex:
                     print(f"\033[91m    Error reading CSV: {ex}\033[0m")
-                    time.sleep(2)
+                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "c":
                 clear_screen()
                 print_header("Configure Email Provider")
@@ -3241,7 +3293,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     
                 write_json(settings_path, settings)
                 print("\n    ✅ Provider configured.")
-                input("    \033[1;94mTap Enter to return to menu...\033[0m")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "r" and emails:
                 idx_str = input("\n    Enter index to remove: ").strip()
                 try:

@@ -90,7 +90,7 @@ def capture_system_logs(out_path: Path):
 
 def analyze_failure(kind: str, output: str) -> str:
     prompt = (PROMPTS_DIR / "build_checker.md").read_text(encoding="utf-8")
-    analysis, _ = run_llm("gemini", f"{prompt}\n\nFailure type: {kind}\n\nOutput:\n{output}\n", cwd=ROOT, role=ModelRole.REVIEWER)
+    analysis, _, session_id = run_llm("gemini", f"{prompt}\n\nFailure type: {kind}\n\nOutput:\n{output}\n", cwd=ROOT, role=ModelRole.REVIEWER)
     return analysis
 
 
