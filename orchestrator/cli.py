@@ -660,12 +660,13 @@ def _main(argv: list[str] | None = None) -> int:
 
             print(f"\n\033[1;96m{'='*20} Orchestrator {'='*20}\033[0m")
             print("No initialized project found in current directory.\n")
-            print("    [\033[93m1\033[0m] Initialize new project here")
+            print("    [\033[93m1\033[0m] Initialize new project (Wizard)")
 
             if projects:
                 print("\n  \033[1;36m--- EXISTING PROJECTS ---\033[0m")
                 for i, p in enumerate(projects, 2):
-                    print(f"    [\033[93m{i}\033[0m] Open {p['name']} \033[90m({p['root']})\033[0m")
+                    print(f"    [\033[93m{i}\033[0m] Open {p['name']}")
+                    print(f"        \033[90m{p['root']}\033[0m")
 
             print("\n    [\033[91mQ\033[0m] Quit")
             
