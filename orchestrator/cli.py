@@ -668,22 +668,30 @@ def _main(argv: list[str] | None = None) -> int:
                     print(f"    [\033[93m{i}\033[0m] Open {p['name']}")
                     print(f"        \033[90m{p['root']}\033[0m")
 
-            print("\n    [\033[91mQ\033[0m] Quit")
-            
+            print("\n    [\033[91mQ\033[0m] Quit\n")
+            print("-" * 37)
+
+            from orchestrator.scripts.common import get_key, print_choice_prompt, clear_choice_placeholder
             while True:
-                choice = input("\nChoice: ").strip().lower()
+                sys.stdout.write("\r")
+                print_choice_prompt("Choice:", "(index or letter)")
+                choice = get_key().strip().lower()
+                clear_choice_placeholder()
+                
                 if choice == "q":
+                    print()
                     return 0
                 if choice == "1":
+                    print()
                     argv = ["wizard"]
                     break
                 if choice.isdigit():
                     idx = int(choice) - 2
                     if 0 <= idx < len(projects):
                         os.environ["ORCHESTRATOR_PROJECT_ROOT"] = projects[idx]["root"]
+                        print()
                         argv = ["console"]
                         break
-                print("Invalid choice.")
 
     parser = argparse.ArgumentParser(prog="orchestrator")
     subparsers = parser.add_subparsers(dest="command", required=True)
