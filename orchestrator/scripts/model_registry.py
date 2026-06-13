@@ -204,6 +204,10 @@ MODELS = [
     )
 ]
 
+import json
+import os
+from pathlib import Path
+
 # Legacy / Base IDs from llm.py that we should support as aliases or direct lookups
 LEGACY_IDS = {
     "gemini": "gemini-3.1-pro-preview",
@@ -212,12 +216,63 @@ LEGACY_IDS = {
     "opencode": "opencode/big-pickle",
 }
 
+def load_custom_models() -> list[ModelMetadata]:
+    """Loads custom models from ~/.orchestrator/custom_models.json or project config."""
+    custom_models = []
+    
+    # Check global config
+    global_config = Path.home() / ".orchestrator" / "custom_models.json"
+    
+    # Check project config if ORCHESTRATOR_PROJECT_ROOT is set
+    project_config = None
+    if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
+        project_config = Path(os.environ["ORCHESTRATOR_PROJECT_ROOT"]) / ".orchestrator" / "config" / "custom_models.json"
+        
+    for config_path in [global_config, project_config]:
+        if config_path and config_path.exists():
+            try:
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                for item in data.get("models", []):
+                    # Map string tiers back to Enums
+                    tier_str = item.get("tier", "HIGH").upper()
+                    tier = getattr(ModelTier, tier_str, ModelTier.HIGH)
+                    
+                    caps_str = item.get("capabilities", ["coding", "reasoning"])
+                    caps = []
+                    for c in caps_str:
+                        try:
+                            caps.append(ModelCapability(c.lower()))
+                        except ValueError:
+                            pass
+                            
+                    custom_models.append(ModelMetadata(
+                        id=item["id"],
+                        family=item.get("family", "custom"),
+                        tier=tier,
+                        capabilities=caps,
+                        cost_factor=item.get("cost_factor", 1.0),
+                        aliases=item.get("aliases", []),
+                        required_clis=item.get("required_clis", []),
+                        api_model_id=item.get("api_model_id"),
+                        reasoning_effort=item.get("reasoning_effort")
+                    ))
+            except Exception as e:
+                print(f"Warning: Failed to load custom models from {config_path}: {e}")
+                
+    return custom_models
+
+_ALL_MODELS_CACHE = None
+
+def get_all_models() -> list[ModelMetadata]:
+    global _ALL_MODELS_CACHE
+    if _ALL_MODELS_CACHE is None:
+        _ALL_MODELS_CACHE = MODELS + load_custom_models()
+    return _ALL_MODELS_CACHE
+
 def get_model(model_id: str) -> ModelMetadata | None:
-    # Check ID and aliases
-    for m in MODELS:
+    # Check ID and aliases against all models
+    all_m = get_all_models()
+    for m in all_m:
         if model_id == m.id or model_id in m.aliases:
             return m
     return None
-
-def get_all_models() -> list[ModelMetadata]:
-    return MODELS

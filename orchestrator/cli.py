@@ -382,25 +382,31 @@ def run_wizard(args: argparse.Namespace) -> int:
         write_helper_script(root, args.force)
 
     if not models and not args.non_interactive:
-        print(f"\n\033[1;96m{'='*20} LLM Models {'='*20}\033[0m")
-        from orchestrator.scripts.common import prompt_checkbox
-        from orchestrator.scripts.dev_console import get_model_selection_data
-        options, value_map, _ = get_model_selection_data()
+        print(f"\n\033[1;96m{'='*20} AI Model Discovery {'='*20}\033[0m")
+        print("Detecting installed AI CLIs and authentication status...\n")
         
-        # Determine defaults based on family defaults (gemini, claude) if present
-        defaults = []
-        for opt in options:
-            if "gemini" in opt.lower() and "standard" in opt.lower():
-                defaults.append(opt)
-        if not defaults and options:
-            # Fallback to the first available non-header option
-            for opt in options:
-                if not opt.startswith("---"):
-                    defaults.append(opt)
-                    break
+        from orchestrator.scripts.model_registry import get_all_models
+        all_models = get_all_models()
         
-        selected_labels = prompt_checkbox("Choose at least one LLM/model alias:", options, defaults=defaults, clear_screen=False)
-        models = [value_map[label] for label in selected_labels if label in value_map]
+        # Get unique CLIs required by models
+        required_clis = set()
+        for m in all_models:
+            required_clis.update(m.required_clis)
+            
+        cli_status = {}
+        for cli in sorted(required_clis):
+            is_ready, msg = check_cli_auth(cli)
+            cli_status[cli] = is_ready
+            print(f"  {cli.ljust(10)} : {msg}")
+            
+        # Automatically select all models where the required CLIs are satisfied
+        for m in all_models:
+            if not m.required_clis:
+                continue
+            if all(cli_status.get(c, False) for c in m.required_clis):
+                models.append(m.id)
+                
+        print("\n\033[90m(You can change active models and default families later in the Dev Console)\033[0m")
         
     if not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
