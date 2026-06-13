@@ -384,8 +384,24 @@ def run_wizard(args: argparse.Namespace) -> int:
     if not models and not args.non_interactive:
         print(f"\n\033[1;96m{'='*20} LLM Models {'='*20}\033[0m")
         from orchestrator.scripts.common import prompt_checkbox
-        model_options = ["gemini", "claude", "codex", "anthropic", "openai", "openrouter"]
-        models = prompt_checkbox("Choose at least one LLM/model alias:", model_options, defaults=["gemini"], clear_screen=False)
+        from orchestrator.scripts.dev_console import get_model_selection_data
+        options, value_map, _ = get_model_selection_data()
+        
+        # Determine defaults based on family defaults (gemini, claude) if present
+        defaults = []
+        for opt in options:
+            if "gemini" in opt.lower() and "standard" in opt.lower():
+                defaults.append(opt)
+        if not defaults and options:
+            # Fallback to the first available non-header option
+            for opt in options:
+                if not opt.startswith("---"):
+                    defaults.append(opt)
+                    break
+        
+        selected_labels = prompt_checkbox("Choose at least one LLM/model alias:", options, defaults=defaults, clear_screen=False)
+        models = [value_map[label] for label in selected_labels if label in value_map]
+        
     if not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
         return 1
