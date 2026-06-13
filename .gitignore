@@ -10,5 +10,11 @@ venv/
 build/
 dist/
 
+# Logs and temporary test projects
+logs/
+temp_proj/
+test_project/
+test_onboarding_proj/
+
 # Runtime directories generated when testing project initialization.
 .orchestrator/

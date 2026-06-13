@@ -308,6 +308,36 @@ def parse_csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def test_ssh_connection(target: str) -> bool:
+    print(f"  🔍 Testing connection to \033[97m{target}\033[0m...")
+    try:
+        # -o BatchMode=yes ensures it doesn't hang on password prompts
+        # -o ConnectTimeout=5 ensures it fails fast if host is down
+        res = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", target, "exit"],
+            capture_output=True, text=True, timeout=10
+        )
+        if res.returncode == 0:
+            print("  ✅ Connection successful.")
+            return True
+        else:
+            err = res.stderr.strip()
+            print(f"  ❌ Connection failed: {err}")
+            if "Permission denied" in err:
+                print("     \033[93m💡 Tip: Your SSH keys might not be authorized on the remote machine.\033[0m")
+                print(f"        Try running: ssh-copy-id {target}")
+            elif "Host key verification failed" in err:
+                print("     \033[93m💡 Tip: The remote host is not in your known_hosts file.\033[0m")
+                print(f"        Try running: ssh {target} to accept the key manually.")
+            return False
+    except subprocess.TimeoutExpired:
+        print("  ❌ Connection timed out after 10s.")
+        return False
+    except Exception as e:
+        print(f"  ❌ Error testing connection: {e}")
+        return False
+
+
 def create_ssh_machine(name: str, ssh_target: str, repo_path: str) -> dict:
     if not name or not ssh_target or not repo_path.startswith("/"):
         raise ValueError("Machine config requires name, SSH target, and absolute repo path.")
@@ -646,11 +676,13 @@ def run_wizard(args: argparse.Namespace) -> int:
                                 c = candidates[idx]
                                 repo_path = prompt_text(f"Remote repo path for {c['hostname']}")
                                 try:
-                                    ssh_machines.append(create_ssh_machine(
+                                    machine = create_ssh_machine(
                                         name=c['hostname'].split('.')[0],
                                         ssh_target=c['host'],
                                         repo_path=repo_path
-                                    ))
+                                    )
+                                    if test_ssh_connection(machine["ssh_target"]) or prompt_yes_no("Connection failed. Add this machine anyway?", False):
+                                        ssh_machines.append(machine)
                                 except ValueError as exc:
                                     print(f"  ❌ {exc}")
                         except ValueError:
@@ -661,10 +693,13 @@ def run_wizard(args: argparse.Namespace) -> int:
                 target = prompt_text("SSH target", name)
                 repo_path = prompt_text("Remote repo path")
                 try:
-                    ssh_machines.append(create_ssh_machine(name, target, repo_path))
+                    machine = create_ssh_machine(name, target, repo_path)
+                    if test_ssh_connection(machine["ssh_target"]) or prompt_yes_no("Connection failed. Add this machine anyway?", False):
+                        ssh_machines.append(machine)
                 except ValueError as exc:
                     print(str(exc))
                     return 1
+
         except SkipSectionException:
             pass
 
@@ -726,6 +761,28 @@ def run_wizard(args: argparse.Namespace) -> int:
         except SkipSectionException:
             pass
 
+    # Final step: Project Grounding / Indexing
+    if not args.non_interactive:
+        print(f"\n\033[1;96m{'='*20} Grounding {'='*20}\033[0m")
+        run_script("index_project.py", [])
+        
+        # Xcode Smoke Test
+        from orchestrator.project_config import load_project_config
+        cfg = load_project_config()
+        if (cfg.xcode_project or cfg.xcode_workspace) and prompt_yes_no("Run a quick Xcode build validation (Smoke Test)?", True):
+            print("\n🔍 Verifying Xcode build settings...")
+            cmd = f"xcodebuild -scheme {shlex.quote(cfg.scheme)} -showBuildSettings"
+            if cfg.xcode_workspace:
+                cmd += f" -workspace {shlex.quote(cfg.xcode_workspace)}"
+            elif cfg.xcode_project:
+                cmd += f" -project {shlex.quote(cfg.xcode_project)}"
+            
+            try:
+                subprocess.run(cmd.split(), capture_output=True, text=True, check=True, timeout=30, cwd=str(root))
+                print("✅ Xcode configuration verified.")
+            except Exception as e:
+                print(f"❌ Xcode validation failed: {e}")
+                print("   Check your scheme name and project paths in .orchestrator/project.json")
 
     print(f"\n\033[1;92m{'='*20} Wizard Complete {'='*20}\033[0m")
     print("\033[90mReview these Markdown/config files before creating jobs:\033[0m")

@@ -134,6 +134,20 @@ def check():
     has_xcode = shutil.which("xcodebuild") is not None
     print_result(has_xcode, "Xcode CLI Tools", "INSTALLED" if has_xcode else "MISSING", "Xcode CLI Tools")
     
+    # Git Check
+    print("\n--- 1a. Git Repository Sanity ---")
+    is_git = (ROOT / ".git").exists()
+    print_result(is_git, "Git Repository", "OK" if is_git else "MISSING")
+    if is_git:
+        try:
+            status = subprocess.check_output(["git", "status", "--short"], cwd=str(ROOT), text=True).strip()
+            if status:
+                print(f"     \033[93m⚠️  Warning: Uncommitted changes detected.\033[0m")
+                print("        AI workflows work best with a clean slate.")
+            else:
+                print(f"     \033[92m✅ Repository is clean.\033[0m")
+        except: pass
+    
     # 1. Check Essential Files
     print("\n--- 2. Project Config ---")
     
@@ -152,6 +166,25 @@ def check():
     m_path = CONFIG_DIR / "machines.json"
     print_result(m_path.exists(), "machines.json", "OK" if m_path.exists() else "MISSING",
                  f"Define your fleet in {m_path}")
+
+    # Xcode Sanity
+    if PROJECT_CONFIG.xcode_project or PROJECT_CONFIG.xcode_workspace:
+        print("\n--- 2a. Xcode Build Settings ---")
+        try:
+            # Quick check if scheme exists
+            res = subprocess.run(["xcodebuild", "-list"], cwd=str(ROOT), capture_output=True, text=True, timeout=5)
+            if PROJECT_CONFIG.scheme and PROJECT_CONFIG.scheme in res.stdout:
+                print_result(True, f"Scheme: {PROJECT_CONFIG.scheme}", "FOUND")
+            else:
+                print_result(False, f"Scheme: {PROJECT_CONFIG.scheme}", "NOT FOUND", f"Ensure scheme exists in 'xcodebuild -list'")
+            
+            if PROJECT_CONFIG.test_target and PROJECT_CONFIG.test_target in res.stdout:
+                print_result(True, f"Test Target: {PROJECT_CONFIG.test_target}", "FOUND")
+            else:
+                # Test targets aren't always in -list stdout as directly as schemes, but good enough for a heuristic
+                pass
+        except Exception as e:
+            print(f"     \033[91m⚠️  Error checking Xcode: {e}\033[0m")
 
     # Grounding Docs
     print("\n--- 3. Grounding Docs (Critical for AI) ---")

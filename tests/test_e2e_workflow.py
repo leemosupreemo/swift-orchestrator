@@ -81,7 +81,7 @@ class E2EWorkflowTests(unittest.TestCase):
             "constraints": [],
             "risks": [],
             "tasks": [{"title": "Task 1", "description": "Desc", "acceptance_criteria": ["AC"], "likely_files": [], "tests": [], "complexity": "low"}]
-        }), "mock-model")
+        }), "mock-model", "mock-session-id")
 
         args = ["feature", "--branch-mode", "manual", "--no-dispatch", "--yolo"]
         input_data = "E2E Test Job\nAC1\n\nConstraints\n\n"
@@ -117,7 +117,7 @@ class E2EWorkflowTests(unittest.TestCase):
             "constraints": [],
             "risks": [],
             "tasks": [{"title": "Task 1", "description": "Desc", "acceptance_criteria": ["AC"], "likely_files": [], "tests": [], "complexity": "low"}]
-        }), "mock-model")
+        }), "mock-model", "mock-session-id")
 
         args = ["feature", "--branch-mode", "new", "--no-dispatch", "--yolo"]
         input_data = "Flush Test Job\nAC1\n\n\n"
@@ -144,8 +144,8 @@ class E2EWorkflowTests(unittest.TestCase):
                 "constraints": [],
                 "risks": [],
                 "tasks": [{"title": "Task 1", "description": "Desc", "acceptance_criteria": ["AC"], "likely_files": [], "tests": [], "complexity": "low"}]
-            }), "gemini-3.1-pro-preview"),
-            (json.dumps({"comments": "Missing status"}), "gemini-3.1-pro-preview"),
+            }), "gemini-3.1-pro-preview", "sid-1"),
+            (json.dumps({"comments": "Missing status"}), "gemini-3.1-pro-preview", "sid-2"),
         ]
 
         args = [
