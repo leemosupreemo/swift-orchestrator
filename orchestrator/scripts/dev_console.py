@@ -2624,7 +2624,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     priority = [PROJECT_CONFIG.base_branch, "main", "master"]
                     options = [p for p in priority if p in branches] + [b for b in branches if b not in priority]
                     
-                    new_base = prompt_radio("Select Primary Base Branch:", options, default=global_base)
+                    new_base = prompt_radio("Select Primary Base Branch:", options, default=global_base, status_bar=status_bar)
                     if new_base:
                         settings = read_json(settings_path) if settings_path.exists() else {}
                         settings["global_base_branch"] = new_base
@@ -2644,8 +2644,9 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     continue
                 options = [p["name"] for p in projects]
                 options.append("Other...")
-                idx = prompt_radio("Select target project (will restart console):", options, status_bar=status_bar)
-                if idx is not None:
+                idx_label = prompt_radio("Select target project (will restart console):", options, status_bar=status_bar)
+                if idx_label is not None:
+                    idx = options.index(idx_label)
                     if idx == len(projects):
                         print("\nRun 'orchestrator use <path>' in your terminal to select a new project.")
                         input("\033[1;96mTap Enter to continue...\033[0m")

@@ -280,25 +280,25 @@ def flush_stdin():
     except Exception:
         pass
 
-def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True) -> str:
+def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None) -> str:
     """Displays interactive radio buttons navigated by arrow keys."""
     if not sys.stdin.isatty():
         return default or options[0]
-        
+
     idx = 0
     if default and default in options:
         idx = options.index(default)
-    
+
     # Hide cursor
     sys.stdout.write("\033[?25l")
     sys.stdout.flush()
-    
+
     try:
         first_render = True
         num_rendered_lines = 0
         while True:
-            # Redraw strategy: 
-            # 1. Clear screen (flickery but safe) 
+            # Redraw strategy:
+            # 1. Clear screen (flickery but safe)
             # 2. OR move cursor back up (smooth but requires knowing height)
             if clear_screen:
                 sys.stdout.write("\033[r\033[?25h\033[0m\r")
@@ -311,7 +311,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             output = []
             output.append(f"\n{label}")
             output.append("\033[90m(Arrows: navigate, Enter: save, B: back)\033[0m")
-            
+
             for i, opt in enumerate(options):
                 cursor = "> " if i == idx else "  "
                 icon = "(*)" if i == idx else "( )"
@@ -324,22 +324,29 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                     # \033[K ensures the background color extends to the end of the terminal line
                     line = f"{hl}{line_fixed}\033[K{res}"
                 output.append(line)
-            
+
             # Print current choice placeholder at the bottom
             output.append("-" * 40)
-            output.append(f"Choice: \033[1;96m{options[idx]}\033[0m\033[K")
-            
+            placeholder = " (arrows/space/enter) "
+            output.append(f"Choice: \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D")
+
             final_output = "\n".join(output)
             lines = final_output.split("\n")
             num_rendered_lines = len(lines)
-            
+
             if not clear_screen:
                 # To prevent smearing if options change size, we must clear each line
                 final_output = "\n".join([line + "\033[K" for line in lines])
 
             sys.stdout.write(final_output)
             sys.stdout.flush()
-            
+
+            if status_bar:
+                orig_sub = status_bar.sub_menu
+                status_bar.sub_menu = True
+                status_bar.render(at_bottom=True, force=True)
+                status_bar.sub_menu = orig_sub
+
             first_render = False
             key = get_key()
 
@@ -621,12 +628,6 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     for line in details:
                         output.append(f"\033[90m{line}\033[0m")
             
-            if status_bar:
-                orig_sub = status_bar.sub_menu
-                status_bar.sub_menu = True
-                status_bar.render(at_bottom=True, force=True)
-                status_bar.sub_menu = orig_sub
-
             # 5. Print Bottom UI
             try:
                 cols, _ = os.get_terminal_size()
@@ -647,6 +648,14 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
 
             sys.stdout.write(final_output)
             sys.stdout.flush()
+
+            if status_bar:
+                orig_sub = status_bar.sub_menu
+                status_bar.sub_menu = True
+                # Draw the status bar at the bottom. 
+                # Note: This uses \0337 / \0338 to save/restore cursor.
+                status_bar.render(at_bottom=True, force=True)
+                status_bar.sub_menu = orig_sub
             
             first_render = False
             key = get_key()
@@ -1030,22 +1039,24 @@ class StatusBar:
             # We construct the entire 4-line footer in one sequence
             cmd = "\0337" # Save cursor
             
+            # Line L: Metadata Bar
+            cmd += f"\033[{lines};1H\r{bar}\033[K"
+
+            # Line L-1: Divider
+            cmd += f"\033[{lines-1};1H\r{divider}\033[K"
+            
             # Line L-3: Activity (Progress)
             act_line = self.activity_indicator.get_line() if self.activity_indicator else ""
             cmd += f"\033[{lines-3};1H\r\033[K{act_line}"
             
-            # Line L-2: User Prompt
+            # Line L-2: User Prompt (Draw LAST to leave cursor here if prompting)
             prompt_str = prompt if prompt else ""
             cmd += f"\033[{lines-2};1H\r\033[K{prompt_str}"
             
-            # Line L-1: Divider
-            cmd += f"\033[{lines-1};1H\r{divider}\033[K"
+            if not prompt:
+                # Restore cursor and flush only if NOT showing a prompt
+                cmd += "\0338"
             
-            # Line L: Metadata Bar
-            cmd += f"\033[{lines};1H\r{bar}\033[K"
-            
-            # Restore cursor and flush
-            cmd += "\0338"
             sys.stdout.write(cmd)
             sys.stdout.flush()
         else:
