@@ -1,0 +1,183 @@
+{
+  "models": [
+    {
+      "id": "claude-opus-4-8",
+      "family": "claude",
+      "tier": "EXTREME",
+      "capabilities": ["reasoning", "coding", "context"],
+      "cost_factor": 10.0,
+      "required_clis": ["claude"]
+    },
+    {
+      "id": "claude-opus-4-7",
+      "family": "claude",
+      "tier": "EXTREME",
+      "capabilities": ["reasoning", "coding", "context"],
+      "cost_factor": 10.0,
+      "required_clis": ["claude"]
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "family": "claude",
+      "tier": "HIGH",
+      "capabilities": ["coding", "speed", "context"],
+      "cost_factor": 5.0,
+      "aliases": ["claude"],
+      "required_clis": ["claude"]
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "family": "claude",
+      "tier": "MEDIUM",
+      "capabilities": ["speed"],
+      "cost_factor": 1.0,
+      "required_clis": ["claude"]
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "family": "gemini",
+      "tier": "HIGH",
+      "capabilities": ["reasoning", "coding", "context", "vision"],
+      "cost_factor": 5.0,
+      "aliases": ["gemini"],
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3-flash-preview",
+      "family": "gemini",
+      "tier": "MEDIUM",
+      "capabilities": ["speed", "context", "vision"],
+      "cost_factor": 1.0,
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.1-flash-lite-preview",
+      "family": "gemini",
+      "tier": "LOW",
+      "capabilities": ["speed", "context"],
+      "cost_factor": 0.5,
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gpt-5.5",
+      "family": "openai",
+      "tier": "EXTREME",
+      "capabilities": ["reasoning", "coding", "context"],
+      "cost_factor": 10.0,
+      "reasoning_effort": "high",
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.5-high",
+      "family": "openai",
+      "tier": "EXTREME",
+      "capabilities": ["reasoning", "coding", "context"],
+      "cost_factor": 10.0,
+      "api_model_id": "gpt-5.5",
+      "reasoning_effort": "high",
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.5-medium",
+      "family": "openai",
+      "tier": "HIGH",
+      "capabilities": ["reasoning", "coding", "context"],
+      "cost_factor": 5.0,
+      "api_model_id": "gpt-5.5",
+      "reasoning_effort": "medium",
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.5-low",
+      "family": "openai",
+      "tier": "MEDIUM",
+      "capabilities": ["reasoning", "coding", "context"],
+      "cost_factor": 2.0,
+      "api_model_id": "gpt-5.5",
+      "reasoning_effort": "low",
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.4",
+      "family": "openai",
+      "tier": "HIGH",
+      "capabilities": ["coding", "reasoning", "speed"],
+      "cost_factor": 4.0,
+      "aliases": ["codex"],
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "family": "openai",
+      "tier": "MEDIUM",
+      "capabilities": ["speed", "coding"],
+      "cost_factor": 1.0,
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.3-codex",
+      "family": "openai",
+      "tier": "MEDIUM",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 2.0,
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "gpt-5.2",
+      "family": "openai",
+      "tier": "HIGH",
+      "capabilities": ["reasoning", "speed"],
+      "cost_factor": 3.0,
+      "required_clis": ["codex"]
+    },
+    {
+      "id": "deepseek",
+      "family": "deepseek",
+      "tier": "HIGH",
+      "capabilities": ["coding", "reasoning"],
+      "cost_factor": 2.0,
+      "required_clis": ["ollama"]
+    },
+    {
+      "id": "copilot",
+      "family": "copilot",
+      "tier": "HIGH",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 0.0,
+      "required_clis": ["gh"]
+    },
+    {
+      "id": "opencode/big-pickle",
+      "family": "opencode",
+      "tier": "LOW",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 1.0,
+      "aliases": ["opencode", "big-pickle"],
+      "required_clis": ["opencode"]
+    },
+    {
+      "id": "opencode/deepseek-v4-flash-free",
+      "family": "opencode",
+      "tier": "LOW",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 0.0,
+      "required_clis": ["opencode"]
+    },
+    {
+      "id": "opencode/nemotron-3-super-free",
+      "family": "opencode",
+      "tier": "LOW",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 0.0,
+      "required_clis": ["opencode"]
+    },
+    {
+      "id": "opencode/qwen3.6-plus-free",
+      "family": "opencode",
+      "tier": "LOW",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 0.0,
+      "required_clis": ["opencode"]
+    }
+  ]
+}

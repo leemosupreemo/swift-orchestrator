@@ -32,6 +32,14 @@ class ModelMetadata:
 
 MODELS = [
     ModelMetadata(
+        id="claude-opus-4-8",
+        family="claude",
+        tier=ModelTier.EXTREME,
+        capabilities=[ModelCapability.REASONING, ModelCapability.CODING, ModelCapability.CONTEXT],
+        cost_factor=10.0,
+        required_clis=["claude"]
+    ),
+    ModelMetadata(
         id="claude-opus-4-7",
         family="claude",
         tier=ModelTier.EXTREME,
@@ -277,50 +285,176 @@ def get_model(model_id: str) -> ModelMetadata | None:
             return m
     return None
 
-def sync_models() -> tuple[bool, str]:
+def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
+    """Best-effort classification of a raw model ID into our metadata structure."""
+    m_id = model_id.lower()
+    tier = ModelTier.HIGH # Default
+    caps = [ModelCapability.CODING, ModelCapability.REASONING]
+    
+    # Tier mapping
+    if any(x in m_id for x in ["opus", "o1", "gpt-5", "extreme"]):
+        tier = ModelTier.EXTREME
+    elif any(x in m_id for x in ["sonnet", "pro", "gpt-4", "high"]):
+        tier = ModelTier.HIGH
+    elif any(x in m_id for x in ["haiku", "flash", "gpt-3.5", "medium"]):
+        tier = ModelTier.MEDIUM
+    elif any(x in m_id for x in ["mini", "lite", "small", "low"]):
+        tier = ModelTier.LOW
+        
+    # Capability mapping
+    if any(x in m_id for x in ["vision", "visual"]):
+        caps.append(ModelCapability.VISION)
+    if any(x in m_id for x in ["context", "128k", "1m", "2m"]):
+        caps.append(ModelCapability.CONTEXT)
+    if "flash" in m_id or "turbo" in m_id:
+        caps.append(ModelCapability.SPEED)
+        
+    # Cost factor (rough guess)
+    cost = 1.0
+    if tier == ModelTier.EXTREME: cost = 10.0
+    elif tier == ModelTier.HIGH: cost = 5.0
+    elif tier == ModelTier.MEDIUM: cost = 1.0
+    elif tier == ModelTier.LOW: cost = 0.5
+    
+    # CLI mapping
+    cli = family
+    if family == "openai": cli = "codex"
+    
+    return ModelMetadata(
+        id=model_id,
+        family=family,
+        tier=tier,
+        capabilities=list(set(caps)),
+        cost_factor=cost,
+        required_clis=[cli],
+        api_model_id=model_id
+    )
+
+def discover_from_sources() -> list[ModelMetadata]:
+    """Pings various provider APIs to find new models."""
+    import urllib.request
+    import json
+    discovered = []
+    
+    # 1. OpenAI
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        try:
+            req = urllib.request.Request("https://api.openai.com/v1/models", 
+                                         headers={"Authorization": f"Bearer {openai_key}"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+                for m in data.get("data", []):
+                    mid = m["id"]
+                    if mid.startswith(("gpt-", "o1-")):
+                        discovered.append(heuristic_classify(mid, "openai"))
+        except: pass
+
+    # 2. Gemini
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_key:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read())
+                for m in data.get("models", []):
+                    mid = m["name"].split("/")[-1]
+                    if "gemini" in mid.lower():
+                        discovered.append(heuristic_classify(mid, "gemini"))
+        except: pass
+
+    # 3. Ollama (Local)
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2) as resp:
+            data = json.loads(resp.read())
+            for m in data.get("models", []):
+                mid = m["name"]
+                discovered.append(heuristic_classify(mid, "ollama"))
+    except: pass
+    
+    return discovered
+
+def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
     """
-    Fetches latest model definitions from the official remote registry
-    and updates ~/.orchestrator/custom_models.json.
+    Fetches latest model definitions and updates ~/.orchestrator/custom_models.json.
+    - if live_discovery=True: Pings OpenAI/Gemini/Ollama APIs directly.
+    - else: Fetches from the remote JSON registry.
     """
     import urllib.request
+    import urllib.error
     import ssl
-    
-    # Official registry URL (placeholder for now, points to a likely repo location)
-    REGISTRY_URL = "https://raw.githubusercontent.com/google/swift-orchestrator/main/orchestrator/config/models.json"
     
     global_config = Path.home() / ".orchestrator" / "custom_models.json"
     global_config.parent.mkdir(parents=True, exist_ok=True)
     
-    try:
-        ctx = ssl._create_unverified_context()
-        req = urllib.request.Request(REGISTRY_URL, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
-            remote_data = json.loads(response.read().decode("utf-8"))
+    new_models = []
+    source_name = "remote registry"
+
+    if live_discovery:
+        source_name = "live provider APIs"
+        new_models = discover_from_sources()
+        if not new_models:
+            return False, "Live discovery found no new models (check your API keys)."
+    else:
+        # Try to load registry URL from settings
+        registry_url = "https://raw.githubusercontent.com/google/swift-orchestrator/main/orchestrator/config/models.json"
+        settings_path = Path.home() / ".orchestrator" / "config" / "settings.json"
+        if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
+            p_settings = Path(os.environ["ORCHESTRATOR_PROJECT_ROOT"]) / ".orchestrator" / "config" / "settings.json"
+            if p_settings.exists(): settings_path = p_settings
             
-        remote_models = remote_data.get("models", [])
-        if not remote_models:
-            return False, "Remote registry is empty or invalid."
-            
-        # Load current global custom models to merge
-        current_custom = {"models": []}
-        if global_config.exists():
+        if settings_path.exists():
             try:
-                current_custom = json.loads(global_config.read_text(encoding="utf-8"))
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                registry_url = settings.get("model_registry_url", registry_url)
             except: pass
+
+        try:
+            ctx = ssl._create_unverified_context()
+            req = urllib.request.Request(registry_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+                remote_data = json.loads(response.read().decode("utf-8"))
+                remote_models = remote_data.get("models", [])
+                for rm in remote_models:
+                    # Convert dict to ModelMetadata for consistency
+                    new_models.append(heuristic_classify(rm["id"], rm.get("family", "custom")))
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False, f"Sync failed: Registry not found at {registry_url}."
+            return False, f"Sync failed: HTTP Error {e.code}"
+        except Exception as e:
+            return False, f"Sync failed: {e}"
+
+    if not new_models:
+        return False, f"No models found from {source_name}."
             
-        # Merge logic: Remote models take precedence for same ID
-        # but keep other local-only custom models
-        merged_map = {m["id"]: m for m in current_custom.get("models", [])}
-        for rm in remote_models:
-            merged_map[rm["id"]] = rm
-            
-        new_data = {"models": sorted(list(merged_map.values()), key=lambda x: x["id"])}
-        global_config.write_text(json.dumps(new_data, indent=2), encoding="utf-8")
+    # Load current global custom models to merge
+    current_custom = {"models": []}
+    if global_config.exists():
+        try:
+            current_custom = json.loads(global_config.read_text(encoding="utf-8"))
+        except: pass
         
-        # Invalidate cache
-        global _ALL_MODELS_CACHE
-        _ALL_MODELS_CACHE = None
+    # Merge logic
+    merged_map = {m["id"]: m for m in current_custom.get("models", [])}
+    for nm in new_models:
+        # Convert ModelMetadata back to dict for JSON storage
+        m_dict = {
+            "id": nm.id,
+            "family": nm.family,
+            "tier": nm.tier.name,
+            "capabilities": [c.value for c in nm.capabilities],
+            "cost_factor": nm.cost_factor,
+            "required_clis": nm.required_clis,
+            "api_model_id": nm.api_model_id
+        }
+        merged_map[nm.id] = m_dict
         
-        return True, f"Successfully synced {len(remote_models)} models from registry."
-    except Exception as e:
-        return False, f"Sync failed: {e}"
+    new_data = {"models": sorted(list(merged_map.values()), key=lambda x: x["id"])}
+    global_config.write_text(json.dumps(new_data, indent=2), encoding="utf-8")
+    
+    # Invalidate cache
+    global _ALL_MODELS_CACHE
+    _ALL_MODELS_CACHE = None
+    
+    return True, f"Successfully synced {len(new_models)} models from {source_name}."

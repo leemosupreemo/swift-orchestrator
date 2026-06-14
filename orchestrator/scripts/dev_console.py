@@ -1733,7 +1733,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 curr_defaults = [label for label, mid in value_map.items() if mid in resolved_ids]
 
                 try:
-                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r"], footer="[\033[1;96mR\033[0m] Refresh from Remote Registry", details_map=details_map, status_bar=status_bar)
+                    footer = "[\033[1;96mR\033[0m] Sync Registry  [\033[1;96mD\033[0m] Live Discovery (Ping APIs)"
+                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d"], footer=footer, details_map=details_map, status_bar=status_bar)
                     if new_labels:
                         job["allowed_models"] = [value_map[label] for label in new_labels]
                         save_job(job)
@@ -1742,10 +1743,12 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         print("Warning: At least one model must be selected. No changes made.")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 except KeyInterruptException as exc:
-                    if exc.key == "r":
+                    if exc.key in ["r", "d"]:
+                        live = (exc.key == "d")
                         from model_registry import sync_models
-                        print("\n\n📡 Syncing models with remote registry...")
-                        success, msg = sync_models()
+                        action = "Syncing with registry..." if not live else "Pinging provider APIs..."
+                        print(f"\n\n📡 {action}")
+                        success, msg = sync_models(live_discovery=live)
                         if success:
                             print(f"✅ {msg}")
                         else:
@@ -2611,17 +2614,20 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 curr_defaults = [label for label, mid in value_map.items() if mid in resolved_session_ids]
 
                 try:
-                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r"], footer="[\033[1;96mR\033[0m] Refresh from Remote Registry", details_map=details_map, status_bar=status_bar)
+                    footer = "[\033[1;96mR\033[0m] Sync Registry  [\033[1;96mD\033[0m] Live Discovery (Ping APIs)"
+                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d"], footer=footer, details_map=details_map, status_bar=status_bar)
                     if new_labels:
                         session_allowed_models = [value_map[label] for label in new_labels]
                     else:
                         print("Warning: At least one model must be selected. Keeping previous choice.")
                         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 except KeyInterruptException as exc:
-                    if exc.key == "r":
+                    if exc.key in ["r", "d"]:
+                        live = (exc.key == "d")
                         from model_registry import sync_models
-                        print("\n\n📡 Syncing models with remote registry...")
-                        success, msg = sync_models()
+                        action = "Syncing with registry..." if not live else "Pinging provider APIs..."
+                        print(f"\n\n📡 {action}")
+                        success, msg = sync_models(live_discovery=live)
                         if success:
                             print(f"✅ {msg}")
                         else:
