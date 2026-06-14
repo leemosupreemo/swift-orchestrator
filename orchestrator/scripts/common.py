@@ -310,9 +310,12 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
 
             output = []
             output.append(f"\n{label}")
-            output.append("\033[90m(Arrows: navigate, Enter: save, B: back)\033[0m")
+            output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
 
             for i, opt in enumerate(options):
+                if opt.startswith("---"):
+                    output.append(f"  \033[1;90m{opt}\033[0m")
+                    continue
                 cursor = "> " if i == idx else "  "
                 icon = "(*)" if i == idx else "( )"
                 line = f"{cursor}{icon} {opt}"
@@ -320,13 +323,18 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                     # White text on Navy Blue background for the active row (consistent with status bar)
                     hl = "\033[1;97;48;5;25m"
                     res = "\033[0m"
-                    line_fixed = line.replace(res, hl)
+                    # Ensure reset codes inside 'opt' don't break the whole row highlight
+                    opt_fixed = opt.replace(res, hl)
                     # \033[K ensures the background color extends to the end of the terminal line
-                    line = f"{hl}{line_fixed}\033[K{res}"
+                    line = f"{hl}{cursor}{icon} {opt_fixed}\033[K{res}"
                 output.append(line)
 
             # Print current choice placeholder at the bottom
-            output.append("-" * 40)
+            try:
+                cols, _ = os.get_terminal_size()
+            except:
+                cols = 80
+            output.append("-" * (cols - 2))
             placeholder = " (arrows/space/enter) "
             output.append(f"Choice: \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D")
 
@@ -360,16 +368,24 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 else:
                     # Final render without blue highlight to avoid double-blue-highlights on screen
                     sys.stdout.write(f"\r\033[{num_rendered_lines}A")
-                    output = []
-                    output.append(f"\n{label}")
-                    output.append("\033[90m(Arrows: navigate, Enter: save, B: back)\033[0m")
+                    final_render = []
+                    final_render.append(f"\n{label}")
+                    final_render.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
                     for i, opt in enumerate(options):
+                        if opt.startswith("---"):
+                            final_render.append(f"  \033[1;90m{opt}\033[0m")
+                            continue
                         cursor = "> " if i == idx else "  "
                         icon = "(*)" if i == idx else "( )"
-                        output.append(f"{cursor}{icon} {opt}")
-                    output.append("-" * 40)
-                    output.append(f"Choice: \033[1;96m{options[idx]}\033[0m")
-                    sys.stdout.write("\n".join(output) + "\n")
+                        final_render.append(f"{cursor}{icon} {opt}")
+                    
+                    try:
+                        cols, _ = os.get_terminal_size()
+                    except:
+                        cols = 80
+                    final_render.append("-" * (cols - 2))
+                    final_render.append(f"Choice: \033[1;96m{options[idx]}\033[0m")
+                    sys.stdout.write("\n".join(final_render) + "\n")
                 break
             elif len(key) == 1 and key.lower() == "b": # Back
                 if not clear_screen:
@@ -417,6 +433,55 @@ def prompt_multiline(prompt: str) -> str:
         return content.strip()
     except EOFError:
         return ""
+
+def prompt_password(label: str, placeholder: str = "") -> str:
+    """Interactive password input that shows asterisks instead of clear text."""
+    if not sys.stdin.isatty():
+        return ""
+
+    # Hide cursor
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+
+    input_text = ""
+    bg_style = "\033[48;5;236m"
+    fg_style = "\033[1;97m" # Bold White
+    placeholder_style = "\033[90m" # Grey
+    reset = "\033[0m"
+    prompt_label = f"\033[1;96m{label}\033[0m"
+
+    try:
+        while True:
+            # Render current state as asterisks
+            if not input_text and placeholder:
+                display = f"{placeholder_style}{placeholder}{reset}"
+            else:
+                display = f"{fg_style}{'*' * len(input_text)}{reset}"
+            
+            # Construct the line
+            line = f"\r    {prompt_label} {bg_style} {display} {reset}\033[K"
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+            key = get_key()
+
+            if key == "enter":
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return input_text.strip().strip("'\"")
+            elif key == "backspace":
+                input_text = input_text[:-1]
+            elif key == "space":
+                input_text += " "
+            elif key == "esc" or key == "\x1b":
+                sys.stdout.write("\n")
+                raise BackException()
+            elif len(key) == 1:
+                input_text += key
+    finally:
+        # Restore cursor
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
 
 def prompt_input(label: str, placeholder: str = "", default: str = "") -> str:
     """Interactive text input with styling, backspace handling, and back-out support."""
@@ -541,7 +606,7 @@ def print_divider(char: str = "-"):
         columns, _ = os.get_terminal_size()
     except:
         columns = 80
-    print(char * (columns - 1), flush=True)
+    print(char * (columns - 2), flush=True)
 
 def format_job_id(job_id: str) -> str:
     return f"\033[1;97m{job_id}\033[0m"
@@ -582,8 +647,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             output = []
             # 1. Print Header
             output.append(f"\n{label}")
-            sub_label = "(Arrows: navigate, Space: toggle, Enter: save, B: back)"
-            output.append(f"\033[90m{sub_label}\033[0m")
+            output.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
             
             if error_msg:
                 output.append(f"\033[1;91m      ⚠️  {error_msg}\033[0m")
@@ -633,7 +697,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 cols, _ = os.get_terminal_size()
             except:
                 cols = 80
-            divider = "-" * (cols - 1)
+            divider = "-" * (cols - 2)
             output.append(divider)
             
             placeholder = " (arrows/space/enter) "
@@ -670,7 +734,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     sys.stdout.write(f"\r\033[{num_rendered_lines}A")
                     final_render = []
                     final_render.append(f"\n{label}")
-                    final_render.append(f"\033[90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
+                    final_render.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
                     for i, opt in enumerate(options):
                         if opt.startswith("---"):
                             final_render.append(f"  \033[1;90m{opt}\033[0m")
@@ -678,7 +742,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                         checked = "[\033[1;96mx\033[0m]" if i in selected_indices else "[ ]"
                         final_render.append(f"  {checked} {opt}")
                     if footer: final_render.append(f"\n{footer}")
-                    final_render.append("-" * (cols - 1))
+                    final_render.append("-" * (cols - 2))
                     final_render.append(f"Choice: \033[1;96m{len(selected_indices)} selected\033[0m")
                     sys.stdout.write("\n".join(final_render) + "\n")
                 break
@@ -1025,7 +1089,7 @@ class StatusBar:
         if self._scroll_region_set and (columns, lines) != self._last_size:
             self.set_scroll_region()
 
-        cols = max(10, columns - 1)
+        cols = max(10, columns - 2)
         content = f" {q_msg:<18} | {meta}"
         if len(content) > cols:
             content = content[:cols-3] + "..."
@@ -1103,12 +1167,18 @@ def print_header(text: str):
     except:
         cols = 80
     
-    # Visible text length (no ANSI codes here yet)
+    # Use a safe width (cols - 2) to prevent bleeding onto new lines
+    safe_cols = cols - 2
+    
     # Account for the spaces around text
-    side_padding = (cols - len(text) - 4) // 2
+    side_padding = (safe_cols - len(text) - 2) // 2
     if side_padding < 2: side_padding = 2
     
-    print(f"\n\033[1;96m{'=' * side_padding} {text} {'=' * side_padding}\033[0m")
+    # Final check: if text itself is too long, don't use padding at all
+    if len(text) + 6 > safe_cols:
+        print(f"\n\033[1;96m== {text} ==\033[0m")
+    else:
+        print(f"\n\033[1;96m{'=' * side_padding} {text} {'=' * side_padding}\033[0m")
 
 def print_phase(phase: str, subtext: str | None = None):
     p_map = {
@@ -1135,10 +1205,12 @@ def print_phase(phase: str, subtext: str | None = None):
     # visible_len = len(header_text) # This might be slightly off for emojis
     # But for our purposes, a rough estimate is fine.
     
-    side_padding = (cols - len(header_text) - 6) // 2
+    # Safe width margin (cols - 2)
+    side_padding = (cols - len(header_text) - 8) // 2
     if side_padding < 2: side_padding = 2
-    
-    print(f"\n{'=' * side_padding} {header_text} {'=' * side_padding}\n")
+
+    print(f"\n\033[1;96m{'=' * side_padding} {header_text} {'=' * side_padding}\033[0m")
+
 
 def get_phase_name(phase: str) -> str:
     return phase.replace("-", " ").capitalize()

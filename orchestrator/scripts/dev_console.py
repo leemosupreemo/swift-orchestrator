@@ -27,7 +27,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -363,11 +363,12 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
                 if purged > 0:
                     print(f"🧹 Automatically purged {purged} zombie processes before execution.\n")
 
-        # Special case: new_job.py is highly interactive and should take over the terminal
-        if script_name == "new_job.py":
+        # Special case: interactive or simple local scripts should take over terminal directly
+        if script_name in ["new_job.py", "check_setup.py", "discover_machines.py"]:
             returncode = subprocess.run(cmd, cwd=str(ROOT), stdin=sys.stdin, stdout=None, stderr=None).returncode
         else:
-            returncode = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)            
+            returncode = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)
+            
         if returncode != 0:
             print("\n" + "\033[1;91m" + "!"*60)
             print("  🚨  SCRIPT FAILURE DETECTED (Code " + str(returncode) + ")  🚨")
@@ -424,130 +425,133 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
             pass
 
 def handle_new_job(session_allowed_models: list[str] | None = None, session_allowed_machines: list[str] | None = None):
-    # 1. Critical Pre-requisite Checks
-    if not session_allowed_machines:
-        print("\n\033[1;91m⚠️  ERROR: No active machines selected for this session.\033[0m")
-        print("A job requires at least one worker machine to execute build and test tasks.")
-        print("\n\033[1;97mTo fix this:\033[0m")
-        print("1. Go to [\033[1;96mC\033[0m] Configuration \033[1;96m->\033[0m [\033[1;96mF\033[0m] Manage Machine Fleet")
-        print("2. Ensure at least one machine is enabled and reachable (green checkmark).")
-        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-        return
+    try:
+        # 1. Critical Pre-requisite Checks
+        if not session_allowed_machines:
+            print("\n\033[1;91m⚠️  ERROR: No active machines selected for this session.\033[0m")
+            print("A job requires at least one worker machine to execute build and test tasks.")
+            print("\n\033[1;97mTo fix this:\033[0m")
+            print("1. Go to [\033[1;96mC\033[0m] Configuration \033[1;96m->\033[0m [\033[1;96mF\033[0m] Manage Machine Fleet")
+            print("2. Ensure at least one machine is enabled and reachable (green checkmark).")
+            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            return
 
-    if not session_allowed_models:
-        print("\n\033[1;91m⚠️  ERROR: No AI models selected for this session.\033[0m")
-        print("A job requires at least one LLM to perform planning and code generation.")
-        print("\n\033[1;97mTo fix this:\033[0m")
-        print("1. Go to [\033[1;96mC\033[0m] Configuration \033[1;96m->\033[0m [\033[1;96mM\033[0m] Manage Model Selection")
-        print("2. Select at least one AI model. Ensure you have the required CLI tools logged in.")
-        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-        return
+        if not session_allowed_models:
+            print("\n\033[1;91m⚠️  ERROR: No AI models selected for this session.\033[0m")
+            print("A job requires at least one LLM to perform planning and code generation.")
+            print("\n\033[1;97mTo fix this:\033[0m")
+            print("1. Go to [\033[1;96mC\033[0m] Configuration \033[1;96m->\033[0m [\033[1;96mM\033[0m] Manage Model Selection")
+            print("2. Select at least one AI model. Ensure you have the required CLI tools logged in.")
+            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            return
 
-    print_header("Create New Job")
-    job_options = [
-        "✨ Brand New Feature (Design-First)",
-        "🛠️ Iterating / Small Refactor (Plan or Quick Mode)",
-        "🐞 Bug Fix (Identify + Fix)",
-        "🎨 Design Prototype (Can promote to Implementation)",
-        "🧪 Test Coverage Audit (Maintenance)"
-    ]
-    choice = prompt_radio("Select Job Type:", job_options, job_options[1])
-
-    # Map back to internal type
-    job_type = "feature"
-    stitch_mode = False
-
-    if "Brand New" in choice:
-        job_type = "feature"
-        stitch_mode = True
-    elif "Iterating" in choice:
-        if prompt_confirm("Use Quick Mode? (skips heavy planning for small changes/refactors)", default=False):
-            job_type = "quick"
-        else:
-            job_type = "feature"
-        stitch_mode = False
-    elif "Bug Fix" in choice:
-        job_type = "bug"
-        stitch_mode = False
-    elif "Design Prototype" in choice:
-        job_type = "design"
-        stitch_mode = True
-    elif "Test Coverage" in choice:
-        job_type = "coverage"
-        stitch_mode = False
-
-    spec_file = None
-    if job_type != "quick":
-        if prompt_confirm("Load spec from a local file or web address? (useful for large multi-page docs)", default=False):
-            # We try to help the user with a list of files in ROOT if they start typing
-            print("\n    (Enter path to .md/.txt file OR a web URL)")
-            spec_file = prompt_input("Spec Path/URL:", placeholder="feature_spec.md or https://gist.../raw")
-
-    yolo = prompt_confirm("YOLO mode? (select YOLO to auto-dispatch job after planning)", default=False)
-    
-    branch_options = ["new (creates a new branch to work in)", "current-branch (git pull)", "manual (no git actions)"]
-    branch_choice = prompt_radio("Branch selection:", branch_options, branch_options[0])
-    
-    # Map friendly UI names back to what new_job.py expects
-    clean_branch_choice = "new"
-    if "current-branch" in branch_choice:
-        clean_branch_choice = "current"
-    elif "manual" in branch_choice:
-        clean_branch_choice = "manual"
-    elif "new (" in branch_choice:
-        clean_branch_choice = "new"
-    else:
-        # Fallback to the first word if it's something unknown
-        clean_branch_choice = branch_choice.split(" ")[0].lower()
-    
-    advanced = False
-    if job_type != "quick":
-        advanced = prompt_confirm("Show advanced options? (Configure LLM presets, model overrides, and machine filtering)", default=False)
-    
-    # Map friendly UI names back to what new_job.py expects
-    args = [job_type, "--branch-mode", clean_branch_choice]
-    
-    if stitch_mode:
-        args.append("--stitch")
-    
-    if spec_file:
-        args.extend(["--spec-file", spec_file])
-    
-    if session_allowed_models:
-        args.extend(["--allowed-models", ",".join(session_allowed_models)])
-    if session_allowed_machines:
-        args.extend(["--allowed-machines", ",".join(session_allowed_machines)])
-    
-    if advanced:
-        preset_options = [
-            "--- Recommended Tiers ---",
-            "balanced (Gemini/Codex/Gemini) (Standard balance of cost and quality)",
-            "fast (Codex/Codex/Gemini) (Cheapest/fastest models for simple fixes)",
-            "--- Professional Tiers ---",
-            "hard-bug (Gemini/Claude-Opus/Gemini) (Opus for complex logic and debugging)",
-            "architecture (Claude-Opus/Claude-Opus/Gemini) (Opus for both planning and building)",
-            "--- Custom ---",
-            "skip (manual setup) (Select each model role manually)"
+        print_header("Create New Job")
+        job_options = [
+            "✨ Brand New Feature (Design-First)",
+            "🛠️ Iterating / Small Refactor (Plan or Quick Mode)",
+            "🐞 Bug Fix (Identify + Fix)",
+            "🎨 Design Prototype (Can promote to Implementation)",
+            "🧪 Test Coverage Audit (Maintenance)"
         ]
-        preset_choice = prompt_radio("LLM Model Configuration - Select a Preset:", preset_options, "balanced (Gemini/Codex/Gemini) (Standard balance of cost and quality)")
+        choice = prompt_radio("Select Job Type:", job_options, job_options[1])
+
+        # Map back to internal type
+        job_type = "feature"
+        stitch_mode = False
+
+        if "Brand New" in choice:
+            job_type = "feature"
+            stitch_mode = True
+        elif "Iterating" in choice:
+            if prompt_confirm("Use Quick Mode? (skips heavy planning for small changes/refactors)", default=False):
+                job_type = "quick"
+            else:
+                job_type = "feature"
+            stitch_mode = False
+        elif "Bug Fix" in choice:
+            job_type = "bug"
+            stitch_mode = False
+        elif "Design Prototype" in choice:
+            job_type = "design"
+            stitch_mode = True
+        elif "Test Coverage" in choice:
+            job_type = "coverage"
+            stitch_mode = False
+
+        spec_file = None
+        if job_type != "quick":
+            if prompt_confirm("Load spec from a local file or web address? (useful for large multi-page docs)", default=False):
+                # We try to help the user with a list of files in ROOT if they start typing
+                print("\n    (Enter path to .md/.txt file OR a web URL)")
+                spec_file = prompt_input("Spec Path/URL:", placeholder="feature_spec.md or https://gist.../raw")
+
+        yolo = prompt_confirm("YOLO mode? (select YOLO to auto-dispatch job after planning)", default=False)
         
-        # Extract preset key from choice (everything before the first space)
-        preset = preset_choice.split(" ")[0]
-        if "skip" in preset:
-            model_opts = ["gemini", "claude-opus-4-7", "codex"]
-            planner = prompt_radio("Select Planner:", model_opts, "gemini")
-            builder = prompt_radio("Select Builder:", model_opts, "claude-opus-4-7")
-            reviewer = prompt_radio("Select Reviewer:", model_opts, "gemini")
-            args.extend(["--planner", planner, "--builder", builder, "--reviewer", reviewer])
+        branch_options = ["new (creates a new branch to work in)", "current-branch (git pull)", "manual (no git actions)"]
+        branch_choice = prompt_radio("Branch selection:", branch_options, branch_options[0])
+        
+        # Map friendly UI names back to what new_job.py expects
+        clean_branch_choice = "new"
+        if "current-branch" in branch_choice:
+            clean_branch_choice = "current"
+        elif "manual" in branch_choice:
+            clean_branch_choice = "manual"
+        elif "new (" in branch_choice:
+            clean_branch_choice = "new"
         else:
-            args.extend(["--preset", preset])
+            # Fallback to the first word if it's something unknown
+            clean_branch_choice = branch_choice.split(" ")[0].lower()
+        
+        advanced = False
+        if job_type != "quick":
+            advanced = prompt_confirm("Show advanced options? (Configure LLM presets, model overrides, and machine filtering)", default=False)
+        
+        # Map friendly UI names back to what new_job.py expects
+        args = [job_type, "--branch-mode", clean_branch_choice]
+        
+        if stitch_mode:
+            args.append("--stitch")
+        
+        if spec_file:
+            args.extend(["--spec-file", spec_file])
+        
+        if session_allowed_models:
+            args.extend(["--allowed-models", ",".join(session_allowed_models)])
+        if session_allowed_machines:
+            args.extend(["--allowed-machines", ",".join(session_allowed_machines)])
+        
+        if advanced:
+            preset_options = [
+                "--- Recommended Tiers ---",
+                "balanced (Gemini/Codex/Gemini) (Standard balance of cost and quality)",
+                "fast (Codex/Codex/Gemini) (Cheapest/fastest models for simple fixes)",
+                "--- Professional Tiers ---",
+                "hard-bug (Gemini/Claude-Opus/Gemini) (Opus for complex logic and debugging)",
+                "architecture (Claude-Opus/Claude-Opus/Gemini) (Opus for both planning and building)",
+                "--- Custom ---",
+                "skip (manual setup) (Select each model role manually)"
+            ]
+            preset_choice = prompt_radio("LLM Model Configuration - Select a Preset:", preset_options, "balanced (Gemini/Codex/Gemini) (Standard balance of cost and quality)")
             
-    if not yolo:
-        args.append("--no-dispatch")
-    else:
-        args.append("--yolo")
-    
-    run_script("new_job.py", args)
+            # Extract preset key from choice (everything before the first space)
+            preset = preset_choice.split(" ")[0]
+            if "skip" in preset:
+                model_opts = ["gemini", "claude-opus-4-7", "codex"]
+                planner = prompt_radio("Select Planner:", model_opts, "gemini")
+                builder = prompt_radio("Select Builder:", model_opts, "claude-opus-4-7")
+                reviewer = prompt_radio("Select Reviewer:", model_opts, "gemini")
+                args.extend(["--planner", planner, "--builder", builder, "--reviewer", reviewer])
+            else:
+                args.extend(["--preset", preset])
+                
+        if not yolo:
+            args.append("--no-dispatch")
+        else:
+            args.append("--yolo")
+        
+        run_script("new_job.py", args)
+    except BackException:
+        return
 
 def check_machine_availability(machine: dict[str, Any]) -> bool:
     """Quickly checks if a machine is reachable."""
@@ -670,7 +674,10 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                 elif exc.key == "n" and exc.value:
                     old_name = exc.value
                     print(f"\n  Renaming machine: \033[97m{old_name}\033[0m")
-                    new_name = prompt_input("Enter new nickname:", placeholder="(or Enter to cancel)")
+                    try:
+                        new_name = prompt_input("Enter new nickname:", placeholder="(or Enter to cancel)")
+                    except BackException:
+                        continue
                     if new_name and new_name != old_name:
                         # Update machines.json
                         m_config = load_machines()
@@ -1299,7 +1306,10 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
             if choice == "b":
                 break
             elif choice == "u" and archived_files:
-                idx_str = prompt_input("Enter index to restore:", placeholder="(number)")
+                try:
+                    idx_str = prompt_input("Enter index to restore:", placeholder="(number)")
+                except BackException:
+                    continue
                 try:
                     idx = int(idx_str)
                     if 0 <= idx < len(archived_files):
@@ -2396,16 +2406,22 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 
             print_header("ACTIONS")
             
-            # Grid Layout for Actions - using smaller gaps and smarter labels
+            # Single-column Layout for Actions
             print(f"  \033[1;96mManual Key Updates\033[0m")
-            print(f"    [\033[1;92mG\033[0m] Gemini Key        [\033[1;92mA\033[0m] Anthropic Key     [\033[1;92mO\033[0m] OpenAI Key")
+            print(f"    [\033[1;92mG\033[0m] Update Gemini Key")
+            print(f"    [\033[1;92mA\033[0m] Update Anthropic Key")
+            print(f"    [\033[1;92mO\033[0m] Update OpenAI Key")
 
             print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
-            print(f"    [\033[1;92m1\033[0m] Gemini            [\033[1;92m2\033[0m] Claude            [\033[1;92m3\033[0m] Codex")
-            print(f"    [\033[1;92m4\033[0m] GitHub            [\033[1;92m5\033[0m] OpenCode")
+            print(f"    [\033[1;92m1\033[0m] Login Gemini")
+            print(f"    [\033[1;92m2\033[0m] Login Claude")
+            print(f"    [\033[1;92m3\033[0m] Login Codex")
+            print(f"    [\033[1;92m4\033[0m] Login GitHub")
+            print(f"    [\033[1;92m5\033[0m] Login OpenCode")
 
-            print(f"\n  \033[1;97mManagement\033[0m")
-            print(f"    [\033[1;91mC\033[0m] Clear Saved Keys  [\033[1;91mB\033[0m] Back")
+            print_header("MANAGEMENT")
+            print(f"    [\033[1;91mC\033[0m] Clear Saved Keys")
+            print(f"    [\033[1;91mB\033[0m] Back")
 
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -2438,9 +2454,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 
             if key_to_update:
                 print(f"\n  Updating: \033[97m{key_to_update}\033[0m")
-                # Use getpass for security
-                import getpass
-                new_val = getpass.getpass("  🔑 Key (invisible): ").strip()
+                new_val = prompt_password("🔑 Key:", placeholder="(invisible)")
                 if new_val:
                     settings[key_to_update] = new_val
                     write_json(settings_path, settings)
@@ -2455,14 +2469,12 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 subprocess.run(login_cmd)
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str]):
-    print_header("System Health & Diagnostic Check")
-    print("\033[90mPerforming a comprehensive audit of prerequisites, files, and fleet dependencies...\033[0m\n")
-    
     # 1. Local Prerequisites & Environment (formerly check_setup.py)
     run_script("check_setup.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt="")
     
     # 2. Fleet-Wide Dependency Matrix
-    print("\n\033[1;97m--- 5. Fleet Dependency Matrix ---\033[0m")
+    print_header("Fleet Dependency Matrix")
+    print("\033[90mProbing current fleet to verify cross-machine capability matching...\033[0m\n")
     from probe_machine import load_machines, probe_machine
     machines_config = load_machines()
     machines = [m for m in machines_config if m["name"] in session_allowed_machines]
@@ -2476,9 +2488,10 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
         results.append((m["name"], probe))
 
     # Header: Machine | gemini | claude | ...
+    # We use dynamic spacing for the binaries
     matrix_header = f"  {'Machine':15}"
     for b in binaries:
-        matrix_header += f" | {b[:6]:6}"
+        matrix_header += f" | {b:10}"
     print("\n" + matrix_header)
     print("  " + "-" * (len(matrix_header) - 2))
     
@@ -2487,8 +2500,10 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
         bins = probe.get("binaries", {})
         for b in binaries:
             status = bins.get(b, False)
-            icon = "\033[92m✅\033[0m" if status else "\033[1;91m❌\033[0m"
-            row += f" | {icon:14}" # Adjust for ANSI codes
+            icon = "✅" if status else "❌"
+            color = "\033[92m" if status else "\033[1;91m"
+            # 10 chars matches the header spacing. icon is usually 2 chars.
+            row += f" | {color}{icon:8}\033[0m" 
         print(row)
         
     print(f"\n\033[90mTotal Machines in session: {len(machines)}\033[0m")
@@ -2541,38 +2556,54 @@ def handle_fleet_hygiene(session_allowed_machines):
     else:
         print("\nNo processes were harmed.")
         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-def handle_role_prompts():
-    print_header("Manage CLI Instructions (Role Prompts)")
-    print("The Orchestrator uses AI Agents (Planner, Builder, Reviewer, etc.).")
-    print("You can override their default instructions by placing specific .md files")
-    print(f"in your project's \033[97m{PROJECT_CONFIG.runtime_dir.name}/prompts/\033[0m directory.\n")
+def handle_role_prompts(session_allowed_machines, session_allowed_models):
+    while True:
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
 
-    prompts_dir = PROJECT_CONFIG.runtime_dir / "prompts"
-    if prompts_dir.exists() and any(prompts_dir.iterdir()):
-        print(f"✅ Custom prompts are currently active in \033[97m{prompts_dir.relative_to(ROOT)}\033[0m")
-        print("You can edit those files directly to customize the AI's behavior.")
-    else:
-        print("❌ No custom prompts found. Using system defaults.")
+            print_header("Customize Agent Instructions (Role Prompts)")
+            print("The Orchestrator uses specialized AI Agents for different tasks.")
+            print("You can override their instructions by placing .md files in:")
+            print(f"  \033[1;97m{PROJECT_CONFIG.runtime_dir.name}/prompts/\033[0m\n")
 
-    print("\nActions:")
-    print("  [\033[1;96m1\033[0m] Copy system default templates to project (to enable editing)")
-    if prompts_dir.exists():
-        print("  [\033[1;96m2\033[0m] Delete custom prompts (revert to system defaults)")
-    print("  [\033[1;91mB\033[0m] Back")
+            prompts_dir = PROJECT_CONFIG.runtime_dir / "prompts"
+            if prompts_dir.exists() and any(prompts_dir.iterdir()):
+                print(f"✅ \033[1;92mCustom prompts are active\033[0m in \033[97m{prompts_dir.relative_to(ROOT)}\033[0m")
+                print("Agents will follow your specific rules instead of defaults.")
+            else:
+                print("❌ \033[90mNo custom prompts found. Using system defaults.\033[0m")
 
-    choice = input("\nChoice: ").strip().lower()
-    if choice == '1':
-        print("\nCopying templates...")
-        cli_path = SCRIPTS_DIR.parent / "cli.py"
-        subprocess.run([sys.executable, str(cli_path), "wizard", "--copy-prompt-overrides", "--non-interactive", "--force"], cwd=str(ROOT))
-        print("\n✅ Templates copied! You can now edit them.")
-        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-    elif choice == '2' and prompts_dir.exists():
-        if prompt_confirm("Are you sure you want to delete all custom prompts?", default=False):
-            import shutil
-            shutil.rmtree(prompts_dir)
-            print("✅ Custom prompts deleted. Reverted to system defaults.")
-            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            print("\nActions:")
+            print("  [\033[1;92m1\033[0m] Copy system default templates to project (to enable editing)")
+            if prompts_dir.exists():
+                print("  [\033[1;91m2\033[0m] Delete custom prompts (revert to system defaults)")
+            print("  [\033[1;91mB\033[0m] Back")
+
+            # Anchor prompt to bottom
+            prompt = get_choice_prompt("Choice:", "(index or letter)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if choice == "b":
+                break
+            elif choice == '1':
+                print("\nCopying templates...")
+                cli_path = SCRIPTS_DIR.parent / "cli.py"
+                subprocess.run([sys.executable, str(cli_path), "wizard", "--copy-prompt-overrides", "--non-interactive", "--force"], cwd=str(ROOT))
+                print("\n✅ Templates copied! You can now edit them.")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            elif choice == '2' and prompts_dir.exists():
+                if prompt_confirm("Are you sure you want to delete all custom prompts?", default=False):
+                    import shutil
+                    shutil.rmtree(prompts_dir)
+                    print("✅ Custom prompts deleted. Reverted to system defaults.")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 
 def handle_configuration_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> tuple[list[str], list[str]]:
     """Secondary menu for advanced setup, tools, and configuration."""
@@ -2599,13 +2630,13 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print("    [\033[93mM\033[0m] LLM Models (Session Defaults)")
             print("    [\033[93mK\033[0m] Manage LLM API Keys")
             print("    [\033[93mF\033[0m] Manage Machine Fleet")
-            print("    [\033[93mP\033[0m] System Health Check")
+            print("    [\033[93mP\033[0m] Run System-Wide Audit (Diagnostics)")
             print(f"    [\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
             print("    [\033[93mC\033[0m] Change Target Project")
             print("    [\033[93mA\033[0m] Manage Archived Jobs")
-            print("    [\033[93mI\033[0m] Manage CLI Instructions (.md files)")
+            print("    [\033[93mI\033[0m] Project Instructions & Agent Customization")
             print("    [\033[93mE\033[0m] Email Notification Settings")
-            print("    [\033[93mS\033[0m] Setup & Architecture Guide")
+            print("    [\033[93mS\033[0m] Documentation & Architecture Guides")
 
             print("    [\033[93mD\033[0m] Firebase App Distro (Delivery)")
 
@@ -2692,9 +2723,12 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                         write_json(settings_path, settings)
                         print(f"\n✅ Base branch set to: \033[97m{new_base}\033[0m")
                         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                except BackException:
+                    continue
                 except Exception as ex:
                     print(f"\033[1;91mError updating base branch: {ex}\033[0m")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+
             elif choice == "c":
                 from orchestrator.project_config import load_recent_projects, remember_project
                 recent = load_recent_projects()
@@ -2705,7 +2739,11 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     continue
                 options = [p["name"] for p in projects]
                 options.append("Other...")
-                idx_label = prompt_radio("Select target project (will restart console):", options, status_bar=status_bar)
+                try:
+                    idx_label = prompt_radio("Select target project (will restart console):", options, status_bar=status_bar)
+                except BackException:
+                    continue
+
                 if idx_label is not None:
                     idx = options.index(idx_label)
                     if idx == len(projects):
@@ -2727,16 +2765,53 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             elif choice == "d":
                 handle_firebase_distro(session_allowed_machines, session_allowed_models)
             elif choice == "s":
-                status_bar.reset_scroll_region()
-                clear_screen()
-                print_header("Setup & Architecture Guide")
-                setup_file = ROOT / "AI_AGENT_SETUP.md"
-                if setup_file.exists():
-                    print(setup_file.read_text())
-                else:
-                    print("⚠️  AI_AGENT_SETUP.md not found.")
-                print_header("Environment Self-Check")
-                run_script("check_setup.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                while True:
+                    clear_screen()
+                    with StatusBar({
+                        "allowed_machines": session_allowed_machines,
+                        "online_machines": get_online_machines(session_allowed_machines),
+                        "allowed_models": session_allowed_models
+                    }, sub_menu=True) as status_bar:
+                        status_bar.set_scroll_region()
+                        print_header("Documentation & Architecture Guides")
+                        print("  Select a guide to read in your terminal:\n")
+                        
+                        docs = sorted(list(DOCS_DIR.glob("*.md")))
+                        # Add some common root files too
+                        root_docs = [ROOT / "README.md", ROOT / "AGENTS.md", ROOT / "AI_AGENT_SETUP.md"]
+                        all_docs = docs + [d for d in root_docs if d.exists()]
+                        
+                        for i, doc in enumerate(all_docs):
+                            # Pretty name
+                            name = doc.stem.replace("-", " ").title()
+                            if doc.parent.name == "docs":
+                                name = f"[DOCS] {name}"
+                            print(f"    [\033[1;96m{i:2}\033[0m] {name:30} \033[90m({doc.name})\033[0m")
+                        
+                        print("\n    [\033[1;91mB\033[0m] Back")
+                        
+                        prompt = get_choice_prompt("Choice:", "(index or B)")
+                        status_bar.render(at_bottom=True, force=True, prompt=prompt)
+                        sub_choice = get_key().strip().lower()
+                        clear_choice_placeholder()
+                        
+                        if sub_choice == "b":
+                            break
+                        
+                        if sub_choice.isdigit():
+                            idx = int(sub_choice)
+                            if 0 <= idx < len(all_docs):
+                                target_doc = all_docs[idx]
+                                clear_screen()
+                                print_header(f"READING: {target_doc.name}")
+                                # Print content with basic wrapping/indenting
+                                try:
+                                    print(target_doc.read_text(encoding="utf-8"))
+                                except Exception as e:
+                                    print(f"❌ Error reading file: {e}")
+                                
+                                input("\n\033[1;96mTap Enter to return to docs menu...\033[0m")
+                                continue
             elif choice == "t":
                 handle_tooling_tests(session_allowed_machines, session_allowed_models)
             elif choice == "u":
@@ -3065,11 +3140,11 @@ Read these files first and treat them as authoritative:
                 print(f"    [\033[1;96m{i}\033[0m] {name:15} -> {cli_files[name]:30} [{status_str}]")
             
             print("\n  Actions:")
-            print("    [\033[1;96mA\033[0m] Create All Missing Files")
+            print("    [\033[1;92mA\033[0m] Create All Missing Files")
             if any(s == "invalid" for s in file_statuses.values()):
-                print("    [\033[1;96mR\033[0m] Repair Misconfigured Files (Append required links)")
+                print("    [\033[1;92mR\033[0m] Repair Misconfigured Files")
             
-            print("    [\033[1;96mP\033[0m] Manage Agent Role Prompts (internal)")
+            print("    [\033[1;92mP\033[0m] Customize Agent Instructions (Planner/Builder/etc)")
             print("    [\033[1;91mB\033[0m] Back")
             
             # Anchor prompt to bottom
@@ -3081,7 +3156,7 @@ Read these files first and treat them as authoritative:
             if choice == "b":
                 break
             elif choice == "p":
-                handle_role_prompts()
+                handle_role_prompts(session_allowed_machines, session_allowed_models)
             elif choice == "a":
                 created = 0
                 for name, status in file_statuses.items():
@@ -3360,7 +3435,10 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 # Use run_script to execute notify.py
                 run_script("notify.py", [f"Test Notification ({provider})", f"This is a test message from the AI Orchestrator console using {provider}.", "test-job-id"], session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "a":
-                email = prompt_input("Enter recipient email address:", placeholder="(or Enter to cancel)")
+                try:
+                    email = prompt_input("Enter recipient email address:", placeholder="(or Enter to cancel)")
+                except BackException:
+                    continue
                 if not email: continue
 
                 emails.append(email)
@@ -3373,7 +3451,10 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print("\n    \033[1;96m--- Import Recipients from CSV ---\033[0m")
                 print("    (You can drag and drop a file here to paste its path)")
                 print("    Example: ~/Downloads/testers.csv or ./emails.csv")
-                csv_path = prompt_input("Enter path to CSV file:", placeholder="(or Enter to cancel)")
+                try:
+                    csv_path = prompt_input("Enter path to CSV file:", placeholder="(or Enter to cancel)")
+                except BackException:
+                    continue
                 if not csv_path:
                     print("⚠️  Import cancelled.")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -3413,7 +3494,10 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print_header("Configure Email Provider")
                 curr_provider = settings.get("notification_provider", "gmail")
                 # Remove clear_screen=False so the radio menu is visible
-                provider = prompt_radio("Select Provider:", ["gmail", "resend"], curr_provider)
+                try:
+                    provider = prompt_radio("Select Provider:", ["gmail", "resend"], curr_provider)
+                except BackException:
+                    continue
                 settings["notification_provider"] = provider
                 
                 if provider == "gmail":
@@ -3423,8 +3507,8 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    3. Copy the 16-character code generated.")
                     print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
 
-                    new_smtp = input("\n    Gmail Address: ").strip()
-                    new_pass = input("    🔑 App Password:  ").strip()
+                    new_smtp = prompt_input("Gmail Address:")
+                    new_pass = prompt_password("🔑 App Password:", placeholder="(invisible)")
                     if new_smtp: settings["smtp_email"] = new_smtp
                     if new_pass: settings["smtp_password"] = new_pass
                 else:
@@ -3434,11 +3518,11 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    3. If you haven't verified a domain, use your Resend login email.")
                     print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
 
-                    new_key = input("\n    Resend API Key:  ").strip()
+                    new_key = prompt_password("Resend API Key:", placeholder="(invisible)")
                     print("    \033[90m(Must be a verified domain on Resend, or your login email)\033[0m")
-                    new_from = input("    From Email:      ").strip()
+                    new_from = prompt_input("From Email:")
                     print("    \033[90m(The name that appears in the inbox, e.g. 'AI Orchestrator')\033[0m")
-                    new_name = input("    Display Name:    ").strip()
+                    new_name = prompt_input("Display Name:")
                     if new_key: settings["resend_api_key"] = new_key
                     if new_from: settings["resend_from_email"] = new_from
                     if new_name: settings["resend_display_name"] = new_name
@@ -3447,7 +3531,10 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print("\n    ✅ Provider configured.")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "r" and emails:
-                idx_str = prompt_input("Enter index to remove:", placeholder="(number)")
+                try:
+                    idx_str = prompt_input("Enter index to remove:", placeholder="(number)")
+                except BackException:
+                    continue
                 try:
                     idx = int(idx_str)
                     if 0 <= idx < len(emails):

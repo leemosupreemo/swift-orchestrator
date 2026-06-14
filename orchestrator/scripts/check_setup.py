@@ -14,7 +14,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import CONFIG_DIR, DOCS_DIR, ROOT, read_json
+from common import CONFIG_DIR, DOCS_DIR, ROOT, read_json, print_header, print_divider
 from orchestrator.project_config import PROJECT_CONFIG
 
 REMEDIATION_GUIDE = {
@@ -120,11 +120,11 @@ def get_auth_command(cli_name: str) -> str | None:
     return mapping.get(cli_name)
 
 def check():
-    print("📋 Starting AI Agent 'Plug & Play' Verification...\n")
+    print_header("AI Agent 'Plug & Play' Verification")
     settings_path = CONFIG_DIR / "settings.json"
     
     # 0. Check Core Prerequisites
-    print("--- 1. Core Prerequisites ---")
+    print_header("1. Core Prerequisites")
     has_brew = shutil.which("brew") is not None
     print_result(has_brew, "Homebrew", "INSTALLED" if has_brew else "MISSING", "Homebrew")
 
@@ -135,21 +135,21 @@ def check():
     print_result(has_xcode, "Xcode CLI Tools", "INSTALLED" if has_xcode else "MISSING", "Xcode CLI Tools")
     
     # Git Check
-    print("\n--- 1a. Git Repository Sanity ---")
+    print_header("1a. Git Repository Sanity")
     is_git = (ROOT / ".git").exists()
     print_result(is_git, "Git Repository", "OK" if is_git else "MISSING")
     if is_git:
         try:
             status = subprocess.check_output(["git", "status", "--short"], cwd=str(ROOT), text=True).strip()
             if status:
-                print(f"     \033[93m⚠️  Warning: Uncommitted changes detected.\033[0m")
+                print(f"     \033[1;93m⚠️  Warning: Uncommitted changes detected.\033[0m")
                 print("        AI workflows work best with a clean slate.")
             else:
-                print(f"     \033[92m✅ Repository is clean.\033[0m")
+                print(f"     \033[1;92m✅ Repository is clean.\033[0m")
         except: pass
     
     # 1. Check Essential Files
-    print("\n--- 2. Project Config ---")
+    print_header("2. Project Config")
     
     if PROJECT_CONFIG.firebase_distribution:
         app_dir = ROOT / PROJECT_CONFIG.project_name
@@ -169,10 +169,10 @@ def check():
 
     # Xcode Sanity
     if PROJECT_CONFIG.xcode_project or PROJECT_CONFIG.xcode_workspace:
-        print("\n--- 2a. Xcode Build Settings ---")
+        print_header("2a. Xcode Build Settings")
         try:
             # Quick check if scheme exists
-            res = subprocess.run(["xcodebuild", "-list"], cwd=str(ROOT), capture_output=True, text=True, timeout=5)
+            res = subprocess.run(["xcodebuild", "-list"], cwd=str(ROOT), capture_output=True, text=True, timeout=20)
             if PROJECT_CONFIG.scheme and PROJECT_CONFIG.scheme in res.stdout:
                 print_result(True, f"Scheme: {PROJECT_CONFIG.scheme}", "FOUND")
             else:
@@ -187,7 +187,7 @@ def check():
             print(f"     \033[1;91m⚠️  Error checking Xcode: {e}\033[0m")
 
     # Grounding Docs
-    print("\n--- 3. Grounding Docs (Critical for AI) ---")
+    print_header("3. Grounding Docs (Critical for AI)")
     docs = [
         ("Architecture", "docs/architecture.md"), 
         ("Standards", "docs/coding-standards.md"), 
@@ -201,7 +201,7 @@ def check():
             print(f"        \033[90m(File: {d})\033[0m")
 
     # 3. Check GitHub Environment
-    print("\n--- 4. GitHub Integration ---")
+    print_header("4. GitHub Integration")
     has_gh = shutil.which("gh") is not None
     print_result(has_gh, "GitHub CLI (gh)", "INSTALLED" if has_gh else "MISSING", "GitHub CLI (gh)")
     if has_gh:
@@ -212,7 +212,7 @@ def check():
         except: pass
 
     # 4. Check LLM Providers
-    print("\n--- 5. AI Providers (Need 1+) ---")
+    print_header("5. AI Providers (Need 1+)")
     
     env_keys = ["GEMINI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY"]
     has_env_key = any(k in os.environ for k in env_keys)
@@ -260,12 +260,12 @@ def check():
         print("\n\033[1;92m✅ READY: At least one AI provider is configured.\033[0m")
 
     # 5. Check SSH Config
-    print("\n--- 6. SSH & Network ---")
+    print_header("6. SSH & Network")
     ssh_config_path = Path.home() / ".ssh" / "config"
     print_result(ssh_config_path.exists(), "SSH Config File", "OK" if ssh_config_path.exists() else "MISSING")
     
     if m_path.exists():
-        print("\nVerification Complete.")
+        print("\n\033[1;92m" + "="*20 + " VERIFICATION COMPLETE " + "="*20 + "\033[0m\n")
     else:
         print(f"\n\033[93m💡 NEXT STEP: Create '{m_path}' to use remote workers.\033[0m")
 
