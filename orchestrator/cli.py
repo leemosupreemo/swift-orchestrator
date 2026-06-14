@@ -771,14 +771,14 @@ def run_wizard(args: argparse.Namespace) -> int:
         cfg = load_project_config()
         if (cfg.xcode_project or cfg.xcode_workspace) and prompt_yes_no("Run a quick Xcode build validation (Smoke Test)?", True):
             print("\n🔍 Verifying Xcode build settings...")
-            cmd = f"xcodebuild -scheme {shlex.quote(cfg.scheme)} -showBuildSettings"
+            cmd_args = ["xcodebuild", "-scheme", cfg.scheme, "-showBuildSettings"]
             if cfg.xcode_workspace:
-                cmd += f" -workspace {shlex.quote(cfg.xcode_workspace)}"
+                cmd_args.extend(["-workspace", cfg.xcode_workspace])
             elif cfg.xcode_project:
-                cmd += f" -project {shlex.quote(cfg.xcode_project)}"
+                cmd_args.extend(["-project", cfg.xcode_project])
             
             try:
-                subprocess.run(cmd.split(), capture_output=True, text=True, check=True, timeout=30, cwd=str(root))
+                subprocess.run(cmd_args, capture_output=True, text=True, check=True, timeout=30, cwd=str(root))
                 print("✅ Xcode configuration verified.")
             except Exception as e:
                 print(f"❌ Xcode validation failed: {e}")
