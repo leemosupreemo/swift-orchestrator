@@ -115,7 +115,22 @@ class ModelRegistryTests(unittest.TestCase):
 
     @patch("pathlib.Path.home")
     @patch("urllib.request.urlopen")
-    def test_sync_models_failure(self, mock_urlopen, mock_home):
+    def test_sync_models_failure_404(self, mock_urlopen, mock_home):
+        mock_home.return_value = self.tmp_home
+        
+        # Mock HTTPError 404
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "url", 404, "Not Found", {}, None
+        )
+        
+        success, msg = model_registry.sync_models()
+        self.assertFalse(success)
+        self.assertIn("Registry not found at", msg)
+
+    @patch("pathlib.Path.home")
+    @patch("urllib.request.urlopen")
+    def test_sync_models_generic_failure(self, mock_urlopen, mock_home):
         mock_home.return_value = self.tmp_home
         mock_urlopen.side_effect = Exception("Network error")
         
