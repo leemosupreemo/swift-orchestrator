@@ -235,7 +235,7 @@ def check():
             return False
         
         try:
-            res = subprocess.run([cli_name] + status_args, capture_output=True, text=True, timeout=2)
+            res = subprocess.run([cli_name] + status_args, capture_output=True, text=True, timeout=5)
             is_auth = res.returncode == 0
             print_result(is_auth, f"{cli_name} Auth", "LOGGED IN" if is_auth else "NOT LOGGED IN", fix_key if not is_auth else None)
             return is_auth
