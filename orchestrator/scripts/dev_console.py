@@ -1731,15 +1731,29 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         resolved_ids.append(mid)
                         
                 curr_defaults = [label for label, mid in value_map.items() if mid in resolved_ids]
-                
-                new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, details_map=details_map, status_bar=status_bar)
-                if new_labels:
-                    job["allowed_models"] = [value_map[label] for label in new_labels]
-                    save_job(job)
-                    print(f"\n✅ Updated allowed models for this job.")
-                else:
-                    print("Warning: At least one model must be selected. No changes made.")
-                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+
+                try:
+                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r"], footer="[\033[1;96mR\033[0m] Refresh from Remote Registry", details_map=details_map, status_bar=status_bar)
+                    if new_labels:
+                        job["allowed_models"] = [value_map[label] for label in new_labels]
+                        save_job(job)
+                        print(f"\n✅ Updated allowed models for this job.")
+                    else:
+                        print("Warning: At least one model must be selected. No changes made.")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                except KeyInterruptException as exc:
+                    if exc.key == "r":
+                        from model_registry import sync_models
+                        print("\n\n📡 Syncing models with remote registry...")
+                        success, msg = sync_models()
+                        if success:
+                            print(f"✅ {msg}")
+                        else:
+                            print(f"❌ {msg}")
+                        input("\n\033[1;96mTap Enter to continue...\033[0m")
+                        continue # Re-open the menu with new data
+                    raise
+
             elif choice == "x":
                 handle_discard_job(job)
                 break
@@ -2596,12 +2610,25 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
 
                 curr_defaults = [label for label, mid in value_map.items() if mid in resolved_session_ids]
 
-                new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, details_map=details_map, status_bar=status_bar)
-                if new_labels:
-                    session_allowed_models = [value_map[label] for label in new_labels]
-                else:
-                    print("Warning: At least one model must be selected. Keeping previous choice.")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                try:
+                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r"], footer="[\033[1;96mR\033[0m] Refresh from Remote Registry", details_map=details_map, status_bar=status_bar)
+                    if new_labels:
+                        session_allowed_models = [value_map[label] for label in new_labels]
+                    else:
+                        print("Warning: At least one model must be selected. Keeping previous choice.")
+                        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                except KeyInterruptException as exc:
+                    if exc.key == "r":
+                        from model_registry import sync_models
+                        print("\n\n📡 Syncing models with remote registry...")
+                        success, msg = sync_models()
+                        if success:
+                            print(f"✅ {msg}")
+                        else:
+                            print(f"❌ {msg}")
+                        input("\n\033[1;96mTap Enter to continue...\033[0m")
+                        continue # Re-open menu
+                    raise
             elif choice == "k":
                 handle_api_keys(session_allowed_machines, session_allowed_models)
             elif choice == "f":

@@ -276,3 +276,51 @@ def get_model(model_id: str) -> ModelMetadata | None:
         if model_id == m.id or model_id in m.aliases:
             return m
     return None
+
+def sync_models() -> tuple[bool, str]:
+    """
+    Fetches latest model definitions from the official remote registry
+    and updates ~/.orchestrator/custom_models.json.
+    """
+    import urllib.request
+    import ssl
+    
+    # Official registry URL (placeholder for now, points to a likely repo location)
+    REGISTRY_URL = "https://raw.githubusercontent.com/google/swift-orchestrator/main/orchestrator/config/models.json"
+    
+    global_config = Path.home() / ".orchestrator" / "custom_models.json"
+    global_config.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        ctx = ssl._create_unverified_context()
+        req = urllib.request.Request(REGISTRY_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+            remote_data = json.loads(response.read().decode("utf-8"))
+            
+        remote_models = remote_data.get("models", [])
+        if not remote_models:
+            return False, "Remote registry is empty or invalid."
+            
+        # Load current global custom models to merge
+        current_custom = {"models": []}
+        if global_config.exists():
+            try:
+                current_custom = json.loads(global_config.read_text(encoding="utf-8"))
+            except: pass
+            
+        # Merge logic: Remote models take precedence for same ID
+        # but keep other local-only custom models
+        merged_map = {m["id"]: m for m in current_custom.get("models", [])}
+        for rm in remote_models:
+            merged_map[rm["id"]] = rm
+            
+        new_data = {"models": sorted(list(merged_map.values()), key=lambda x: x["id"])}
+        global_config.write_text(json.dumps(new_data, indent=2), encoding="utf-8")
+        
+        # Invalidate cache
+        global _ALL_MODELS_CACHE
+        _ALL_MODELS_CACHE = None
+        
+        return True, f"Successfully synced {len(remote_models)} models from registry."
+    except Exception as e:
+        return False, f"Sync failed: {e}"
