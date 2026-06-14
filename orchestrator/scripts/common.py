@@ -1065,8 +1065,14 @@ class StatusBar:
 
 def cleanup_terminal():
     try:
-        _, lines = os.get_terminal_size()
-        sys.stdout.write(f"\033[r\033[{lines};1H\n")
+        _, lines = self._get_size()
+    except:
+        lines = 24
+    try:
+        # \033[r: Reset scroll region
+        # \033[?25h: Show cursor
+        # \033[lines;1H: Move to bottom line
+        sys.stdout.write(f"\033[r\033[?25h\033[{lines};1H\n")
         sys.stdout.flush()
     except: pass
 

@@ -112,6 +112,9 @@ def clear_screen():
     sys.stdout.write("\033[r\033[?25h\033[0m\r")
     sys.stdout.flush()
     os.system("clear" if os.name != "nt" else "cls")
+    # Explicitly move to top-left to avoid misalignment if 'clear' didn't do it perfectly
+    sys.stdout.write("\033[1;1H")
+    sys.stdout.flush()
 
 def list_jobs() -> list[dict[str, Any]]:
     job_files = sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -3437,8 +3440,7 @@ if __name__ == "__main__":
             
         main_loop()
     except KeyboardInterrupt:
+        from orchestrator.scripts.common import cleanup_terminal
+        cleanup_terminal()
         print("\nExiting console.")
-        # Ensure terminal is reset on exit
-        sys.stdout.write("\033[r\033[?25h")
-        sys.stdout.flush()
         sys.exit(0)
