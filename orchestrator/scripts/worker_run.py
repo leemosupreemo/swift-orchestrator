@@ -156,7 +156,7 @@ def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Opt
         print(f"  2. Run the orchestrator console to manage this job: \033[1;96morchestrator console\033[0m")
         print(f"  3. Merge and cleanup using dev_console when satisfied.")
     else:
-        print("\n\033[91m" + "!"*60)
+        print("\n\033[1;91m" + "!"*60)
         print("  ⚠️  FAILURE: Human Intervention Needed  ⚠️")
         print("!"*60)
         print("""

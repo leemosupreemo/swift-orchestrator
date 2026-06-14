@@ -156,14 +156,14 @@ def main() -> int:
             print("\n\033[1;97mChoices:\033[0m")
             print("  [\033[92mA\033[0m] Approve & Run All")
             print("  [\033[93mF\033[0m] Provide Feedback (Steer the Agent)")
-            print("  [\033[91mQ\033[0m] Abort / Quit")
+            print("  [\033[1;91mQ\033[0m] Abort / Quit")
             
             from orchestrator.scripts.common import get_key
             print("\n  \033[1;97mChoice:\033[0m ", end="", flush=True)
             user_choice = get_key().strip().lower()
 
             if user_choice == "q":
-                print("\033[91mabort\033[0m")
+                print("\033[1;91mabort\033[0m")
                 print("\nAborting orchestration loop.")
                 return 0
             elif user_choice == "f":
@@ -179,7 +179,7 @@ def main() -> int:
             elif user_choice in {"a", "enter"}:
                 print("\033[92mapprove\033[0m")
             else:
-                print(f"\033[91m{user_choice}\033[0m")
+                print(f"\033[1;91m{user_choice}\033[0m")
                 print("  Invalid choice. Aborting for safety.")
                 return 0
         print(f"\n\033[1;92m" + "-"*60)
@@ -199,7 +199,7 @@ def main() -> int:
                 sub_prompt_path = PROMPTS_DIR / f"{agent_name}.md"
                 if not sub_prompt_path.exists():
                     res = f"ERROR: Sub-agent prompt '{agent_name}.md' not found."
-                    print(f"\033[91m{res}\033[0m")
+                    print(f"\033[1;91m{res}\033[0m")
                     turn_results.append(f"Sub-agent {agent_name} result: {res}")
                     continue
                 
@@ -228,7 +228,7 @@ def main() -> int:
                     print(f"\n  Proceed? (y/n): ", end="", flush=True)
                     user_ok = get_key().strip().lower()
                     if user_ok not in {"y", "yes"}:
-                        print("\033[91mno\033[0m")
+                        print("\033[1;91mno\033[0m")
                         print("  Skipping tool execution.")
                         turn_results.append(f"### Result from system tool {tool_name} ###\nUSER CANCELLED: Execution was denied by the user.")
                         continue
@@ -283,7 +283,7 @@ def main() -> int:
         if args.step_by_step and turn < args.max_turns:
             input(f"\n\033[1;96mTurn {turn} complete. Tap Enter to continue to next turn...\033[0m")
 
-    print(f"\n\033[91mReached maximum turns ({args.max_turns}). Stopping.\033[0m")
+    print(f"\n\033[1;91mReached maximum turns ({args.max_turns}). Stopping.\033[0m")
     return 0
 
 import shlex

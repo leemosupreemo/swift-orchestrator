@@ -22,7 +22,7 @@ def run_smoke_delivery():
     # 0. Pre-flight check: Ensure signing configuration is present
     dist_errors = PROJECT_CONFIG.validate_distribution_config()
     if dist_errors:
-        print("\n\033[91m!!! Error: Distribution configuration is incomplete:\033[0m")
+        print("\n\033[1;91m!!! Error: Distribution configuration is incomplete:\033[0m")
         for err in dist_errors:
             print(f"      - {err}")
         print("\n\033[93mYou must configure signing and accounts before distributing.\033[0m")

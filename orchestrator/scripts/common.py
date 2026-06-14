@@ -228,11 +228,11 @@ def colorize_diff_line(line: str) -> str:
     if line.startswith("+") and not line.startswith("+++") and not is_log_bullet:
         return "\033[92m" + line + "\033[0m"
     elif line.startswith("-") and not line.startswith("---") and not is_log_bullet:
-        return "\033[91m" + line + "\033[0m"
+        return "\033[1;91m" + line + "\033[0m"
     elif line.startswith("@@"):
         return "\033[1;96m" + line + "\033[0m"
     elif "(+)" in line or "(-)" in line:
-        return line.replace("(+)", "(\033[92m+\033[0m)").replace("(-)", "(\033[91m-\033[0m)")
+        return line.replace("(+)", "(\033[92m+\033[0m)").replace("(-)", "(\033[1;91m-\033[0m)")
     return line
 
 def _print_completed_process(result: subprocess.CompletedProcess) -> None:
@@ -586,7 +586,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             output.append(f"\033[90m{sub_label}\033[0m")
             
             if error_msg:
-                output.append(f"\033[91m      ⚠️  {error_msg}\033[0m")
+                output.append(f"\033[1;91m      ⚠️  {error_msg}\033[0m")
                 error_msg = ""
 
             # 2. Print options
@@ -1065,10 +1065,15 @@ class StatusBar:
 
 def cleanup_terminal():
     try:
-        _, lines = self._get_size()
+        columns, lines = os.get_terminal_size()
     except:
         lines = 24
     try:
+        # 1. Reset terminal mode (restore ONLCR / carriage returns)
+        if os.name != "nt":
+            os.system("stty sane 2>/dev/null")
+            
+        # 2. Reset scroll region, show cursor, move to bottom
         # \033[r: Reset scroll region
         # \033[?25h: Show cursor
         # \033[lines;1H: Move to bottom line

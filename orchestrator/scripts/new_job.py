@@ -585,7 +585,7 @@ def main(args_override: list[str] | None = None) -> None:
     try:
         plan = json.loads(llm_output)
     except json.JSONDecodeError:
-        print("\n\033[91mFAILED TO PARSE PLANNER OUTPUT AS JSON\033[0m")
+        print("\n\033[1;91mFAILED TO PARSE PLANNER OUTPUT AS JSON\033[0m")
         print("-" * 40)
         print(llm_output)
         print("-" * 40)
@@ -657,7 +657,7 @@ def main(args_override: list[str] | None = None) -> None:
                             # Clear clarification so status stays 'planned'
                             clarification = None
                         except:
-                            print(f"\033[91m      - Failed to parse revised plan. Falling back to human-needed.\033[0m")
+                            print(f"\033[1;91m      - Failed to parse revised plan. Falling back to human-needed.\033[0m")
                             clarification = clarification or f"Architect {status_str}: {verification['comments']}"
                     else:
                         # Force human intervention

@@ -80,7 +80,7 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         missing_clis = [cli for cli in m.required_clis if not shutil.which(cli)]
         install_warning = ""
         if missing_clis:
-            install_warning = f" \033[91m[Requires '{missing_clis[0]}' CLI]\033[0m"
+            install_warning = f" \033[1;91m[Requires '{missing_clis[0]}' CLI]\033[0m"
             
         label = f"{m.id}{alias_info}{effort_info} [{tier_str}]{install_warning}"
         
@@ -94,7 +94,7 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
             f"Capabilities: {', '.join([c.value.capitalize() for c in m.capabilities])}"
         ]
         if missing_clis:
-            details.append(f"\033[91mWarning: Missing required CLI '{missing_clis[0]}'\033[0m")
+            details.append(f"\033[1;91mWarning: Missing required CLI '{missing_clis[0]}'\033[0m")
         if m.reasoning_effort:
             details.append(f"Effort:   {m.reasoning_effort}")
         if m.aliases:
@@ -109,8 +109,8 @@ def get_online_machines(allowed: list[str]) -> list[str]:
 
 def clear_screen():
     # Force reset scroll region and show cursor before clearing to prevent layout bugs
-    sys.stdout.write("\033[r\033[?25h\033[0m\r")
-    sys.stdout.flush()
+    from orchestrator.scripts.common import cleanup_terminal
+    cleanup_terminal()
     os.system("clear" if os.name != "nt" else "cls")
     # Explicitly move to top-left to avoid misalignment if 'clear' didn't do it perfectly
     sys.stdout.write("\033[1;1H")
@@ -161,7 +161,7 @@ def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
         "planned": "\033[1;96m",      # Blue
         "executing": "\033[93m",    # Yellow
         "review-needed": "\033[92m", # Green
-        "human-needed": "\033[91m",  # Red
+        "human-needed": "\033[1;91m",  # Red
         "debugging": "\033[95m",     # Magenta
         "decomposed": "\033[90m",    # Grey",
         "designing": "\033[1;96m",     # Blue
@@ -185,7 +185,7 @@ def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
     # Write out full type: bug or feature
     job_type = job.get("type", "bug")
     if "bug" in job_type:
-        type_str = "\033[91mbug    \033[0m"
+        type_str = "\033[1;91mbug    \033[0m"
     elif "feature" in job_type:
         type_str = "\033[95mfeature\033[0m"
     elif "design" in job_type:
@@ -369,7 +369,7 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
         else:
             returncode = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)            
         if returncode != 0:
-            print("\n" + "\033[91m" + "!"*60)
+            print("\n" + "\033[1;91m" + "!"*60)
             print("  🚨  SCRIPT FAILURE DETECTED (Code " + str(returncode) + ")  🚨")
             print("!"*60 + "\033[0m")
 
@@ -391,15 +391,19 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
                             summary = "Blocker: " + match.group(1).strip()
 
             if summary:
-                print(f"\n\033[1;93m" + "-"*60)
+                print("\n\033[1;93m", end="")
+                print_divider("-")
                 print(f"🔍 FAILURE SUMMARY:\n{summary}")
-                print("-"*60 + "\033[0m")
+                print_divider("-")
+                print("\033[0m", end="")
             else:
                 print("\n\033[90m(No detailed summary available from artifacts)\033[0m")
         else:
-            print("\n" + "\033[92m" + "="*60)
+            print("\n\033[92m", end="")
+            print_divider("=")
             print("  ✅  SCRIPT COMPLETED SUCCESSFULLY")
-            print("="*60 + "\033[0m")
+            print_divider("=")
+            print("\033[0m", end="")
 
     except KeyboardInterrupt:
         print("\nProcess interrupted by user.")
@@ -612,7 +616,7 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
             for m in machines_config:
                 name = m.get("name", "unknown")
                 is_online = FLEET_AVAILABILITY.get(name, False)
-                status_str = "\033[92mONLINE\033[0m" if is_online else "\033[91mOFFLINE\033[0m"
+                status_str = "\033[92mONLINE\033[0m" if is_online else "\033[1;91mOFFLINE\033[0m"
                 
                 details = [
                     f"Status: {status_str}",
@@ -629,8 +633,8 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
             try:
                 # We use prompt_checkbox with 'd' as an extra key for discovery and 'n' for rename
                 # Enforce 10 machine limit via max_selections
-                footer = "[\033[1;96mD\033[0m] Discover Remote    [\033[1;96mN\033[0m] Rename Selected    [\033[1;96mZ\033[0m] Fleet Hygiene"
-                new_allowed = prompt_checkbox("Active Machines for Session:", machine_names, session_allowed_machines, extra_keys=["d", "n", "z"], footer=footer, details_map=details_map, status_bar=status_bar, max_selections=10)
+                footer = "[\033[1;92mD\033[0m] Discover    [\033[1;92mN\033[0m] Rename    [\033[1;92mZ\033[0m] Hygiene    [\033[1;91mB\033[0m] Back"
+                new_allowed = prompt_checkbox("Active Machines for Session:", machine_names, session_allowed_machines, extra_keys=["d", "n", "z", "b"], footer=footer, details_map=details_map, status_bar=status_bar, max_selections=10)
                 
                 if not new_allowed:
                     print("\n\033[1;91m⚠️  ERROR: You must select at least one machine to continue.\033[0m")
@@ -647,6 +651,13 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                     continue
                 return session_allowed_machines
             except KeyInterruptException as exc:
+                if exc.key == "b":
+                    if not session_allowed_machines:
+                        print("\n\033[1;91m⚠️  ERROR: No machines selected.\033[0m")
+                        print("Please select at least one machine before going back.")
+                        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                        continue
+                    return session_allowed_machines
                 if exc.key == "d":
                     print_header("Discovering Remote Machines")
                     run_script("discover_machines.py", [])
@@ -728,10 +739,10 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
             print("\n  \033[1;90m--- ENVIRONMENT & SETUP ---\033[0m")
             print("  [\033[1;96mP\033[0m] Plug & Play Self-Tests  (Setup logic verification)")
 
-            print("\n[\033[1;96mB\033[0m] Back")
+            print("\n[\033[1;91mB\033[0m] Back")
             
             if error_msg:
-                print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                 error_msg = ""
 
             # Anchor prompt to bottom
@@ -863,10 +874,10 @@ def handle_app_tests(session_allowed_machines: list[str], session_allowed_models
             print("\n  Visual Checks:")
             print("    [\033[1;96mV\033[0m] Simulator Visual Check (build, launch, screenshots)")
 
-            print("\n[\033[1;96mB\033[0m] Back")
+            print("\n[\033[1;91mB\033[0m] Back")
             
             if error_msg:
-                print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                 error_msg = ""
 
             # Anchor prompt to bottom
@@ -1045,7 +1056,7 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
         print(f"\nNo log entries found for this job or in manual folder.")
         print("Or select a custom log file path by pressing L")
         print("\n[\033[1;96mL\033[0m] Custom Log Path")
-        print("[\033[1;96mB\033[0m] Back")
+        print("[\033[1;91mB\033[0m] Back")
         print_choice_prompt("\nChoice:", "(action)")
         sub_choice = get_key().strip().lower()
         clear_choice_placeholder()
@@ -1105,7 +1116,7 @@ def prompt_for_reference_artifact(job: dict[str, Any]) -> bool:
     try:
         artifact = attach_reference_artifact(job, source, note)
     except Exception as exc:
-        print(f"\n\033[91mCould not attach reference: {exc}\033[0m")
+        print(f"\n\033[1;91mCould not attach reference: {exc}\033[0m")
         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
         return False
 
@@ -1273,11 +1284,11 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
                         status = data.get("status", "unknown")
                         print(f"    [{i:2}] \033[97m{job_id:15}\033[0m | {status:10} | {title}")
                     except:
-                        print(f"    [{i:2}] \033[91m{f.name:15}\033[0m | CORRUPT")
+                        print(f"    [{i:2}] \033[1;91m{f.name:15}\033[0m | CORRUPT")
 
             print("\n    Actions:")
             print("    [\033[1;96mU\033[0m] Un-archive (Restore to main menu)")
-            print("    [\033[1;96mB\033[0m] Back")
+            print("    [\033[1;91mB\033[0m] Back")
 
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(letter)")
@@ -1399,7 +1410,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("[\033[1;96mA\033[0m] Answer Question & Re-plan")
                     if "a" not in actions: actions.append("a")
                 elif error:
-                    print(f" \033[91mError:\033[0m {error}")
+                    print(f" \033[1;91mError:\033[0m {error}")
                 else:
                     print(" \033[90mReason: Unknown (Check logs or try re-running with more context)\033[0m")
                 print(f" \033[1;96m->\033[0m Press \033[1;96m'L'\033[0m to link logs then \033[1;96m'U'\033[0m to Resume, or \033[1;96m'R'\033[0m to RESET progress & delete changes.")
@@ -1486,9 +1497,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             if res.get("build_ok") and res.get("tests_ok"):
                                 res_str = "\033[92mPASS\033[0m"
                             elif not res.get("build_ok"):
-                                res_str = "\033[91mFAIL (Build)\033[0m"
+                                res_str = "\033[1;91mFAIL (Build)\033[0m"
                             else:
-                                res_str = "\033[91mFAIL (Tests)\033[0m"
+                                res_str = "\033[1;91mFAIL (Tests)\033[0m"
                         else:
                             res_str = f"\033[90m{res}\033[0m"
                         
@@ -1584,7 +1595,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     stats_parts = []
                     for p in parts:
                         if "insertion" in p: stats_parts.append(f"\033[92m+{p.split()[0]}\033[0m")
-                        elif "deletion" in p: stats_parts.append(f"\033[91m-{p.split()[0]}\033[0m")
+                        elif "deletion" in p: stats_parts.append(f"\033[1;91m-{p.split()[0]}\033[0m")
                     
                     file_count = parts[0].split()[0]
                     stats_str = f" ({', '.join(stats_parts)})" if stats_parts else ""
@@ -1596,7 +1607,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     local_stats = []
                     for p in parts:
                         if "insertion" in p: local_stats.append(f"\033[92m+{p.split()[0]}\033[0m")
-                        elif "deletion" in p: local_stats.append(f"\033[91m-{p.split()[0]}\033[0m")
+                        elif "deletion" in p: local_stats.append(f"\033[1;91m-{p.split()[0]}\033[0m")
                     print(f"    \033[90m└─\033[0m \033[93m{parts[0].split()[0]} files unsaved (local)\033[0m \033[90m{' '.join(local_stats)}\033[0m")
 
                 # 3. Combined File List (Preview)
@@ -1668,7 +1679,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("[\033[93mD\033[0m] Auto-Fix / Iterate")
                     actions.append("d")
                 if "r" not in actions:
-                    print("[\033[91mR\033[0m] Full Re-run \033[91m(Deletes existing changes & resets to Planned)\033[0m")
+                    print("[\033[1;91mR\033[0m] Full Re-run \033[1;91m(Deletes existing changes & resets to Planned)\033[0m")
                     actions.append("r")
             
             ai_modified = job.get("ai_modified_files", [])
@@ -1686,13 +1697,13 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             print("[\033[93mT\033[0m] Export Context (Logs, Progress, Plan)")
             print("[\033[93mV\033[0m] View Brief / Summary")
             print("[\033[1;96mG\033[0m] View in GitHub")
-            print("[\033[91mC\033[0m] Close Issue in GitHub")
-            print("[\033[91mX\033[0m] Discard & Revert Changes")
-            print("[\033[91mB\033[0m] Back to Main Menu")
+            print("[\033[1;91mC\033[0m] Close Issue in GitHub")
+            print("[\033[1;91mX\033[0m] Discard & Revert Changes")
+            print("[\033[1;91mB\033[0m] Back to Main Menu")
             actions.extend(["v", "g", "c", "r", "x", "m", "f", "o", "b", "u", "t"])
             
             if error_msg:
-                print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                 error_msg = ""
 
             # Anchor prompt to bottom
@@ -1720,45 +1731,51 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 break
             elif choice == "o":
                 print_header("Override LLM Models for Job")
-                options, value_map, details_map = get_model_selection_data()
-                
-                # Map current IDs back to labels for defaults
-                curr_allowed_ids = job.get("allowed_models", list(DEFAULT_FALLBACKS))
-                # Handle aliases in current settings by resolving them
-                from model_registry import get_model
-                resolved_ids = []
-                for mid in curr_allowed_ids:
-                    if m := get_model(mid):
-                        resolved_ids.append(m.id)
-                    else:
-                        resolved_ids.append(mid)
-                        
-                curr_defaults = [label for label, mid in value_map.items() if mid in resolved_ids]
-
-                try:
-                    footer = "[\033[1;96mR\033[0m] Sync Registry  [\033[1;96mD\033[0m] Live Discovery (Ping APIs)"
-                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d"], footer=footer, details_map=details_map, status_bar=status_bar)
-                    if new_labels:
-                        job["allowed_models"] = [value_map[label] for label in new_labels]
-                        save_job(job)
-                        print(f"\n✅ Updated allowed models for this job.")
-                    else:
-                        print("Warning: At least one model must be selected. No changes made.")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                except KeyInterruptException as exc:
-                    if exc.key in ["r", "d"]:
-                        live = (exc.key == "d")
-                        from model_registry import sync_models
-                        action = "Syncing with registry..." if not live else "Pinging provider APIs..."
-                        print(f"\n\n📡 {action}")
-                        success, msg = sync_models(live_discovery=live)
-                        if success:
-                            print(f"✅ {msg}")
+                while True:
+                    options, value_map, details_map = get_model_selection_data()
+                    
+                    # Map current IDs back to labels for defaults
+                    curr_allowed_ids = job.get("allowed_models", list(DEFAULT_FALLBACKS))
+                    # Handle aliases in current settings by resolving them
+                    from model_registry import get_model
+                    resolved_ids = []
+                    for mid in curr_allowed_ids:
+                        if m := get_model(mid):
+                            resolved_ids.append(m.id)
                         else:
-                            print(f"❌ {msg}")
-                        input("\n\033[1;96mTap Enter to continue...\033[0m")
-                        continue # Re-open the menu with new data
-                    raise
+                            resolved_ids.append(mid)
+                            
+                    curr_defaults = [label for label, mid in value_map.items() if mid in resolved_ids]
+
+                    try:
+                        footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
+                        new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
+                        if new_labels:
+                            job["allowed_models"] = [value_map[label] for label in new_labels]
+                            save_job(job)
+                            print(f"\n✅ Updated allowed models for this job.")
+                        else:
+                            print("Warning: At least one model must be selected. No changes made.")
+                        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                        break
+                    except KeyInterruptException as exc:
+                        if exc.key == "b":
+                            break
+                        if exc.key in ["r", "d"]:
+                            live = (exc.key == "d")
+                            from model_registry import sync_models
+                            action = "Syncing with registry..." if not live else "Pinging provider APIs..."
+                            print(f"\n\n📡 {action}")
+                            success, msg = sync_models(live_discovery=live)
+                            if success:
+                                print(f"✅ {msg}")
+                            else:
+                                print(f"❌ {msg}")
+                            input("\n\033[1;96mTap Enter to continue...\033[0m")
+                            continue # Re-open the menu with new data
+                        raise
+                    except BackException:
+                        break
 
             elif choice == "x":
                 handle_discard_job(job)
@@ -1842,7 +1859,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     if dist_errors:
                         print_header("Distribution Setup Needed")
                         for err in dist_errors:
-                            print(f" \033[91m- {err}\033[0m")
+                            print(f" \033[1;91m- {err}\033[0m")
                         print("\n \033[93mYou must configure signing and accounts before distributing.\033[0m")
                         if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
                             print("\n\033[1;96mStarting Orchestrator Wizard...\033[0m")
@@ -2111,11 +2128,11 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             try:
                                 extra = int(extra_input)
                                 if extra < 0:
-                                    print("\033[91m      ⚠️  Please enter a positive number.\033[0m")
+                                    print("\033[1;91m      ⚠️  Please enter a positive number.\033[0m")
                                     continue
                                 break
                             except ValueError:
-                                print("\033[91m      ⚠️  Invalid input. Please enter a number.\033[0m")
+                                print("\033[1;91m      ⚠️  Invalid input. Please enter a number.\033[0m")
 
                         final_limit = current_total + extra
                         args.extend(["--max-iterations", str(final_limit)])
@@ -2250,7 +2267,7 @@ You MUST NOT propose or perform any code changes. Be concise, accurate, and focu
             print("-" * 60)
             
         except Exception as e:
-            print(f"\n\033[91mError calling AI: {e}\033[0m")
+            print(f"\n\033[1;91mError calling AI: {e}\033[0m")
             
     return
 
@@ -2325,23 +2342,23 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 {"label": "Ollama (Local)", "cli": "ollama", "key_id": None, "status": get_ollama_status()},
             ]
 
-            # Table Header
-            header = f"{'Provider / Tool':20} | {'CLI Status':15} | {'Manual Key':15} | {'Access'}"
+            # Table Header - Narrower for better responsiveness
+            header = f"{'Provider / Tool':18} | {'CLI Status':13} | {'Manual Key':13} | {'Access'}"
             print(f"\033[1;97m{header}\033[0m")
-            print("\033[90m" + "-" * len(header) + "\033[0m")
+            print_divider("-")
 
             for p in providers:
                 status = p["status"]
                 
                 # 1. CLI Column
                 if status in ["Logged In", "Ready", "Running"]:
-                    cli_display = f"\033[92m{status:15}\033[0m"
+                    cli_display = f"\033[92m{status:13}\033[0m"
                     cli_ready = True
                 elif status == "Not Installed":
-                    cli_display = f"\033[90m{status:15}\033[0m"
+                    cli_display = f"\033[90m{status:13}\033[0m"
                     cli_ready = False
                 else:
-                    cli_display = f"\033[91m{status:15}\033[0m"
+                    cli_display = f"\033[1;91m{status:13}\033[0m"
                     cli_ready = False
 
                 # 2. Key Column
@@ -2367,26 +2384,28 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                     raw_key_status = "N/A"
                     key_color = "\033[90m"
 
-                key_display = f"{key_color}{raw_key_status:15}\033[0m"
+                key_display = f"{key_color}{raw_key_status:13}\033[0m"
 
                 # 3. Overall Ready Column
                 if cli_ready or key_ready:
                     ready_display = "\033[1;92m✓ READY\033[0m"
                 else:
-                    ready_display = "\033[91m✗ LOCKED\033[0m"
+                    ready_display = "\033[1;91m✗ LOCKED\033[0m"
 
-                print(f"{p['label']:20} | {cli_display} | {key_display} | {ready_display}")
+                print(f"{p['label']:18} | {cli_display} | {key_display} | {ready_display}")
 
-            print("\n  \033[1;97mActions:\033[0m")
-            print("    \033[1;96mManual Key Updates\033[0m")
-            print("      [\033[1;96mG\033[0m] Update Gemini Key    [\033[1;96mA\033[0m] Update Anthropic Key    [\033[1;96mO\033[0m] Update OpenAI Key")
+            print_header("ACTIONS")
+            
+            # Grid Layout for Actions - using smaller gaps and smarter labels
+            print(f"  \033[1;96mManual Key Updates\033[0m")
+            print(f"    [\033[1;92mG\033[0m] Gemini Key        [\033[1;92mA\033[0m] Anthropic Key     [\033[1;92mO\033[0m] OpenAI Key")
 
-            print("\n    \033[1;96mBrowser Logins (OAuth)\033[0m")
-            print("      [\033[1;96m1\033[0m] Login Gemini        [\033[1;96m2\033[0m] Login Claude           [\033[1;96m3\033[0m] Login Codex")
-            print("      [\033[1;96m4\033[0m] Login GitHub        [\033[1;96m5\033[0m] Login OpenCode")
+            print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
+            print(f"    [\033[1;92m1\033[0m] Gemini            [\033[1;92m2\033[0m] Claude            [\033[1;92m3\033[0m] Codex")
+            print(f"    [\033[1;92m4\033[0m] GitHub            [\033[1;92m5\033[0m] OpenCode")
 
-            print("\n    \033[1;97mOptions\033[0m")
-            print("      [\033[1;96mC\033[0m] Clear Saved Keys    [\033[1;96mB\033[0m] Back")
+            print(f"\n  \033[1;97mManagement\033[0m")
+            print(f"    [\033[1;91mC\033[0m] Clear Saved Keys  [\033[1;91mB\033[0m] Back")
 
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -2468,7 +2487,7 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
         bins = probe.get("binaries", {})
         for b in binaries:
             status = bins.get(b, False)
-            icon = "\033[92m✅\033[0m" if status else "\033[91m❌\033[0m"
+            icon = "\033[92m✅\033[0m" if status else "\033[1;91m❌\033[0m"
             row += f" | {icon:14}" # Adjust for ANSI codes
         print(row)
         
@@ -2539,7 +2558,7 @@ def handle_role_prompts():
     print("  [\033[1;96m1\033[0m] Copy system default templates to project (to enable editing)")
     if prompts_dir.exists():
         print("  [\033[1;96m2\033[0m] Delete custom prompts (revert to system defaults)")
-    print("  [\033[1;96mB\033[0m] Back")
+    print("  [\033[1;91mB\033[0m] Back")
 
     choice = input("\nChoice: ").strip().lower()
     if choice == '1':
@@ -2592,7 +2611,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
 
             print("    [\033[93mT\033[0m] Orchestrator Self-Tests")
             print("    [\033[93mU\033[0m] Update Orchestrator (Local & Fleet)")
-            print("    [\033[91mB\033[0m] Back")
+            print("    [\033[1;91mB\033[0m] Back")
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(letter)")
             status_bar.render(at_bottom=True, force=True, prompt=prompt)
@@ -2603,41 +2622,47 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 break
             elif choice == "m":
                 print_header("Select LLM Models for Session")
-                options, value_map, details_map = get_model_selection_data()
+                while True:
+                    options, value_map, details_map = get_model_selection_data()
 
-                # Resolve current session defaults
-                from model_registry import get_model
-                resolved_session_ids = []
-                for mid in session_allowed_models:
-                    if m := get_model(mid):
-                        resolved_session_ids.append(m.id)
-                    else:
-                        resolved_session_ids.append(mid)
-
-                curr_defaults = [label for label, mid in value_map.items() if mid in resolved_session_ids]
-
-                try:
-                    footer = "[\033[1;96mR\033[0m] Sync Registry  [\033[1;96mD\033[0m] Live Discovery (Ping APIs)"
-                    new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d"], footer=footer, details_map=details_map, status_bar=status_bar)
-                    if new_labels:
-                        session_allowed_models = [value_map[label] for label in new_labels]
-                    else:
-                        print("Warning: At least one model must be selected. Keeping previous choice.")
-                        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                except KeyInterruptException as exc:
-                    if exc.key in ["r", "d"]:
-                        live = (exc.key == "d")
-                        from model_registry import sync_models
-                        action = "Syncing with registry..." if not live else "Pinging provider APIs..."
-                        print(f"\n\n📡 {action}")
-                        success, msg = sync_models(live_discovery=live)
-                        if success:
-                            print(f"✅ {msg}")
+                    # Resolve current session defaults
+                    from model_registry import get_model
+                    resolved_session_ids = []
+                    for mid in session_allowed_models:
+                        if m := get_model(mid):
+                            resolved_session_ids.append(m.id)
                         else:
-                            print(f"❌ {msg}")
-                        input("\n\033[1;96mTap Enter to continue...\033[0m")
-                        continue # Re-open menu
-                    raise
+                            resolved_session_ids.append(mid)
+
+                    curr_defaults = [label for label, mid in value_map.items() if mid in resolved_session_ids]
+
+                    try:
+                        footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
+                        new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
+                        if new_labels:
+                            session_allowed_models = [value_map[label] for label in new_labels]
+                        else:
+                            print("Warning: At least one model must be selected. Keeping previous choice.")
+                            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                        break
+                    except KeyInterruptException as exc:
+                        if exc.key == "b":
+                            break
+                        if exc.key in ["r", "d"]:
+                            live = (exc.key == "d")
+                            from model_registry import sync_models
+                            action = "Syncing with registry..." if not live else "Pinging provider APIs..."
+                            print(f"\n\n📡 {action}")
+                            success, msg = sync_models(live_discovery=live)
+                            if success:
+                                print(f"✅ {msg}")
+                            else:
+                                print(f"❌ {msg}")
+                            input("\n\033[1;96mTap Enter to continue...\033[0m")
+                            continue # Re-open menu
+                        raise
+                    except BackException:
+                        break
             elif choice == "k":
                 handle_api_keys(session_allowed_machines, session_allowed_models)
             elif choice == "f":
@@ -2668,7 +2693,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                         print(f"\n✅ Base branch set to: \033[97m{new_base}\033[0m")
                         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 except Exception as ex:
-                    print(f"\033[91mError updating base branch: {ex}\033[0m")
+                    print(f"\033[1;91mError updating base branch: {ex}\033[0m")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "c":
                 from orchestrator.project_config import load_recent_projects, remember_project
@@ -2829,10 +2854,10 @@ def main_loop():
                 print("[\033[93mV\033[0m] Run your unit tests")
                 print("[\033[93mC\033[0m] Configuration & Tools")
                 print("[\033[93mR\033[0m] Refresh & Sync (GitHub)")
-                print("[\033[91mQ\033[0m] Quit")
+                print("[\033[1;91mQ\033[0m] Quit")
                 
                 if error_msg:
-                    print(f"\n\033[91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                    print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
                     error_msg = ""
 
                 # Anchor prompt to bottom
@@ -3031,10 +3056,10 @@ Read these files first and treat them as authoritative:
                             status_str = "\033[92mVALID\033[0m"
                             file_statuses[name] = "valid"
                     except Exception:
-                        status_str = "\033[91mERROR\033[0m"
+                        status_str = "\033[1;91mERROR\033[0m"
                         file_statuses[name] = "error"
                 else:
-                    status_str = "\033[91mMISSING\033[0m"
+                    status_str = "\033[1;91mMISSING\033[0m"
                     file_statuses[name] = "missing"
                     
                 print(f"    [\033[1;96m{i}\033[0m] {name:15} -> {cli_files[name]:30} [{status_str}]")
@@ -3045,7 +3070,7 @@ Read these files first and treat them as authoritative:
                 print("    [\033[1;96mR\033[0m] Repair Misconfigured Files (Append required links)")
             
             print("    [\033[1;96mP\033[0m] Manage Agent Role Prompts (internal)")
-            print("    [\033[1;96mB\033[0m] Back")
+            print("    [\033[1;91mB\033[0m] Back")
             
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(index or letter)")
@@ -3121,7 +3146,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                 subprocess.check_output(["firebase", "--version"])
                 cli_status = "\033[92mINSTALLED\033[0m"
             except FileNotFoundError:
-                cli_status = "\033[91mMISSING\033[0m (Run: npm install -g firebase-tools)"
+                cli_status = "\033[1;91mMISSING\033[0m (Run: npm install -g firebase-tools)"
             print(f"  Firebase CLI: {cli_status}")
             
             # 2. Check Auth Status
@@ -3131,9 +3156,9 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                     account = login_out.split("Logged in as ")[-1].strip()
                     auth_status = f"\033[92m{account}\033[0m"
                 else:
-                    auth_status = "\033[91mNOT LOGGED IN\033[0m (Run: firebase login)"
+                    auth_status = "\033[1;91mNOT LOGGED IN\033[0m (Run: firebase login)"
             except Exception:
-                auth_status = "\033[91mERROR\033[0m"
+                auth_status = "\033[1;91mERROR\033[0m"
             print(f"  Account:      {auth_status}")
             
             # 3. Check Active Project
@@ -3153,9 +3178,9 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                             if project != "NONE":
                                 project_status = f"\033[92m{project}\033[0m \033[90m(from .firebaserc)\033[0m"
                             else:
-                                project_status = "\033[91mNONE\033[0m"
+                                project_status = "\033[1;91mNONE\033[0m"
                         except:
-                            project_status = "\033[91mNONE\033[0m"
+                            project_status = "\033[1;91mNONE\033[0m"
                     else:
                         # Fallback 2: GoogleService-Info.plist
                         gs_info = ROOT / PROJECT_CONFIG.project_name / "GoogleService-Info.plist"
@@ -3164,11 +3189,11 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                                 project = subprocess.check_output(["/usr/libexec/PlistBuddy", "-c", "Print :PROJECT_ID", str(gs_info)], stderr=subprocess.DEVNULL).decode("utf-8").strip()
                                 project_status = f"\033[92m{project}\033[0m \033[90m(from config)\033[0m"
                             except:
-                                project_status = "\033[91mNONE\033[0m"
+                                project_status = "\033[1;91mNONE\033[0m"
                         else:
-                            project_status = "\033[91mNONE\033[0m"
+                            project_status = "\033[1;91mNONE\033[0m"
             except Exception:
-                project_status = "\033[91mERROR\033[0m"
+                project_status = "\033[1;91mERROR\033[0m"
             print(f"  Project:      {project_status}")
 
             # 3.1 Check for CI Token (if applicable)
@@ -3189,15 +3214,15 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                     app_id = subprocess.check_output(["/usr/libexec/PlistBuddy", "-c", "Print :GOOGLE_APP_ID", str(gs_info)], stderr=subprocess.DEVNULL).decode("utf-8").strip()
                     print(f"  App ID (iOS):             \033[92m{app_id}\033[0m")
                 except Exception:
-                    print(f"  App ID (iOS):             \033[91mCOULD NOT EXTRACT\033[0m")
+                    print(f"  App ID (iOS):             \033[1;91mCOULD NOT EXTRACT\033[0m")
             else:
-                print(f"  GoogleService-Info.plist: \033[91mMISSING\033[0m")
+                print(f"  GoogleService-Info.plist: \033[1;91mMISSING\033[0m")
                 
             export_opts = ROOT / "ExportOptions.plist"
             if export_opts.exists():
                 print(f"  ExportOptions.plist:      \033[92mEXISTS\033[0m")
             else:
-                print(f"  ExportOptions.plist:      \033[91mMISSING\033[0m")
+                print(f"  ExportOptions.plist:      \033[1;91mMISSING\033[0m")
 
             # 5. Check Keychain Status
             print("\n  \033[1;90m--- KEYCHAIN & SIGNING ---\033[0m")
@@ -3210,7 +3235,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
             print("    [\033[1;96mL\033[0m] Login to Firebase (Browser)")
             print("    [\033[1;96mK\033[0m] Configure Headless Signing (Keychain Auto-Unlock)")
             print("    [\033[1;96mT\033[0m] Test Distribution Script (Dry Run via build delivery)")
-            print("    [\033[1;96mB\033[0m] Back")
+            print("    [\033[1;91mB\033[0m] Back")
             
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -3320,7 +3345,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print("    [\033[1;96mR\033[0m] Remove recipient address")
                 print("    [\033[1;96mT\033[0m] Send Test Email")
             print("    [\033[1;96mC\033[0m] Configure Email Sender")
-            print("    [\033[1;96mB\033[0m] Back")
+            print("    [\033[1;91mB\033[0m] Back")
             
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -3358,7 +3383,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 csv_path = csv_path.strip("'\"")
                 path = Path(csv_path)
                 if not path.exists():
-                    print(f"\033[91m    Error: File not found at {path}\033[0m")
+                    print(f"\033[1;91m    Error: File not found at {path}\033[0m")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                     continue
                 
@@ -3381,7 +3406,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                         print("\033[93m    No new unique email addresses found in file.\033[0m")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 except Exception as ex:
-                    print(f"\033[91m    Error reading CSV: {ex}\033[0m")
+                    print(f"\033[1;91m    Error reading CSV: {ex}\033[0m")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "c":
                 clear_screen()

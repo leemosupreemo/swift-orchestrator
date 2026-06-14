@@ -84,7 +84,7 @@ def check_file_content(path: Path, pattern: str) -> bool:
 def check_cli_auth(cli_name: str) -> tuple[bool, str]:
     """Checks if a CLI is installed and authenticated."""
     if shutil.which(cli_name) is None:
-        return False, "\033[91mNOT INSTALLED\033[0m"
+        return False, "\033[1;91mNOT INSTALLED\033[0m"
     
     try:
         if cli_name == "claude":
@@ -104,7 +104,7 @@ def check_cli_auth(cli_name: str) -> tuple[bool, str]:
         else:
             ready = True
             
-        return ready, "\033[92mREADY\033[0m" if ready else "\033[91mNOT LOGGED IN\033[0m"
+        return ready, "\033[92mREADY\033[0m" if ready else "\033[1;91mNOT LOGGED IN\033[0m"
     except Exception as e:
         return True, f"INSTALLED (Error checking status: {e})"
 
@@ -184,7 +184,7 @@ def check():
                 # Test targets aren't always in -list stdout as directly as schemes, but good enough for a heuristic
                 pass
         except Exception as e:
-            print(f"     \033[91m⚠️  Error checking Xcode: {e}\033[0m")
+            print(f"     \033[1;91m⚠️  Error checking Xcode: {e}\033[0m")
 
     # Grounding Docs
     print("\n--- 3. Grounding Docs (Critical for AI) ---")

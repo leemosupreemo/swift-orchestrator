@@ -258,7 +258,7 @@ def prompt_text(label: str, default: str | None = None, skip_available: bool = T
                 print()
                 return val or (default or "")
             if key == "q":
-                print("\033[91mquit\033[0m")
+                print("\033[1;91mquit\033[0m")
                 sys.exit(0)
             if key == "s" and skip_available:
                 print("\033[93mskip\033[0m")
@@ -284,7 +284,7 @@ def prompt_yes_no(label: str, default: bool = False, skip_available: bool = True
     key = get_key().strip().lower()
     
     if key == "q":
-        print("\033[91mquit\033[0m")
+        print("\033[1;91mquit\033[0m")
         sys.exit(0)
     if key == "s" and skip_available:
         print("\033[93mskip\033[0m")
@@ -296,7 +296,7 @@ def prompt_yes_no(label: str, default: bool = False, skip_available: bool = True
         return default
         
     res = key in {"y", "yes", "true", "1"}
-    print("\033[92myes\033[0m" if res else "\033[91mno\033[0m")
+    print("\033[92myes\033[0m" if res else "\033[1;91mno\033[0m")
     return res
 
 class SkipSectionException(Exception): pass
@@ -529,7 +529,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                 choice = get_key().strip().lower()
 
                 if choice == 'q':
-                    print("\033[91mquit\033[0m")
+                    print("\033[1;91mquit\033[0m")
                     sys.exit(0)
                 if choice == 's' and models:
                     print("\033[93mskip\033[0m")
@@ -541,7 +541,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                     for i, cli in enumerate(not_logged_in, 1):
                         print(f"  {i}. {cli}")
 
-                    sub_choice = input("\nSelect number to log in (or Enter to go back): ").strip()
+                    sub_choice = input(f"\nSelect number to log in (or \033[1;91mEnter to go back\033[0m): ").strip()
                     if not sub_choice: continue
                     try:
                         idx = int(sub_choice) - 1
@@ -569,7 +569,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                     except ValueError:
                         print("Invalid choice.")
                 elif choice == 'c' and not models:
-                    print("\033[91mcancel\033[0m")
+                    print("\033[1;91mcancel\033[0m")
                     return 1
                 elif choice in {'enter', ''} and models:
                     print("\033[97mcontinue\033[0m")
@@ -653,7 +653,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                         print()
                         break
                     if key == "q":
-                        print("\033[91mquit\033[0m")
+                        print("\033[1;91mquit\033[0m")
                         sys.exit(0)
                     if key == "s":
                         print("\033[93mskip\033[0m")
@@ -1025,7 +1025,7 @@ def _main(argv: list[str] | None = None) -> int:
                     print(f"    [\033[93m{i}\033[0m] Open {p['name']}")
                     print(f"        \033[90m{p['root']}\033[0m")
 
-            print("\n    [\033[91mQ\033[0m] Quit\n")
+            print("\n    [\033[1;91mQ\033[0m] Quit\n")
             print("-" * 37)
 
             from orchestrator.scripts.common import get_key, print_choice_prompt, clear_choice_placeholder
