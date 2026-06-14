@@ -16,6 +16,7 @@ from common import (
     print_phase,
     print_header,
     ProgressIndicator,
+    prompt_input,
 )
 from llm import run_llm, extract_json_block
 from model_router import ModelRole
@@ -116,7 +117,7 @@ def main() -> int:
             print("="*60 + "\033[0m")
             print(f"\033[1;97mQuestion:\033[0m {response.get('clarification')}")
             
-            user_answer = input("\n  \033[1;97mYour Answer:\033[0m ").strip()
+            user_answer = prompt_input("Your Answer:", placeholder="(required)")
             if not user_answer:
                 print("No answer provided. Stopping.")
                 return 0
@@ -167,7 +168,7 @@ def main() -> int:
                 return 0
             elif user_choice == "f":
                 print("\033[93mfeedback\033[0m")
-                feedback = input("\n  \033[1;97mFeedback for Agent:\033[0m ").strip()
+                feedback = prompt_input("Feedback for Agent:", placeholder="(or Enter to cancel)")
                 if feedback:
                     history.append(f"USER FEEDBACK (TURN {turn}): {feedback}")
                     current_input = f"USER FEEDBACK: {feedback}\n\nPlease revise your plan based on this feedback."

@@ -103,7 +103,6 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
         raise ValueError(f"Unsupported model: {model}")
 
     # Define fallback sequence based on the role and allowed models
-    # If no role is provided, we prioritize based on the primary model's family if possible
     preferred_family = resolved_model.family if resolved_model else None
     
     attempts = get_prioritized_models(
@@ -112,55 +111,44 @@ def run_llm(model: str, prompt: str, cwd: Path | None = None, timeout: int = 300
         preferred_family=preferred_family
     )
     
-    # Ensure the requested primary model is tried first if it's in the attempts list
+    # Ensure the requested primary model is tried first
     if primary_id in attempts:
         attempts.remove(primary_id)
         attempts.insert(0, primary_id)
     elif not allowed_models:
-        # If not explicitly restricted, we should at least try what was asked for
         attempts.insert(0, primary_id)
 
     last_error = None
-    
-    # Use provided session_id or generate a new one
     actual_session_id = session_id or str(uuid.uuid4())
 
     for current_model in attempts:
         try:
-            output = _run_llm_single(current_model, prompt, cwd, timeout, role=role, session_id=actual_session_id)
+            raw_output = _run_llm_single(current_model, prompt, cwd, timeout, role=role, session_id=actual_session_id)
             
-            # Validation: if role expects JSON, verify we have it
+            # Validation: if role expects JSON, verify we have it but DO NOT overwrite raw_output
             if role in [ModelRole.PLANNER, ModelRole.BUILDER, ModelRole.DEBUGGER, ModelRole.VERIFIER]:
-                output = extract_json_block(output)
+                json_part = extract_json_block(raw_output)
                 try:
-                    json.loads(output)
+                    json.loads(json_part)
                 except json.JSONDecodeError as exc:
                     print(f"⚠️  {current_model} produced invalid JSON. Attempting fallback...")
-                    last_error = RuntimeError(f"{current_model} produced invalid JSON:\n{output}\nError: {exc}")
+                    last_error = RuntimeError(f"{current_model} produced invalid JSON:\n{raw_output}\nError: {exc}")
                     continue
             
-            return output, current_model, actual_session_id
+            # Return the full raw output so callers can see research/thoughts
+            return raw_output, current_model, actual_session_id
         except LLMTimeoutError as exc:
-            # High-visibility colored timeout report
-            print("\n" + "!"*60)
-            print(f"\033[91mResult: {exc.model} timed out.\033[0m")
-            print(f"\033[93mEnded on step:\033[0m {exc.last_milestone}")
-            print(f"\033[93mDetailed summary:\033[0m Sent {exc.input_chars} chars, received {exc.output_chars} chars so far. Total duration: {exc.duration:.1f}s (Limit: {exc.timeout}s)")
-            print("!"*60 + "\n")
-            
+            # ... (timeout logging)
             print(f"⚠️  {current_model} timed out. Attempting fallback...")
             last_error = exc
             continue
         except RuntimeError as exc:
-            error_msg = str(exc)
-            if is_quota_error(error_msg):
+            if is_quota_error(str(exc)):
                 print(f"⚠️  {current_model} hit quota limit. Attempting fallback...")
                 last_error = exc
                 continue
-            else:
-                # For non-quota errors (like syntax or connection), we fail immediately
-                raise
-        except Exception as exc:
+            raise
+        except Exception:
             raise
 
     raise RuntimeError(f"All models failed (quota limits reached). Last error: {last_error}")

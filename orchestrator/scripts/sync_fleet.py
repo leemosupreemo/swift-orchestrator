@@ -33,7 +33,7 @@ def sync_all():
             
         print(f"\n--- Machine: {name} ---")
         try:
-            print(f"      - \033[96mProbing {name}...\033[0m")
+            print(f"      - \033[1;94mProbing {name}...\033[0m")
             probe = probe_machine(machine)
             
             if not probe.get("reachable"):

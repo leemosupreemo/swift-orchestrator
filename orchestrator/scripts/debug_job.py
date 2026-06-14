@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from common import ROOT, OUTPUT_DIR, PROMPTS_DIR, now_iso, read_json, write_json, write_text, run_shell, print_phase, StatusBar
-from llm import run_llm
+from llm import run_llm, extract_json_block
 from model_router import ModelRole
 from reference_artifacts import reference_context
 
@@ -267,7 +267,7 @@ def run_propose(job: dict, job_path: Path, logs_path: str | None, feedback: str 
 
     # Call LLM
     print_phase("agent_thinking", subtext="proposing debug fix")
-    output, actual_model, session_id = run_llm(
+    raw_output, actual_model, session_id = run_llm(
         job["reviewer"], 
         full_prompt, 
         cwd=ROOT, 
@@ -280,10 +280,18 @@ def run_propose(job: dict, job_path: Path, logs_path: str | None, feedback: str 
     if "llm_sessions" not in job:
         job["llm_sessions"] = []
     job["llm_sessions"].append({"id": session_id, "model": actual_model})
-    write_text(iter_dir / "llm_response.json", output)
+    write_text(iter_dir / "llm_response.json", raw_output)
 
     try:
-        plan = json.loads(output)
+        json_output = extract_json_block(raw_output)
+        
+        # Print debug thoughts if present
+        debug_thoughts = raw_output.replace(json_output, "").strip()
+        debug_thoughts = re.sub(r"```(?:json|markdown)?", "", debug_thoughts).strip()
+        if debug_thoughts:
+            print(f"      - Debugger analysis: {debug_thoughts}")
+
+        plan = json.loads(json_output)
         job["debug_proposal"] = plan
         job["debug_phase"] = "implement"
         

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from common import OUTPUT_DIR, PROMPTS_DIR, ROOT, read_json, write_text, print_phase, StatusBar
-from llm import run_llm
+from llm import run_llm, extract_json_block
 from model_router import ModelRole
 from run_build_and_tests import run_build_and_tests
 from reference_artifacts import reference_context
@@ -240,7 +240,8 @@ Brief:
 
     import json
     try:
-        parsed_output = json.loads(output)
+        json_output = extract_json_block(output)
+        parsed_output = json.loads(json_output)
         
         # Check for clarification needed from builder
         if "clarification_needed" in parsed_output and parsed_output["clarification_needed"]:

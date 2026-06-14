@@ -28,7 +28,7 @@ def run_smoke_delivery():
         print("\n\033[93mYou must configure signing and accounts before distributing.\033[0m")
         
         if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
-            print("\n\033[96mStarting Orchestrator Wizard...\033[0m")
+            print("\n\033[1;94mStarting Orchestrator Wizard...\033[0m")
             cli_path = SCRIPTS_DIR.parent / "cli.py"
             subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
             print("\n✅ Wizard complete. Please re-run the smoke test to verify.")
@@ -79,7 +79,7 @@ def run_smoke_delivery():
             print(f"\n❌ SMOKE TEST FAILED with exit code {res}.")
             # We don't exit immediately because we want to cleanup the mock job
             
-        print("\n\033[96mCheck the logs above for Firebase distribution URLs.\033[0m")
+        print("\n\033[1;94mCheck the logs above for Firebase distribution URLs.\033[0m")
         print("\033[90m(The smoke test creates a temporary mock job in ai/jobs/ for the distribution pipeline.)\033[0m")
         
         # We use a forced final wait here only if we aren't in CI mode

@@ -23,7 +23,7 @@ from common import (
     prompt_confirm,
     flush_stdin,
 )
-from llm import run_llm, SUPPORTED_MODELS, DEFAULT_FALLBACKS
+from llm import run_llm, SUPPORTED_MODELS, DEFAULT_FALLBACKS, extract_json_block
 from model_router import ModelRole, get_prioritized_models
 from model_registry import get_model, ModelTier
 from probe_machine import load_machines
@@ -567,25 +567,29 @@ def main(args_override: list[str] | None = None) -> None:
     llm_sessions = []
     
     print(f"\n[1/3] Planning {args.job_type} (Stitch AI Mode: {'Enabled' if args.stitch else 'Off'}) using {planner}...", flush=True)
-    llm_output, actual_planner, sid = run_llm(planner, llm_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+    llm_raw_output, actual_planner, sid = run_llm(planner, llm_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
     llm_sessions.append({"id": sid, "model": actual_planner})
+
+    llm_output = extract_json_block(llm_raw_output)
+    
+    # Print research findings if present
+    research_part = llm_raw_output.replace(llm_output, "").strip()
+    # Remove markdown noise (fences and leading/trailing markers)
+    research_part = re.sub(r"```(?:json|markdown)?", "", research_part).strip()
+    
+    if research_part:
+        print("\n--- Research & Discovery ---")
+        print(research_part)
+        print("-" * 30 + "\n")
 
     try:
         plan = json.loads(llm_output)
     except json.JSONDecodeError:
         print("\n\033[91mFAILED TO PARSE PLANNER OUTPUT AS JSON\033[0m")
-        # Try extraction
-        extracted = extract_commands(llm_output, "json")
-        if extracted:
-            try:
-                plan = json.loads(extracted[0])
-            except:
-                raise
-        else:
-            print("-" * 40)
-            print(llm_output)
-            print("-" * 40)
-            raise
+        print("-" * 40)
+        print(llm_output)
+        print("-" * 40)
+        raise
 
     # Check for clarification needed from planner
     clarification = plan.get("clarification_needed")
@@ -611,8 +615,17 @@ def main(args_override: list[str] | None = None) -> None:
             verifier_input = f"{verifier_prompt}\n\n### ORIGINAL REQUEST ###\n{raw_input_text}\n\n### GENERATED PLAN ###\n{llm_output}"
             
             try:
-                v_output, actual_verifier, sid = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
+                v_raw_output, actual_verifier, sid = run_llm(verifier_model, verifier_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.VERIFIER)
                 llm_sessions.append({"id": sid, "model": actual_verifier})
+                
+                v_output = extract_json_block(v_raw_output)
+                
+                # Print verifier thoughts if present
+                v_thoughts = v_raw_output.replace(v_output, "").strip()
+                v_thoughts = re.sub(r"```(?:json|markdown)?", "", v_thoughts).strip()
+                if v_thoughts:
+                    print(f"      - Verifier thoughts: {v_thoughts}")
+
                 verification = normalize_verification(json.loads(v_output), actual_verifier)
                 if not verification:
                     raise ValueError("Verifier output missing required status/comments fields")
@@ -634,12 +647,12 @@ def main(args_override: list[str] | None = None) -> None:
                         recursive_input += "Please update the plan JSON to address the architect's feedback while fulfilling the original request."
                         
                         print(f"      - Re-planning with {actual_planner}...", flush=True)
-                        new_llm_output, actual_planner, sid = run_llm(planner, recursive_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
+                        new_llm_raw_output, actual_planner, sid = run_llm(planner, recursive_input, cwd=ROOT, allowed_models=allowed_models, role=ModelRole.PLANNER)
                         llm_sessions.append({"id": sid, "model": actual_planner})
                         
                         try:
-                            plan = json.loads(new_llm_output)
-                            llm_output = new_llm_output # Update for issue body
+                            llm_output = extract_json_block(new_llm_raw_output)
+                            plan = json.loads(llm_output)
                             print(f"      - Plan revised successfully. Proceeding...")
                             # Clear clarification so status stays 'planned'
                             clarification = None

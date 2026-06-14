@@ -27,7 +27,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -113,9 +113,6 @@ def clear_screen():
     sys.stdout.flush()
     os.system("clear" if os.name != "nt" else "cls")
 
-def print_header(text: str):
-    print(f"\n\033[1;94m{'='*20} {text} {'='*20}\033[0m")
-
 def list_jobs() -> list[dict[str, Any]]:
     job_files = sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     jobs = []
@@ -158,13 +155,13 @@ def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
         "designing": "design"
     }
     status_colors = {
-        "planned": "\033[94m",      # Blue
+        "planned": "\033[1;94m",      # Blue
         "executing": "\033[93m",    # Yellow
         "review-needed": "\033[92m", # Green
         "human-needed": "\033[91m",  # Red
         "debugging": "\033[95m",     # Magenta
         "decomposed": "\033[90m",    # Grey",
-        "designing": "\033[1;94m",     # Cyan
+        "designing": "\033[1;94m",     # Blue
     }
     reset = "\033[0m"
 
@@ -441,41 +438,43 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
 
     print_header("Create New Job")
     job_options = [
-        "bug (fix an issue)",
-        "feature (standard implementation)",
-        "feature-stitch (design-first with Google Stitch AI)",
-        "design (create high-fidelity spec only)",
-        "coverage (test audit & coverage gap analysis)",
-        "quick (fast fix/refactor - skips heavy planning)"
+        "✨ Brand New Feature (Design-First)",
+        "🛠️ Iterating / Small Refactor (Plan or Quick Mode)",
+        "🐞 Bug Fix (Identify + Fix)",
+        "🎨 Design Prototype (Can promote to Implementation)",
+        "🧪 Test Coverage Audit (Maintenance)"
     ]
-    choice = prompt_radio("Select Job Type:", job_options, "feature-stitch (design-first with Google Stitch AI)")
-    
+    choice = prompt_radio("Select Job Type:", job_options, job_options[1])
+
     # Map back to internal type
     job_type = "feature"
     stitch_mode = False
-    
-    if "bug" in choice:
-        job_type = "bug"
-    elif "feature-stitch" in choice:
+
+    if "Brand New" in choice:
         job_type = "feature"
         stitch_mode = True
-    elif "design" in choice:
+    elif "Iterating" in choice:
+        if prompt_confirm("Use Quick Mode? (skips heavy planning for small changes/refactors)", default=False):
+            job_type = "quick"
+        else:
+            job_type = "feature"
+        stitch_mode = False
+    elif "Bug Fix" in choice:
+        job_type = "bug"
+        stitch_mode = False
+    elif "Design Prototype" in choice:
         job_type = "design"
         stitch_mode = True
-    elif "coverage" in choice:
+    elif "Test Coverage" in choice:
         job_type = "coverage"
-    elif "quick" in choice:
-        job_type = "quick"
+        stitch_mode = False
 
     spec_file = None
     if job_type != "quick":
         if prompt_confirm("Load spec from a local file or web address? (useful for large multi-page docs)", default=False):
             # We try to help the user with a list of files in ROOT if they start typing
             print("\n    (Enter path to .md/.txt file OR a web URL)")
-            print("    Example: feature_spec.md or https://gist.../raw")
-            spec_file = input("\n    Spec Path/URL: ").strip()
-            # Remove quotes if pasted
-            spec_file = spec_file.strip("'\"")
+            spec_file = prompt_input("Spec Path/URL:", placeholder="feature_spec.md or https://gist.../raw")
 
     yolo = prompt_confirm("YOLO mode? (select YOLO to auto-dispatch job after planning)", default=False)
     
@@ -657,7 +656,7 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                 elif exc.key == "n" and exc.value:
                     old_name = exc.value
                     print(f"\n  Renaming machine: \033[97m{old_name}\033[0m")
-                    new_name = input(f"  Enter new nickname \033[90m(or Enter to cancel)\033[0m: ").strip()
+                    new_name = prompt_input("Enter new nickname:", placeholder="(or Enter to cancel)")
                     if new_name and new_name != old_name:
                         # Update machines.json
                         m_config = load_machines()
@@ -784,6 +783,44 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
                 run_script("-m unittest", ["tests/test_check_setup.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             else:
                 error_msg = f"'{choice}'"
+
+def handle_update_orchestrator(session_allowed_machines: list[str]):
+    print_header("Update Orchestrator")
+    
+    from orchestrator.project_config import PACKAGE_ROOT
+    pkg_dir = PACKAGE_ROOT.parent
+    is_git = (pkg_dir / ".git").exists()
+    
+    print(f"  Current Version: \033[97mv{__version__}\033[0m")
+    print(f"  Package Location: \033[90m{pkg_dir}\033[0m")
+    
+    if is_git:
+        print("\n  \033[1;94mGit Repository detected.\033[0m")
+        if prompt_confirm("Pull latest changes from origin and re-install locally?", default=True):
+            print("\n  Updating local package...")
+            try:
+                subprocess.run(["git", "pull"], cwd=str(pkg_dir), check=False)
+                subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=str(pkg_dir), check=False)
+                print("\n  ✅ Local update complete.")
+            except Exception as e:
+                print(f"\n  ❌ Local update failed: {e}")
+    else:
+        print("\n  \033[1;93mNote: Local source code not found in a Git repository.\033[0m")
+        print("  If you installed via pipx, run: \033[97mpipx upgrade orchestrator\033[0m")
+        print("  If you installed via pip, run:  \033[97mpip install --upgrade orchestrator\033[0m")
+
+    # Fleet Update
+    machines = load_machines()
+    remote_machines = [m for m in machines if m.get("execution_mode") == "ssh" and m.get("enabled", True)]
+    if remote_machines:
+        print(f"\n  Detected {len(remote_machines)} enabled remote worker(s).")
+        if prompt_confirm("Update the orchestrator package on all remote workers?", default=True):
+            for m in remote_machines:
+                print(f"\n  - Updating {m['name']}...")
+                run_script("worker_tools.py", ["install", "--machine", m["name"]])
+            print("\n  ✅ Fleet update complete.")
+
+    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
 
 def handle_app_tests(session_allowed_machines: list[str], session_allowed_models: list[str]):
     error_msg = ""
@@ -1011,7 +1048,7 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
         clear_choice_placeholder()
         print(sub_choice)
         if sub_choice == "l":
-            path = input("Enter custom log path \033[90m(or Enter to cancel)\033[0m: ").strip()
+            path = prompt_input("Enter custom log path:", placeholder="(or Enter to cancel)")
             if path: log_paths.append(path)
         else:
             raise BackException()
@@ -1057,11 +1094,10 @@ def prompt_for_reference_artifact(job: dict[str, Any]) -> bool:
     print("Supported URLs: http/https, including Figma links stored as URL references.")
     print()
 
-    source = input("Enter local file path or URL \033[90m(or Enter to cancel)\033[0m: ").strip()
-    if not source:
-        return False
+    source = prompt_input("Enter local file path or URL:", placeholder="(or Enter to cancel)")
+    if not source: return False
+    note = prompt_input("Optional note for agents:", placeholder="(e.g. target screen/state)")
 
-    note = input("Optional note for agents \033[90m(e.g. target screen/state)\033[0m: ").strip()
 
     try:
         artifact = attach_reference_artifact(job, source, note)
@@ -1249,7 +1285,7 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
             if choice == "b":
                 break
             elif choice == "u" and archived_files:
-                idx_str = input("\n    Enter index to restore: ").strip()
+                idx_str = prompt_input("Enter index to restore:", placeholder="(number)")
                 try:
                     idx = int(idx_str)
                     if 0 <= idx < len(archived_files):
@@ -1349,7 +1385,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print(f" {verification.get('comments')}")
                     
                     if verification.get("suggested_additions"):
-                        print(f"\n \033[1;96mSuggested Additions:\033[0m")
+                        print(f"\n \033[1;94mSuggested Additions:\033[0m")
                         for s in verification["suggested_additions"]:
                             print(f" - {s}")
 
@@ -1371,7 +1407,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     actions.append("a")
                 
             elif status == "designing":
-                print("\033[1;96m 🎨 DESIGNING: Stitch AI Spec Ready\033[0m")
+                print("\033[1;94m 🎨 DESIGNING: Stitch AI Spec Ready\033[0m")
                 print(f" Designer: \033[97m{job.get('planner')}\033[0m | Vibe: \033[93m{job.get('plan', {}).get('vibe', 'N/A')}\033[0m")
                 print(f" \033[1;94m->\033[0m Press \033[1;94m'V'\033[0m to Review the high-fidelity design spec.")
                 print(f" \033[1;94m->\033[0m Press \033[1;94m'F'\033[0m to Provide Feedback & Revise the design.")
@@ -1383,7 +1419,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 actions.extend(["a", "f"])
                 
             elif status == "planned":
-                print("\033[1;96m 📝 READY: Planning Complete\033[0m")
+                print("\033[1;94m 📝 READY: Planning Complete\033[0m")
                 print(f" Pipeline: \033[97m{job.get('planner')} \033[1;94m->\033[0m {job.get('builder')} \033[1;94m->\033[0m {job.get('reviewer')}\033[0m")
                 print(f" \033[1;94m->\033[0m Press \033[1;94m'S'\033[0m to Schedule & Dispatch this job to a worker.")
                 
@@ -1579,6 +1615,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 else:
                     print("[\033[92mS\033[0m] Schedule & Dispatch")
                     actions.append("s")
+                print("[\033[93mF\033[0m] Tweak / Revise Plan")
+                actions.append("f")
             elif status == "scheduled":
                 print("[\033[92mE\033[0m] Execute (Worker Run)")
                 actions.append("e")
@@ -1593,12 +1631,17 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 # Broaden Resume Availability: Let users escape debugging loops
                 print("[\033[93mU\033[0m] Resume Job (Next Task)")
                 actions.append("u")
+
+                print("[\033[93mF\033[0m] Tweak / Give Hint")
+                actions.append("f")
                 
             elif status == "review-needed":
                 print("[\033[92mM\033[0m] Merge & Mark Completed")
                 actions.append("m")
                 print("[\033[93mF\033[0m] Deliver to Device (Firebase distribution)")
                 actions.append("f")
+                print("[\033[93mT\033[0m] Tweak / Iterate Further")
+                actions.append("t")
                 
                 # If there are tasks remaining, allow Resuming to the next task
                 if tasks and len(completed) < len(tasks):
@@ -1608,6 +1651,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 if job.get("branch"):
                     print("[\033[93mF\033[0m] Deliver to Device (Firebase distribution)")
                     actions.append("f")
+                print("[\033[93mT\033[0m] Tweak / Revise")
+                actions.append("t")
                 print("[\033[92mU\033[0m] Resume Job")
                 actions.append("u")
             elif status == "executing" or is_stalled:
@@ -1626,7 +1671,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
             if ai_modified or ai_untracked:
-                print("[\033[96mI\033[0m] View AI Changes (Files)")
+                print("[\033[1;94mI\033[0m] View AI Changes (Files)")
                 actions.append("i")
                 
             print("[\033[93mL\033[0m] Link Logs (Update Context)")
@@ -1637,7 +1682,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             print("[\033[93mO\033[0m] Select LLM Models (Override)")
             print("[\033[93mT\033[0m] Export Context (Logs, Progress, Plan)")
             print("[\033[93mV\033[0m] View Brief / Summary")
-            print("[\033[96mG\033[0m] View in GitHub")
+            print("[\033[1;94mG\033[0m] View in GitHub")
             print("[\033[91mC\033[0m] Close Issue in GitHub")
             print("[\033[91mX\033[0m] Discard & Revert Changes")
             print("[\033[91mB\033[0m] Back to Main Menu")
@@ -1770,16 +1815,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             
                 input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "f" and "f" in actions:
-                if status == "designing":
-                    print_header("Provide Design Feedback")
-                    feedback = input("\n\033[1;94mEnter your feedback for the design revision:\033[0m\n").strip()
-                    if feedback:
-                        print(f"\n[1/1] Revising design based on feedback...")
-                        run_script("new_job.py", ["design", "--stitch", "--update", str(job["_path"]), "--feedback", feedback], sub_menu=True)
-                        job = refresh_job(job)
-                    else:
-                        print("⚠️  No feedback provided. Revision cancelled.")
-                        input("\n\033[1;94mTap Enter to return to menu...\033[0m")
+                if status == "designing" or status == "planned" or status == "debugging":
+                    job = handle_tweak_revise(job)
                 else:
                     dist_errors = PROJECT_CONFIG.validate_distribution_config()
                     if dist_errors:
@@ -1816,6 +1853,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("Estimated time: 5-10 minutes.")
                     run_script("deliver_build.py", [str(job["_path"])], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
                     job = refresh_job(job)
+            elif choice == "t" and "t" in actions:
+                job = handle_tweak_revise(job)
             elif choice == "m" and "m" in actions:
                 handle_merge_cleanup(job)
                 break
@@ -2043,9 +2082,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         if current_total == 5: current_total = 8
 
                         default_extra = 5
-                        feedback = input("\n\033[1;94mAdd info to help iteration (optional):\033[0m ").strip()
+                        feedback = prompt_input("Add info to help iteration:", placeholder="(optional)")
                         while True:
-                            extra_input = input(f"\033[1;94mAdditional iterations (default {default_extra}):\033[0m ").strip()
+                            extra_input = prompt_input("Additional iterations:", default=str(default_extra))
                             if not extra_input:
                                 extra = default_extra
                                 break
@@ -2074,6 +2113,36 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     pass # Return to job menu
                 
                 job = refresh_job(job)
+
+def handle_tweak_revise(job: dict[str, Any]):
+    print_header("Tweak / Revise")
+    print("\033[90mProvide feedback, new requirements, or context to help the AI refine its work.\033[0m")
+    feedback = prompt_input("Feedback:", placeholder="(or Enter to cancel)")
+    if not feedback:
+        return
+
+    # Determine which job type to use for re-planning
+    job_type_map = {
+        "bug-fix": "bug",
+        "bug-investigate": "bug",
+        "feature-plan": "feature",
+        "test-audit": "coverage",
+        "feature-design": "design"
+    }
+    current_type = job.get("type", "feature")
+    requested_type = job_type_map.get(current_type, "feature")
+    status = job.get("status")
+
+    print(f"\n[1/1] Revising based on feedback...")
+    args = [requested_type, "--no-dispatch", "--update", str(job["_path"]), "--feedback", feedback]
+    
+    # Enable stitch if we are designing or have a design spec
+    if job.get("design_spec") or status == "designing" or "design" in current_type:
+        if "--stitch" not in args:
+            args.append("--stitch")
+    
+    run_script("new_job.py", args, sub_menu=True)
+    return refresh_job(job)
 
 def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
     """Opens a conversational interface to ask questions about job changes."""
@@ -2135,7 +2204,7 @@ Your goal is to answer questions about the code modifications, the rationale beh
 You MUST NOT propose or perform any code changes. Be concise, accurate, and focus on the provided diff and job context."""
 
     while True:
-        question = input("\n\033[1;94mQuestion (or Enter to go back):\033[0m ").strip()
+        question = prompt_input("Question:", placeholder="(or Enter to go back)")
         if not question:
             break
             
@@ -2268,7 +2337,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                         key_ready = True
                     elif p["key_id"].upper() in os.environ:
                         raw_key_status = "Environment"
-                        key_color = "\033[94m" # Blue
+                        key_color = "\033[1;94m" # Blue
                         key_ready = True
                     elif cli_ready:
                         raw_key_status = "Delegated"
@@ -2292,7 +2361,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             print("    \033[1;94mManual Key Updates\033[0m")
             print("      [\033[1;94mG\033[0m] Update Gemini Key    [\033[1;94mA\033[0m] Update Anthropic Key    [\033[1;94mO\033[0m] Update OpenAI Key")
 
-            print("\n    \033[1;96mBrowser Logins (OAuth)\033[0m")
+            print("\n    \033[1;94mBrowser Logins (OAuth)\033[0m")
             print("      [\033[1;94m1\033[0m] Login Gemini        [\033[1;94m2\033[0m] Login Claude           [\033[1;94m3\033[0m] Login Codex")
             print("      [\033[1;94m4\033[0m] Login GitHub        [\033[1;94m5\033[0m] Login OpenCode")
 
@@ -2502,6 +2571,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print("    [\033[93mD\033[0m] Firebase App Distro (Delivery)")
 
             print("    [\033[93mT\033[0m] Orchestrator Self-Tests")
+            print("    [\033[93mU\033[0m] Update Orchestrator (Local & Fleet)")
             print("    [\033[91mB\033[0m] Back")
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(letter)")
@@ -2608,6 +2678,8 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             elif choice == "t":
                 handle_tooling_tests(session_allowed_machines, session_allowed_models)
             elif choice == "u":
+                handle_update_orchestrator(session_allowed_machines)
+            elif choice == "v":
                 handle_app_tests(session_allowed_machines, session_allowed_models)
             elif choice == "r":
                 print_header("Refreshing & Syncing with GitHub")
@@ -2691,12 +2763,10 @@ def main_loop():
             }) as status_bar:
                 status_bar.set_scroll_region()
 
-                # Cyan color for the header (Compact 62-char width)
-                print("\033[1;94m" + r"""
-  _   _   _   _   _   _   _   _   _   _   _   _ 
- / \ |_) /   |_| |_  (_   |  |_) /_\  |  / \ |_)
- \_/ | \ \__ | | |_  __)  |  | \ | |  |  \_/ | \
-                """ + f"v{__version__}\033[0m")
+                # Simple, Ultra-Legible Spaced Title (Bold Cyan)
+                print("\033[1;96m" + r"""
+  O R C H E S T R A T O R
+  -----------------------""" + f"\n  v{__version__}\033[0m")
                 print_header("AI Job History")
                 jobs = list_jobs()
                 if not jobs:
@@ -2719,7 +2789,7 @@ def main_loop():
                 
                 print_header("Actions")
                 print("[\033[96mN\033[0m] New Job")
-                print("[\033[93mU\033[0m] Run your unit tests")
+                print("[\033[93mV\033[0m] Run your unit tests")
                 print("[\033[93mC\033[0m] Configuration & Tools")
                 print("[\033[93mR\033[0m] Refresh & Sync (GitHub)")
                 print("[\033[91mQ\033[0m] Quit")
@@ -2830,7 +2900,7 @@ def main_loop():
                         continue
                     elif choice == "n":
                         handle_new_job(session_allowed_models=session_allowed_models, session_allowed_machines=session_allowed_machines)
-                    elif choice == "u":
+                    elif choice == "v":
                         handle_app_tests(session_allowed_machines, session_allowed_models)
                     elif choice == "r":
                         print_header("Refreshing & Syncing with GitHub")
@@ -3228,19 +3298,20 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 # Use run_script to execute notify.py
                 run_script("notify.py", [f"Test Notification ({provider})", f"This is a test message from the AI Orchestrator console using {provider}.", "test-job-id"], session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "a":
-                email = input("\n    Enter recipient email address \033[90m(or Enter to cancel)\033[0m: ").strip()
-                if email and email not in emails:
-                    emails.append(email)
-                    settings["notification_emails"] = emails
-                    write_json(settings_path, settings)
-                    print(f"✅ Added: {email}")
-                    input("\n\033[1;94mTap Enter to return to menu...\033[0m")
+                email = prompt_input("Enter recipient email address:", placeholder="(or Enter to cancel)")
+                if not email: continue
+
+                emails.append(email)
+                settings["notification_emails"] = emails
+                write_json(settings_path, settings)
+                print(f"✅ Added: {email}")
+                input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "i":
                 import re
-                print("\n    \033[1;96m--- Import Recipients from CSV ---\033[0m")
+                print("\n    \033[1;94m--- Import Recipients from CSV ---\033[0m")
                 print("    (You can drag and drop a file here to paste its path)")
                 print("    Example: ~/Downloads/testers.csv or ./emails.csv")
-                csv_path = input("\n    Enter path to CSV file \033[90m(or Enter to cancel)\033[0m: ").strip()
+                csv_path = prompt_input("Enter path to CSV file:", placeholder="(or Enter to cancel)")
                 if not csv_path:
                     print("⚠️  Import cancelled.")
                     input("\n\033[1;94mTap Enter to return to menu...\033[0m")
@@ -3284,7 +3355,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 settings["notification_provider"] = provider
                 
                 if provider == "gmail":
-                    print("\n    \033[1;96m--- Configure Gmail SMTP ---\033[0m")
+                    print("\n    \033[1;94m--- Configure Gmail SMTP ---\033[0m")
                     print("    1. Go to: \033[4;94mhttps://myaccount.google.com/apppasswords\033[0m")
                     print("    2. Log in and create a name (e.g. 'AI Orchestrator')")
                     print("    3. Copy the 16-character code generated.")
@@ -3295,7 +3366,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     if new_smtp: settings["smtp_email"] = new_smtp
                     if new_pass: settings["smtp_password"] = new_pass
                 else:
-                    print("\n    \033[1;96m--- Configure Resend SMTP ---\033[0m")
+                    print("\n    \033[1;94m--- Configure Resend SMTP ---\033[0m")
                     print("    1. Go to: \033[4;94mhttps://resend.com/api-keys\033[0m")
                     print("    2. Create a new API key with 'Sending' permissions.")
                     print("    3. If you haven't verified a domain, use your Resend login email.")
@@ -3314,7 +3385,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print("\n    ✅ Provider configured.")
                 input("\n\033[1;94mTap Enter to return to menu...\033[0m")
             elif choice == "r" and emails:
-                idx_str = input("\n    Enter index to remove: ").strip()
+                idx_str = prompt_input("Enter index to remove:", placeholder="(number)")
                 try:
                     idx = int(idx_str)
                     if 0 <= idx < len(emails):

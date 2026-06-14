@@ -230,7 +230,7 @@ def colorize_diff_line(line: str) -> str:
     elif line.startswith("-") and not line.startswith("---") and not is_log_bullet:
         return "\033[91m" + line + "\033[0m"
     elif line.startswith("@@"):
-        return "\033[96m" + line + "\033[0m"
+        return "\033[1;94m" + line + "\033[0m"
     elif "(+)" in line or "(-)" in line:
         return line.replace("(+)", "(\033[92m+\033[0m)").replace("(-)", "(\033[91m-\033[0m)")
     return line
@@ -317,20 +317,25 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 icon = "(*)" if i == idx else "( )"
                 line = f"{cursor}{icon} {opt}"
                 if i == idx:
-                    # White text on Blue background for the active row
-                    line = f"\033[1;97;44m{line}\033[0m"
+                    # White text on Navy Blue background for the active row (consistent with status bar)
+                    hl = "\033[1;97;48;5;18m"
+                    res = "\033[0m"
+                    line_fixed = line.replace(res, hl)
+                    # \033[K ensures the background color extends to the end of the terminal line
+                    line = f"{hl}{line_fixed}\033[K{res}"
                 output.append(line)
             
             # Print current choice placeholder at the bottom
             output.append("-" * 40)
-            output.append(f"Choice: \033[1;94m{options[idx]}\033[0m\033[K")
+            output.append(f"Choice: \033[1;96m{options[idx]}\033[0m\033[K")
             
             final_output = "\n".join(output)
+            lines = final_output.split("\n")
+            num_rendered_lines = len(lines)
+            
             if not clear_screen:
                 # To prevent smearing if options change size, we must clear each line
-                lines = final_output.split("\n")
                 final_output = "\n".join([line + "\033[K" for line in lines])
-                num_rendered_lines = len(lines) - 1
 
             sys.stdout.write(final_output)
             sys.stdout.flush()
@@ -340,16 +345,29 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
 
             if key == "enter":
                 if not clear_screen:
-                    # Clear the lines we printed
-                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    # Clear the entire interaction including the label
+                    sys.stdout.write(f"\r\033[{num_rendered_lines-1}A\033[J")
                     sys.stdout.flush()
+                    # Print ONLY the final choice concisely
+                    print(f"Choice: \033[1;96m{options[idx]}\033[0m")
                 else:
-                    sys.stdout.write("\n")
+                    # Final render without blue highlight to avoid double-blue-highlights on screen
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A")
+                    output = []
+                    output.append(f"\n{label}")
+                    output.append("\033[90m(Arrows: navigate, Enter: save, B: back)\033[0m")
+                    for i, opt in enumerate(options):
+                        cursor = "> " if i == idx else "  "
+                        icon = "(*)" if i == idx else "( )"
+                        output.append(f"{cursor}{icon} {opt}")
+                    output.append("-" * 40)
+                    output.append(f"Choice: \033[1;96m{options[idx]}\033[0m")
+                    sys.stdout.write("\n".join(output) + "\n")
                 break
             elif len(key) == 1 and key.lower() == "b": # Back
                 if not clear_screen:
                     # Clear the lines we printed
-                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.write(f"\r\033[{num_rendered_lines-1}A\033[J")
                     sys.stdout.flush()
                 else:
                     sys.stdout.write("\n")
@@ -392,6 +410,62 @@ def prompt_multiline(prompt: str) -> str:
         return content.strip()
     except EOFError:
         return ""
+
+def prompt_input(label: str, placeholder: str = "", default: str = "") -> str:
+    """Interactive text input with styling, backspace handling, and back-out support."""
+    if not sys.stdin.isatty():
+        return default
+
+    # Hide cursor
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+
+    input_text = default
+    bg_style = "\033[48;5;236m"
+    fg_style = "\033[1;97m" # Bold White
+    placeholder_style = "\033[90m" # Grey
+    reset = "\033[0m"
+    prompt_label = f"\033[1;94m{label}\033[0m"
+
+    try:
+        while True:
+            # Render current state
+            display = input_text
+            if not input_text and placeholder:
+                display = f"{placeholder_style}{placeholder}{reset}"
+            else:
+                display = f"{fg_style}{input_text}{reset}"
+            
+            # Construct the line (indented to match other prompts)
+            line = f"\r    {prompt_label} {bg_style} {display} {reset}\033[K"
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+            key = get_key()
+
+            if key == "enter":
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return input_text.strip().strip("'\"") # Remove quotes if pasted
+            elif key == "backspace":
+                input_text = input_text[:-1]
+            elif key == "space":
+                input_text += " "
+            elif key == "esc" or key == "\x1b":
+                sys.stdout.write("\n")
+                raise BackException()
+            elif len(key) == 1:
+                # If 'b' or 'B' at the start with no text, treat as back
+                if len(input_text) == 0 and key.lower() == "b":
+                    sys.stdout.write("\n")
+                    raise BackException()
+                input_text += key
+            elif key == "up" or key == "down" or key == "left" or key == "right":
+                # For now, ignore arrows to prevent ^[[D being echoed
+                pass
+    finally:
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
 
 def get_key(blocking: bool = True) -> str:
     """Reads a single keypress, including multi-byte escape sequences for arrows."""
@@ -466,7 +540,7 @@ def format_job_id(job_id: str) -> str:
     return f"\033[1;97m{job_id}\033[0m"
 
 def format_index(i: int) -> str:
-    return f"[\033[1;94m{i}\033[0m]"
+    return f"[\033[96m{i}\033[0m]"
 
 def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None = None, extra_keys: list[str] | None = None, footer: str | None = None, details_map: dict[str, list[str]] | None = None, status_bar: StatusBar | None = None, clear_screen: bool = True, max_selections: int | None = None) -> list[str]:
     """Displays interactive checkboxes navigated by arrow keys, toggled by space (vertical)."""
@@ -519,8 +593,15 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 
                 # Only highlight the entire row if it is currently hovered (idx)
                 if i == idx:
-                    line = f"\033[1;97;44m{cursor}{checked} {opt}\033[0m"
-                    
+                    # Highlight color (Navy Blue for consistency with main menu status bar)
+                    hl = "\033[1;97;48;5;18m"
+                    res = "\033[0m"
+                    # Ensure reset codes inside 'checked' or 'opt' don't break the whole row highlight
+                    checked_fixed = checked.replace(res, hl)
+                    opt_fixed = opt.replace(res, hl)
+                    # \033[K ensures the background color extends to the end of the terminal line
+                    line = f"{hl}{cursor}{checked_fixed} {opt_fixed}\033[K{res}"
+                
                 output.append(line)
             
             # Max selections disclaimer
@@ -558,10 +639,11 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             output.append(f"Choice: \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D")
             
             final_output = "\n".join(output)
+            lines = final_output.split("\n")
+            num_rendered_lines = len(lines)
+            
             if not clear_screen:
-                lines = final_output.split("\n")
                 final_output = "\n".join([line + "\033[K" for line in lines])
-                num_rendered_lines = len(lines) - 1
 
             sys.stdout.write(final_output)
             sys.stdout.flush()
@@ -572,15 +654,29 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             if key == "enter":
                 if not clear_screen:
                     # Clear the lines we printed
-                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.write(f"\r\033[{num_rendered_lines-1}A\033[J")
                     sys.stdout.flush()
                 else:
-                    sys.stdout.write("\n")
+                    # Final render without blue highlight
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A")
+                    final_render = []
+                    final_render.append(f"\n{label}")
+                    final_render.append(f"\033[90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
+                    for i, opt in enumerate(options):
+                        if opt.startswith("---"):
+                            final_render.append(f"  \033[1;90m{opt}\033[0m")
+                            continue
+                        checked = "[\033[1;96mx\033[0m]" if i in selected_indices else "[ ]"
+                        final_render.append(f"  {checked} {opt}")
+                    if footer: final_render.append(f"\n{footer}")
+                    final_render.append("-" * (cols - 1))
+                    final_render.append(f"Choice: \033[1;96m{len(selected_indices)} selected\033[0m")
+                    sys.stdout.write("\n".join(final_render) + "\n")
                 break
             elif len(key) == 1 and key.lower() == "b": # Back
                 if not clear_screen:
                     # Clear the lines we printed
-                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.write(f"\r\033[{num_rendered_lines-1}A\033[J")
                     sys.stdout.flush()
                 else:
                     sys.stdout.write("\n")
@@ -588,7 +684,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             elif key.lower() in extra_keys:
                 if not clear_screen:
                     # Clear the lines we printed
-                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.write(f"\r\033[{num_rendered_lines-1}A\033[J")
                     sys.stdout.flush()
                 else:
                     sys.stdout.write("\n")
@@ -978,6 +1074,20 @@ def clear_choice_placeholder() -> None:
     sys.stdout.write("\033[K")
     sys.stdout.flush()
 
+def print_header(text: str):
+    """Prints a centered header with equals signs, responsive to terminal width."""
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    
+    # Visible text length (no ANSI codes here yet)
+    # Account for the spaces around text
+    side_padding = (cols - len(text) - 4) // 2
+    if side_padding < 2: side_padding = 2
+    
+    print(f"\n\033[1;94m{'=' * side_padding} {text} {'=' * side_padding}\033[0m")
+
 def print_phase(phase: str, subtext: str | None = None):
     p_map = {
         "planning": ("🧠", "PLANNING"),
@@ -988,11 +1098,25 @@ def print_phase(phase: str, subtext: str | None = None):
         "complete": ("✅", "COMPLETE")
     }
     icon, label = p_map.get(phase, ("⚙️", phase.upper()))
-    text = f"\n==================== {icon} {label}"
+    
+    header_text = f"{icon} {label}"
     if subtext:
-        text += f": {subtext.upper()}"
-    text += " ====================\n"
-    print(text)
+        header_text += f": {subtext.upper()}"
+        
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+        
+    # Account for the fact that emojis like 🧠 might take 2 cells in some terminals 
+    # but Python len() might be different. Let's be conservative.
+    # visible_len = len(header_text) # This might be slightly off for emojis
+    # But for our purposes, a rough estimate is fine.
+    
+    side_padding = (cols - len(header_text) - 6) // 2
+    if side_padding < 2: side_padding = 2
+    
+    print(f"\n{'=' * side_padding} {header_text} {'=' * side_padding}\n")
 
 def get_phase_name(phase: str) -> str:
     return phase.replace("-", " ").capitalize()

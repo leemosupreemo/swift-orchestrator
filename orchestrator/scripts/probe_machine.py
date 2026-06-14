@@ -260,7 +260,7 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
     local_script_path = Path(__file__).resolve()
     remote_tmp_script_path = f"/tmp/probe_{local_script_path.name}"
 
-    print(f"      - \033[96mProbing remote machine {machine_name}...\033[0m")
+    print(f"      - \033[1;94mProbing remote machine {machine_name}...\033[0m")
     
     last_result = None
     successful_target = None

@@ -108,6 +108,14 @@ Validate your configuration any time:
 orchestrator check-config
 ```
 
+### 🆙 Keeping Up to Date
+
+Easily update your local installation and your remote fleet with one command:
+```bash
+orchestrator update          # Updates local package (Git/Pip)
+orchestrator update --fleet  # Updates all remote workers
+```
+
 ---
 
 ## 📚 Documentation
