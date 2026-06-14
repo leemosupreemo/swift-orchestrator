@@ -281,7 +281,7 @@ def main() -> int:
         current_input += "\n\nPlease analyze these results and decide on the next steps."
 
         if args.step_by_step and turn < args.max_turns:
-            input(f"\n\033[1;94mTurn {turn} complete. Tap Enter to continue to next turn...\033[0m")
+            input(f"\n\033[1;96mTurn {turn} complete. Tap Enter to continue to next turn...\033[0m")
 
     print(f"\n\033[91mReached maximum turns ({args.max_turns}). Stopping.\033[0m")
     return 0

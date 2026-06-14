@@ -230,7 +230,7 @@ def colorize_diff_line(line: str) -> str:
     elif line.startswith("-") and not line.startswith("---") and not is_log_bullet:
         return "\033[91m" + line + "\033[0m"
     elif line.startswith("@@"):
-        return "\033[1;94m" + line + "\033[0m"
+        return "\033[1;96m" + line + "\033[0m"
     elif "(+)" in line or "(-)" in line:
         return line.replace("(+)", "(\033[92m+\033[0m)").replace("(-)", "(\033[91m-\033[0m)")
     return line
@@ -318,7 +318,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 line = f"{cursor}{icon} {opt}"
                 if i == idx:
                     # White text on Navy Blue background for the active row (consistent with status bar)
-                    hl = "\033[1;97;48;5;18m"
+                    hl = "\033[1;97;48;5;25m"
                     res = "\033[0m"
                     line_fixed = line.replace(res, hl)
                     # \033[K ensures the background color extends to the end of the terminal line
@@ -425,7 +425,7 @@ def prompt_input(label: str, placeholder: str = "", default: str = "") -> str:
     fg_style = "\033[1;97m" # Bold White
     placeholder_style = "\033[90m" # Grey
     reset = "\033[0m"
-    prompt_label = f"\033[1;94m{label}\033[0m"
+    prompt_label = f"\033[1;96m{label}\033[0m"
 
     try:
         while True:
@@ -594,7 +594,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 # Only highlight the entire row if it is currently hovered (idx)
                 if i == idx:
                     # Highlight color (Navy Blue for consistency with main menu status bar)
-                    hl = "\033[1;97;48;5;18m"
+                    hl = "\033[1;97;48;5;25m"
                     res = "\033[0m"
                     # Ensure reset codes inside 'checked' or 'opt' don't break the whole row highlight
                     checked_fixed = checked.replace(res, hl)
@@ -884,7 +884,7 @@ class ProgressIndicator:
 
         spinner = self.frames[self.frame_idx]
         self.frame_idx = (self.frame_idx + 1) % len(self.frames)
-        return f"\033[1;94m{spinner}\033[0m {self.label}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
+        return f"\033[1;96m{spinner}\033[0m {self.label}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
 
     def render(self, force: bool = False, last_activity_time: float | None = None):
         if self.is_silent: return
@@ -1023,7 +1023,7 @@ class StatusBar:
         else:
             content = content + (" " * (cols - len(content)))
 
-        bar = f"\033[1;48;5;18;97m{content}\033[0m"
+        bar = f"\033[1;48;5;25;97m{content}\033[0m"
         divider = "\033[90m" + ("-" * cols) + "\033[0m"
         
         if at_bottom:
@@ -1062,7 +1062,7 @@ def cleanup_terminal():
 def get_choice_prompt(label: str, hint: str) -> str:
     """Returns a styled prompt with a dark grey background and positional offset."""
     placeholder = f" {hint} "
-    return f"\033[1;94m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
+    return f"\033[1;96m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
 
 def print_choice_prompt(label: str, hint: str) -> None:
     """Prints a choice prompt at the current cursor position."""
@@ -1086,7 +1086,7 @@ def print_header(text: str):
     side_padding = (cols - len(text) - 4) // 2
     if side_padding < 2: side_padding = 2
     
-    print(f"\n\033[1;94m{'=' * side_padding} {text} {'=' * side_padding}\033[0m")
+    print(f"\n\033[1;96m{'=' * side_padding} {text} {'=' * side_padding}\033[0m")
 
 def print_phase(phase: str, subtext: str | None = None):
     p_map = {

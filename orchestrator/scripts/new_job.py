@@ -523,7 +523,7 @@ def main(args_override: list[str] | None = None) -> None:
                 vibe = "minimalist"
                 if "custom" in vibe_choice:
                     print("\n    (Enter a custom design style, e.g., 'Cyberpunk 2077', 'Soft UI')")
-                    vibe = input("\033[1;94m    Custom Vibe:\033[0m ").strip()
+                    vibe = input("\033[1;96m    Custom Vibe:\033[0m ").strip()
                 else:
                     vibe = vibe_choice.split(" ")[0]
                 
@@ -596,7 +596,7 @@ def main(args_override: list[str] | None = None) -> None:
     if clarification:
         print("\n" + "!"*60)
         print(f"\033[1;93mPAUSED: Planner needs clarification\033[0m")
-        print(f"\033[1;94mQuestion:\033[0m {clarification}")
+        print(f"\033[1;96mQuestion:\033[0m {clarification}")
         print("!"*60 + "\n")
 
     # --- VERIFICATION STEP ---
@@ -735,20 +735,20 @@ def main(args_override: list[str] | None = None) -> None:
 
     # --- DESIGN PREVIEW ---
     if (args.stitch or args.job_type == "design") and not clarification:
-        print("\n" + "\033[1;94m🎨 \033[0m" * 15)
-        print(f"\033[1;94mDESIGN SPEC READY: {plan.get('title', 'Untitled')}\033[0m")
-        print(f"\033[1;94mSummary:\033[0m {plan.get('summary', 'N/A')}")
-        print(f"\033[1;94mVibe:\033[0m    \033[1;97m{plan.get('vibe', 'N/A')}\033[0m")
+        print("\n" + "\033[1;96m🎨 \033[0m" * 15)
+        print(f"\033[1;96mDESIGN SPEC READY: {plan.get('title', 'Untitled')}\033[0m")
+        print(f"\033[1;96mSummary:\033[0m {plan.get('summary', 'N/A')}")
+        print(f"\033[1;96mVibe:\033[0m    \033[1;97m{plan.get('vibe', 'N/A')}\033[0m")
         
         comps = plan.get('visual_components', [])
         if comps:
-            print("\033[1;94mKey Components:\033[0m")
+            print("\033[1;96mKey Components:\033[0m")
             for comp in comps[:3]:
                 print(f"  - {comp}")
             if len(comps) > 3:
                 print(f"  \033[90m...and {len(comps)-3} more\033[0m")
         
-        print("\033[1;94m🎨 \033[0m" * 15 + "\n")
+        print("\033[1;96m🎨 \033[0m" * 15 + "\n")
 
     try:
         job_file_display = str(paths.job_file.relative_to(ROOT))

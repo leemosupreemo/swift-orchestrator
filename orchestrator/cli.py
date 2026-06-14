@@ -237,7 +237,7 @@ def print_wizard_bar(skip_available: bool = True):
     skip_msg = " [S] Skip Section |" if skip_available else ""
     bar_content = f" {skip_msg} [Q] Quit Wizard"
     padding = " " * (cols - len(bar_content) - 1)
-    print(f"\033[1;48;5;18;97m{bar_content}{padding}\033[0m", end="", flush=True)
+    print(f"\033[1;48;5;25;97m{bar_content}{padding}\033[0m", end="", flush=True)
     # Move cursor back to start of line so prompt can follow if needed, 
     # but usually prompts follow on the next line or are handled by these helpers.
     sys.stdout.write("\r")
@@ -432,7 +432,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     asc_key_path = args.asc_key_path
 
     from orchestrator import __version__
-    print(f"\n\033[1;94m{'='*20} Orchestrator Wizard v{__version__} {'='*20}\033[0m")
+    print(f"\n\033[1;96m{'='*20} Orchestrator Wizard v{__version__} {'='*20}\033[0m")
 
     # Validation: Pre-flight checks before modifying filesystem
     if firebase_enabled and args.non_interactive:
@@ -480,7 +480,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     if not models and not args.non_interactive:
         try:
-            print(f"\n\033[1;94m{'='*20} AI Model Discovery {'='*20}\033[0m")
+            print(f"\n\033[1;96m{'='*20} AI Model Discovery {'='*20}\033[0m")
             print("Detecting installed AI CLIs and authentication status...\n")
 
             from orchestrator.scripts.check_setup import check_cli_auth, get_auth_command
@@ -591,7 +591,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     copy_prompts = args.copy_prompt_overrides
     if not copy_prompts and not args.non_interactive:
         try:
-            print(f"\n\033[1;94m{'='*20} Role Prompts {'='*20}\033[0m")
+            print(f"\n\033[1;96m{'='*20} Role Prompts {'='*20}\033[0m")
             if has_custom_prompts:
                 print(f"✅ Custom prompts already exist in \033[97m{prompts_dir.relative_to(root)}\033[0m.")
                 print("\033[90m(Manage these later via Dev Console -> Configuration -> [I] Manage CLI Instructions)\033[0m")
@@ -615,7 +615,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     if not args.non_interactive:
         try:
-            print(f"\n\033[1;94m{'='*20} Workers {'='*20}\033[0m")
+            print(f"\n\033[1;96m{'='*20} Workers {'='*20}\033[0m")
 
             import socket
             from orchestrator.scripts.discover_machines import get_local_ssh_hosts, check_machine_suitability
@@ -707,7 +707,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     if not firebase_enabled and not args.non_interactive:
         try:
-            print(f"\n\033[1;94m{'='*20} Delivery {'='*20}\033[0m")
+            print(f"\n\033[1;96m{'='*20} Delivery {'='*20}\033[0m")
             firebase_enabled = prompt_yes_no("Configure Firebase distribution now?", False)
         except SkipSectionException:
             firebase_enabled = False
@@ -718,9 +718,9 @@ def run_wizard(args: argparse.Namespace) -> int:
                 import orchestrator.scripts.setup_distribution as sd
                 detected_team, detected_method = sd.detect_identity_info()
 
-                print("\n\033[1;94m--- iOS Signing Configuration ---\033[0m")
+                print("\n\033[1;96m--- iOS Signing Configuration ---\033[0m")
                 print("Orchestrator can use App Store Connect API keys for fully automated, headless signing.")
-                print("1. Create a key at: \033[4;94mhttps://appstoreconnect.apple.com/access/api\033[0m")
+                print("1. Create a key at: \033[4;96mhttps://appstoreconnect.apple.com/access/api\033[0m")
                 print("2. Name: 'Orchestrator', Role: 'Developer'")
                 print("3. Download the .p8 file and copy the Issuer ID and Key ID.\n")
 
@@ -733,7 +733,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                     asc_issuer_id = asc_issuer_id or prompt_text("ASC Issuer ID")
                     asc_key_path = asc_key_path or prompt_text("ASC Key Path (.p8)")
 
-                print("\n\033[1;94m--- Keychain Access ---\033[0m")
+                print("\n\033[1;96m--- Keychain Access ---\033[0m")
                 print("For headless/remote builds, Orchestrator needs to unlock your keychain.")
                 if prompt_yes_no("Configure automated keychain unlocking?", True):
                     run_script("dev_console.py", ["keychain-setup"])
@@ -763,7 +763,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
     # Final step: Project Grounding / Indexing
     if not args.non_interactive:
-        print(f"\n\033[1;94m{'='*20} Grounding {'='*20}\033[0m")
+        print(f"\n\033[1;96m{'='*20} Grounding {'='*20}\033[0m")
         run_script("index_project.py", [])
         
         # Xcode Smoke Test
@@ -793,11 +793,11 @@ def run_wizard(args: argparse.Namespace) -> int:
         runtime_dir / "config" / "settings.json",
     ]:
         print(f"  - \033[97m{path.relative_to(root)}\033[0m")
-    print("\n\033[90mRun: \033[1;94morchestrator check\033[0m")
-    print("\033[90mRun: \033[1;94morchestrator check-config\033[0m\n")
+    print("\n\033[90mRun: \033[1;96morchestrator check\033[0m")
+    print("\033[90mRun: \033[1;96morchestrator check-config\033[0m\n")
     install_workers = [machine["name"] for machine in ssh_machines] if args.install_workers else []
     if not args.non_interactive and ssh_machines and not install_workers:
-        print(f"\033[1;94m{'='*20} Final Setup {'='*20}\033[0m")
+        print(f"\033[1;96m{'='*20} Final Setup {'='*20}\033[0m")
         if prompt_yes_no("Install/check SSH worker packages now?", False):
             install_workers = [machine["name"] for machine in ssh_machines]
     remember_project(root, project_display_name(root), active=True)
@@ -960,11 +960,11 @@ def update_command(args: argparse.Namespace) -> int:
     pkg_dir = PACKAGE_ROOT.parent
     is_git = (pkg_dir / ".git").exists()
     
-    print(f"\n\033[1;94m{'='*20} Orchestrator Update {'='*20}\033[0m")
+    print(f"\n\033[1;96m{'='*20} Orchestrator Update {'='*20}\033[0m")
     print(f"Current Version: \033[97mv{__version__}\033[0m")
     
     if is_git:
-        print("\n\033[1;94m--- Local Update (Git Repository) ---\033[0m")
+        print("\n\033[1;96m--- Local Update (Git Repository) ---\033[0m")
         print(f"Location: {pkg_dir}")
         try:
             subprocess.run(["git", "pull"], cwd=str(pkg_dir), check=False)
@@ -979,7 +979,7 @@ def update_command(args: argparse.Namespace) -> int:
         print("If you installed via pip, run:  \033[97mpip install --upgrade orchestrator\033[0m")
 
     if getattr(args, "fleet", False):
-        print("\n\033[1;94m--- Fleet Update ---\033[0m")
+        print("\n\033[1;96m--- Fleet Update ---\033[0m")
         try:
             return run_script("worker_tools.py", ["install"])
         except Exception as e:
@@ -1015,7 +1015,7 @@ def _main(argv: list[str] | None = None) -> int:
             recent = load_recent_projects()
             projects = recent.get("projects", [])
 
-            print(f"\n\033[1;94m{'='*20} Orchestrator {'='*20}\033[0m")
+            print(f"\n\033[1;96m{'='*20} Orchestrator {'='*20}\033[0m")
             print("No initialized project found in current directory.\n")
             print("    [\033[93m1\033[0m] Initialize new project (Wizard)")
 

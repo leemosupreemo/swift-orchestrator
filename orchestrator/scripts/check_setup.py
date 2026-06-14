@@ -71,7 +71,7 @@ def print_remediation(key: str):
     guide = REMEDIATION_GUIDE.get(key)
     if not guide: return
     print(f"     \033[93m└─ INSTALL: {guide['cmd']}\033[0m")
-    print(f"        \033[1;94mDocs   : {guide['url']}\033[0m")
+    print(f"        \033[1;96mDocs   : {guide['url']}\033[0m")
     if "auth" in guide:
         print(f"        \033[95mAuth   : {guide['auth']}\033[0m")
 

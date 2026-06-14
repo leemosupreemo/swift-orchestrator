@@ -251,7 +251,7 @@ Brief:
             write_json(job_path, job)
             print("\n" + "!"*60)
             print(f"\033[93mPAUSED: Builder needs clarification\033[0m")
-            print(f"\033[1;94mQuestion:\033[0m {q}")
+            print(f"\033[1;96mQuestion:\033[0m {q}")
             print("!"*60 + "\n")
             raise BuilderClarificationNeeded(q)
 
