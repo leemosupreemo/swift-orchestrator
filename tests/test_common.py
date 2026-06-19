@@ -136,6 +136,20 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertTrue(prompt.endswith("\033[20D"))
         self.assertIn("\033[48;5;236m\033[90m (number or letter) ", prompt)
 
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key")
+    @patch("sys.stdout.write")
+    def test_prompt_input_back_behavior(self, mock_write, mock_get_key, mock_isatty) -> None:
+        # If allow_back=False (default), typing 'b' should just insert 'b' and not raise BackException
+        mock_get_key.side_effect = ["b", "u", "i", "l", "d", "enter"]
+        res = common.prompt_input("Path:", allow_back=False)
+        self.assertEqual(res, "build")
+
+        # If allow_back=True, typing 'b' as the first key should raise BackException
+        mock_get_key.side_effect = ["b"]
+        with self.assertRaises(common.BackException):
+            common.prompt_input("Path:", allow_back=True)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -201,6 +201,19 @@ def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
+def safe_relative_path(path: Path, root: Path) -> Path:
+    """Returns a relative path from root, ignoring case sensitivity differences on macOS/Windows."""
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        # Fallback for case-sensitivity or symlink casing mismatch
+        p_str = os.path.abspath(path)
+        r_str = os.path.abspath(root)
+        if p_str.lower().startswith(r_str.lower()):
+            rel_str = p_str[len(r_str):].lstrip(os.sep)
+            return Path(rel_str)
+        return path
+
 def read_text(path: Path) -> str:
     if not path.exists():
         return ""
@@ -304,6 +317,8 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 sys.stdout.write("\033[r\033[?25h\033[0m\r")
                 sys.stdout.flush()
                 os.system("clear" if os.name != "nt" else "cls")
+                sys.stdout.write("\033[?25l")
+                sys.stdout.flush()
             elif not first_render:
                 # Move up by the number of lines we printed last time
                 sys.stdout.write(f"\033[{num_rendered_lines}A")
@@ -335,7 +350,6 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             except:
                 cols = 80
             output.append("-" * (cols - 2))
-            output.append(get_choice_prompt("Choice:", "(arrows/space/enter)"))
 
             final_output = "\n".join(output)
             lines = final_output.split("\n")
@@ -433,7 +447,7 @@ def prompt_multiline(prompt: str) -> str:
     except EOFError:
         return ""
 
-def prompt_password(label: str, placeholder: str = "") -> str:
+def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     """Interactive password input that shows asterisks instead of clear text."""
     if not sys.stdin.isatty():
         return ""
@@ -482,7 +496,7 @@ def prompt_password(label: str, placeholder: str = "") -> str:
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
 
-def prompt_input(label: str, placeholder: str = "", default: str = "") -> str:
+def prompt_input(label: str, placeholder: str = "", default: str = "", allow_back: bool = False) -> str:
     """Interactive text input with styling, backspace handling, and back-out support."""
     if not sys.stdin.isatty():
         return default
@@ -527,7 +541,7 @@ def prompt_input(label: str, placeholder: str = "", default: str = "") -> str:
                 raise BackException()
             elif len(key) == 1:
                 # If 'b' or 'B' at the start with no text, treat as back
-                if len(input_text) == 0 and key.lower() == "b":
+                if allow_back and len(input_text) == 0 and key.lower() == "b":
                     sys.stdout.write("\n")
                     raise BackException()
                 input_text += key
@@ -640,6 +654,8 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 sys.stdout.write("\033[r\033[?25h\033[0m\r")
                 sys.stdout.flush()
                 os.system("clear" if os.name != "nt" else "cls")
+                sys.stdout.write("\033[?25l")
+                sys.stdout.flush()
             elif not first_render:
                 sys.stdout.write(f"\033[{num_rendered_lines}A")
 
@@ -677,8 +693,22 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             # Max selections disclaimer
             if max_selections:
                 output.append(f"  \033[90m(Fleet limit: {max_selections} active machines max)\033[0m")
+            # 3. Print details for current selection
+            if details_map:
+                current_option = options[idx]
+                details = details_map.get(current_option, [])
+                if details:
+                    output.append("")
+                    output.append(f"\033[90m{'-'*20}\033[0m")
+                    if details_title:
+                        output.append(f"\033[1;97m{details_title}\033[0m")
+                    for line in details:
+                        if line.startswith("\033"):
+                            output.append(line)
+                        else:
+                            output.append(f"\033[90m{line}\033[0m")
             
-            # 3. Print footer
+            # 4. Print footer
             if footer_actions:
                 output.append("")
                 output.append("\033[1;97mActions\033[0m")
@@ -687,17 +717,6 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             elif footer:
                 output.append(f"\n{footer}")
             
-            # 4. Print details for current selection
-            if details_map:
-                current_option = options[idx]
-                details = details_map.get(current_option, [])
-                if details:
-                    output.append(f"\033[90m{'-'*20}\033[0m")
-                    if details_title:
-                        output.append(f"\033[1;97m{details_title}\033[0m")
-                    for line in details:
-                        output.append(f"\033[90m{line}\033[0m")
-            
             # 5. Print Bottom UI
             try:
                 cols, _ = os.get_terminal_size()
@@ -705,8 +724,6 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 cols = 80
             divider = "-" * (cols - 2)
             output.append(divider)
-            
-            output.append(get_choice_prompt("Choice:", "(arrows/space/enter)"))
             
             final_output = "\n".join(output)
             lines = final_output.split("\n")
@@ -1068,7 +1085,7 @@ class StatusBar:
         sys.stdout.write(cmd)
         sys.stdout.flush()
 
-    def render(self, at_bottom: bool = True, force: bool = False, prompt: str | None = None, activity: ProgressIndicator | None = None):
+    def render(self, at_bottom: bool = True, force: bool = False, prompt: str | None = None, activity: ProgressIndicator | None = None, q_msg: str | None = None):
         if self.is_silent: return
         now = time.monotonic()
         # Rate limit frequent renders unless forced
@@ -1083,12 +1100,13 @@ class StatusBar:
         if at_bottom and not self._scroll_region_set:
             self.set_scroll_region()
 
-        if self.is_processing:
-            q_msg = "Ctrl-C to abort"
-        elif self.sub_menu:
-            q_msg = "Ctrl-C to go back"
-        else:
-            q_msg = "Ctrl-C to quit"
+        if q_msg is None:
+            if self.is_processing:
+                q_msg = "Ctrl-C to abort"
+            elif self.sub_menu:
+                q_msg = "B to go back"
+            else:
+                q_msg = "Ctrl-C to quit"
             
         model_info = f"models: {self.models}"
         if self.active_model:
@@ -1156,10 +1174,11 @@ def cleanup_terminal():
         sys.stdout.flush()
     except: pass
 
-def get_choice_prompt(label: str, hint: str) -> str:
+def get_choice_prompt(label: str, hint: str, show_cursor: bool = True) -> str:
     """Returns a styled prompt with a dark grey background and positional offset."""
     placeholder = f" {hint} "
-    return f"\033[?25h\033[1;96m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
+    cursor_code = "\033[?25h" if show_cursor else "\033[?25l"
+    return f"{cursor_code}\033[1;96m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
 
 def print_choice_prompt(label: str, hint: str) -> None:
     """Prints a choice prompt at the current cursor position."""

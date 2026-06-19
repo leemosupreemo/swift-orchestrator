@@ -82,23 +82,23 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         if missing_clis:
             install_warning = f" \033[1;91m[Requires '{missing_clis[0]}' CLI]\033[0m"
             
-        label = f"{m.id}{alias_info}{effort_info} [{tier_str}]{install_warning}"
+        label = m.id
         
         options.append(label)
         value_map[label] = m.id
         
         details = [
-            f"Family:   {m.family.capitalize()}",
-            f"Tier:     {tier_str}",
-            f"Cost:     {m.cost_factor:.1f}x",
-            f"Capabilities: {', '.join([c.value.capitalize() for c in m.capabilities])}"
+            f"\033[1;97mFamily:\033[0m        \033[90m{m.family.capitalize()}\033[0m",
+            f"\033[1;97mTier:\033[0m          \033[90m{tier_str}\033[0m",
+            f"\033[1;97mCost:\033[0m          \033[90m{m.cost_factor:.1f}x\033[0m",
+            f"\033[1;97mCapabilities:\033[0m  \033[90m{', '.join([c.value.capitalize() for c in m.capabilities])}\033[0m"
         ]
         if missing_clis:
             details.append(f"\033[1;91mWarning: Missing required CLI '{missing_clis[0]}'\033[0m")
         if m.reasoning_effort:
-            details.append(f"Effort:   {m.reasoning_effort}")
+            details.append(f"\033[1;97mEffort:\033[0m        \033[90m{m.reasoning_effort}\033[0m")
         if m.aliases:
-            details.append(f"Aliases:  {', '.join(m.aliases)}")
+            details.append(f"\033[1;97mAliases:\033[0m       \033[90m{', '.join(m.aliases)}\033[0m")
             
         details_map[label] = details
         
@@ -295,13 +295,14 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                     except (OSError, ValueError):
                         pass
 
-            # Final read after process exit
+            # Final read after process exit: make sure we read everything till EOF
             if process.stdout:
+                try:
+                    os.set_blocking(process.stdout.fileno(), True)
+                except Exception:
+                    pass
                 while True:
                     try:
-                        # Use select with 0 timeout to check if data is left
-                        if not selector.select(timeout=0):
-                            break
                         chunk = os.read(process.stdout.fileno(), 8192)
                         if not chunk:
                             break
@@ -346,6 +347,7 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
         print(f"  🧪 TESTS CHOSEN TO BE RUN: {target_str}")
         print("★"*60 + "\033[0m\n")
 
+    returncode = 1
     try:
         # Reset terminal state, clear screen, and move cursor to top-left before running any subprocess
         # \033[r: Reset scroll region
@@ -426,6 +428,8 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
             input(final_prompt)
         except (KeyboardInterrupt, EOFError):
             pass
+            
+    return returncode
 
 def handle_new_job(session_allowed_models: list[str] | None = None, session_allowed_machines: list[str] | None = None):
     try:
@@ -632,12 +636,12 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                     capabilities.append("Backend tests")
                 
                 details = [
-                    f"Status       {status_str}",
-                    f"Mode         {m.get('execution_mode', 'unknown')}",
-                    f"Roles        {', '.join(m.get('roles', [])) or 'none'}",
-                    f"Models       {', '.join(m.get('models', [])) or 'none'}",
-                    f"Priority     {m.get('priority', 'N/A')}",
-                    f"Capabilities {', '.join(capabilities) or 'none'}"
+                    f"\033[1;97mStatus\033[0m       {status_str}",
+                    f"\033[1;97mMode\033[0m         \033[90m{m.get('execution_mode', 'unknown')}\033[0m",
+                    f"\033[1;97mRoles\033[0m        \033[90m{', '.join(m.get('roles', [])) or 'none'}\033[0m",
+                    f"\033[1;97mModels\033[0m       \033[90m{', '.join(m.get('models', [])) or 'none'}\033[0m",
+                    f"\033[1;97mPriority\033[0m     \033[90m{m.get('priority', 'N/A')}\033[0m",
+                    f"\033[1;97mCapabilities\033[0m \033[90m{', '.join(capabilities) or 'none'}\033[0m"
                 ]
                 details_map[name] = details
             
@@ -721,11 +725,22 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                             if old_name in session_allowed_machines:
                                 session_allowed_machines.remove(old_name)
                                 session_allowed_machines.append(new_name)
+                                
+                            # Update active machines config and availability mapping
+                            machines_config = m_config
+                            if old_name in FLEET_AVAILABILITY:
+                                FLEET_AVAILABILITY[new_name] = FLEET_AVAILABILITY.pop(old_name)
                             
                             print(f"✅ Machine renamed to: \033[97m{new_name}\033[0m")
+                            # Hide cursor during Tap Enter prompt
+                            sys.stdout.write("\033[?25l")
+                            sys.stdout.flush()
                             input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                     else:
                         print("⚠️  No changes made.")
+                        # Hide cursor during Tap Enter prompt
+                        sys.stdout.write("\033[?25l")
+                        sys.stdout.flush()
                         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                     continue
                 elif exc.key == "z":
@@ -1784,7 +1799,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
 
                     try:
                         footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
-                        new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
+                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
                         if new_labels:
                             job["allowed_models"] = [value_map[label] for label in new_labels]
                             save_job(job)
@@ -2353,18 +2368,43 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
         except:
             return "Offline"
 
-    # We cache CLI statuses here so we don't query them on every loop/invalid keypress.
-    cli_statuses = {}
-    def refresh_cli_statuses():
-        cli_statuses["gemini"] = get_gemini_status()
-        cli_statuses["claude"] = get_cli_status(['claude', 'auth', 'status'])
-        cli_statuses["codex"] = get_cli_status(['codex', 'login', 'status'])
-        cli_statuses["gh"] = get_cli_status(['gh', 'auth', 'status'])
-        cli_statuses["opencode"] = get_opencode_status()
-        cli_statuses["ollama"] = get_ollama_status()
+    import threading
 
-    # Initial query on entering menu
-    refresh_cli_statuses()
+    # We cache CLI statuses here so we don't query them on every loop/invalid keypress.
+    cli_statuses = {
+        "gemini": "Checking...",
+        "claude": "Checking...",
+        "codex": "Checking...",
+        "gh": "Checking...",
+        "opencode": "Checking...",
+        "ollama": "Checking..."
+    }
+
+    def refresh_cli_statuses():
+        for k in cli_statuses:
+            cli_statuses[k] = "Checking..."
+            
+        def run_check(key, func, *args):
+            try:
+                cli_statuses[key] = func(*args)
+            except Exception:
+                cli_statuses[key] = "Unknown"
+
+        threads = [
+            threading.Thread(target=run_check, args=("gemini", get_gemini_status)),
+            threading.Thread(target=run_check, args=("claude", get_cli_status, ['claude', 'auth', 'status'])),
+            threading.Thread(target=run_check, args=("codex", get_cli_status, ['codex', 'login', 'status'])),
+            threading.Thread(target=run_check, args=("gh", get_cli_status, ['gh', 'auth', 'status'])),
+            threading.Thread(target=run_check, args=("opencode", get_opencode_status)),
+            threading.Thread(target=run_check, args=("ollama", get_ollama_status)),
+        ]
+        for t in threads:
+            t.start()
+        return threads
+
+    # Trigger initial check in background
+    threads = refresh_cli_statuses()
+    first_render = True
 
     while True:
         # Settings file read on each loop is extremely fast, so we do it here.
@@ -2401,7 +2441,10 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 status = p["status"]
                 
                 # 1. CLI Column
-                if status in ["Logged In", "Ready", "Running"]:
+                if status == "Checking...":
+                    cli_display = f"\033[93m{status:13}\033[0m"
+                    cli_ready = False
+                elif status in ["Logged In", "Ready", "Running"]:
                     cli_display = f"\033[92m{status:13}\033[0m"
                     cli_ready = True
                 elif status == "Not Installed":
@@ -2439,10 +2482,17 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 # 3. Overall Ready Column
                 if cli_ready or key_ready:
                     ready_display = "\033[1;92m✓ READY\033[0m"
+                elif status == "Checking...":
+                    ready_display = "\033[93m⏱ CHECKING\033[0m"
                 else:
                     ready_display = "\033[1;91m✗ LOCKED\033[0m"
 
                 print(f"{p['label']:18} | {cli_display} | {key_display} | {ready_display}")
+
+            print()
+            print(f"\033[1;90mStatus Key:\033[0m")
+            print(f"  \033[92mLogged In/Ready\033[0m: CLI authenticated/ready       | \033[92mActive\033[0m: Key saved in settings.json")
+            print(f"  \033[1;96mEnvironment\033[0m: Key set via shell env var       | \033[1;96mDelegated\033[0m: Auth handled via active CLI")
 
             print_header("ACTIONS")
             
@@ -2462,6 +2512,16 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             print_header("MANAGEMENT")
             print(f"    [\033[1;91mC\033[0m] Clear Saved Keys")
             print(f"    [\033[1;91mB\033[0m] Back")
+
+            # If we are loading statuses for the first time, render the loading indicator,
+            # wait for threads, and redraw immediately.
+            if first_render and threads:
+                first_render = False
+                status_bar.render(at_bottom=True, force=True, prompt=get_choice_prompt("Choice:", "(loading status...)"))
+                for t in threads:
+                    t.join()
+                threads = None
+                continue
 
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(action)")
@@ -2499,7 +2559,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 
             if key_to_update:
                 print(f"\n  Updating: \033[97m{key_to_update}\033[0m")
-                new_val = prompt_password("🔑 Key:", placeholder="(invisible)")
+                new_val = prompt_password("🔑 Key:", placeholder="(enter to skip)")
                 if new_val:
                     settings[key_to_update] = new_val
                     write_json(settings_path, settings)
@@ -2516,7 +2576,8 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                     print("To return to this menu, type '/exit' or 'exit' and press Enter inside the prompt.\033[0m")
                     input("\n\033[1;96mTap Enter to launch Antigravity CLI...\033[0m")
                 subprocess.run(login_cmd)
-                refresh_cli_statuses()
+                threads = refresh_cli_statuses()
+                first_render = True
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str]):
     # 1. Local Prerequisites & Environment (formerly check_setup.py)
@@ -2775,10 +2836,13 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             clear_screen()
             status_bar.set_scroll_region()
             print_header("Add Project Path")
-            print("Register a project by specifying its absolute or relative path.\n")
+            print("Register a project by specifying its absolute or relative path.")
+            print("  Examples:")
+            print("    \033[90m~/projects/my-ios-app\033[0m")
+            print("    \033[90m./my-ios-app\033[0m\n")
             status_bar.render(at_bottom=True, force=True)
             try:
-                path_str = prompt_input("Project path:", placeholder="(B or Enter to cancel)")
+                path_str = prompt_input("Project path:", placeholder="(Enter to cancel)")
             except BackException:
                 continue
             if not path_str:
@@ -2858,7 +2922,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print("    [\033[93mM\033[0m] LLM Models (Session Defaults)")
             print("    [\033[93mK\033[0m] Manage LLM API Keys")
             print("    [\033[93mF\033[0m] Manage Machine Fleet")
-            print("    [\033[93mP\033[0m] Run System-Wide Audit (Diagnostics)")
+            print("    [\033[93mP\033[0m] Run Prerequisite Audit")
             print(f"    [\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
             print("    [\033[93mC\033[0m] Change Target Project")
             print("    [\033[93mA\033[0m] Manage Archived Jobs")
@@ -2897,7 +2961,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
 
                     try:
                         footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
-                        new_labels = prompt_checkbox("Select allowed models:", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
+                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
                         if new_labels:
                             session_allowed_models = [value_map[label] for label in new_labels]
                         else:
@@ -3591,7 +3655,7 @@ def handle_import_email_recipients(status_bar: StatusBar, settings_path: Path, s
 
     status_bar.render(at_bottom=True, force=True)
     try:
-        csv_path = prompt_input("CSV path:", placeholder="(B or Enter to cancel)")
+        csv_path = prompt_input("CSV path:", placeholder="(Enter to cancel)")
     except BackException:
         return
     if not csv_path:
@@ -3734,7 +3798,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
 
                     new_smtp = prompt_input("Gmail Address:")
-                    new_pass = prompt_password("🔑 App Password:", placeholder="(invisible)")
+                    new_pass = prompt_password("🔑 App Password:", placeholder="(enter to skip)")
                     if new_smtp: settings["smtp_email"] = new_smtp
                     if new_pass: settings["smtp_password"] = new_pass
                 else:
@@ -3744,7 +3808,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    3. If you haven't verified a domain, use your Resend login email.")
                     print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
 
-                    new_key = prompt_password("Resend API Key:", placeholder="(invisible)")
+                    new_key = prompt_password("Resend API Key:", placeholder="(enter to skip)")
                     print("    \033[90m(Must be a verified domain on Resend, or your login email)\033[0m")
                     new_from = prompt_input("From Email:")
                     print("    \033[90m(The name that appears in the inbox, e.g. 'AI Orchestrator')\033[0m")

@@ -48,10 +48,12 @@ def deliver_build(job_path: Path):
     # 0. Pre-flight check: Ensure signing configuration is present
     dist_errors = PROJECT_CONFIG.validate_distribution_config()
     if dist_errors:
+        config_file = PROJECT_CONFIG.runtime_dir / "project.json"
         print("\n\033[1;91m!!! Error: Distribution configuration is incomplete:\033[0m")
         for err in dist_errors:
             print(f"      - {err}")
-        print("\n\033[93mPlease run 'orchestrator wizard' to configure iOS distribution and signing.\033[0m")
+        print(f"\n\033[93mPlease run 'orchestrator wizard' or configure the following config file:\033[0m")
+        print(f"      \033[1;97m{config_file}\033[0m")
         sys.exit(1)
     
     # 1. Ensure we are on the correct branch

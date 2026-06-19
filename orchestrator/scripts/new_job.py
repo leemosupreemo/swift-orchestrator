@@ -379,7 +379,7 @@ def main(args_override: list[str] | None = None) -> None:
         allowed_models = args.allowed_models.split(",")
     else:
         print("\nLLM Model Selection (restrict workflow to these models):")
-        allowed_models = prompt_checkbox("Select allowed models:", all_models, DEFAULT_FALLBACKS)
+        allowed_models = prompt_checkbox("select models", all_models, DEFAULT_FALLBACKS)
     
     if not allowed_models:
         print("\n\033[1;91m⚠️  ERROR: No AI models selected.\033[0m")

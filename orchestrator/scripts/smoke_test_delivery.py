@@ -22,16 +22,21 @@ def run_smoke_delivery():
     # 0. Pre-flight check: Ensure signing configuration is present
     dist_errors = PROJECT_CONFIG.validate_distribution_config()
     if dist_errors:
+        config_file = PROJECT_CONFIG.runtime_dir / "project.json"
         print("\n\033[1;91m!!! Error: Distribution configuration is incomplete:\033[0m")
         for err in dist_errors:
             print(f"      - {err}")
-        print("\n\033[93mYou must configure signing and accounts before distributing.\033[0m")
+        print(f"\n\033[93mYou must configure signing and accounts in the config file before distributing:\033[0m")
+        print(f"      \033[1;97m{config_file}\033[0m")
         
         if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
             print("\n\033[1;96mStarting Orchestrator Wizard...\033[0m")
             cli_path = SCRIPTS_DIR.parent / "cli.py"
-            subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
-            print("\n✅ Wizard complete. Please re-run the smoke test to verify.")
+            res = subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
+            if res.returncode == 0:
+                print("\n✅ Wizard complete. Please re-run the smoke test to verify.")
+            else:
+                print(f"\n❌ Setup Wizard failed/exited with code {res.returncode}. Please check the error above.")
         
         sys.exit(1)
 

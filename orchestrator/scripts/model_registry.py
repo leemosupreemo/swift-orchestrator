@@ -173,7 +173,7 @@ MODELS = [
         family="deepseek",
         tier=ModelTier.HIGH,
         capabilities=[ModelCapability.CODING, ModelCapability.REASONING],
-        cost_factor=2.0,
+        cost_factor=0.0,
         required_clis=["ollama"]
     ),
     ModelMetadata(
@@ -358,11 +358,14 @@ def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
         caps.append(ModelCapability.SPEED)
         
     # Cost factor (rough guess)
-    cost = 1.0
-    if tier == ModelTier.EXTREME: cost = 10.0
-    elif tier == ModelTier.HIGH: cost = 5.0
-    elif tier == ModelTier.MEDIUM: cost = 1.0
-    elif tier == ModelTier.LOW: cost = 0.5
+    if family == "ollama":
+        cost = 0.0
+    else:
+        cost = 1.0
+        if tier == ModelTier.EXTREME: cost = 10.0
+        elif tier == ModelTier.HIGH: cost = 5.0
+        elif tier == ModelTier.MEDIUM: cost = 1.0
+        elif tier == ModelTier.LOW: cost = 0.5
     
     # CLI mapping
     cli = family

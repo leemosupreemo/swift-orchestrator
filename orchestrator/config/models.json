@@ -135,7 +135,7 @@
       "family": "deepseek",
       "tier": "HIGH",
       "capabilities": ["coding", "reasoning"],
-      "cost_factor": 2.0,
+      "cost_factor": 0.0,
       "required_clis": ["ollama"]
     },
     {

@@ -73,7 +73,9 @@ def print_result(success: bool, name: str, info: str = "", fix_key: str | None =
 
 def print_remediation(key: str):
     guide = REMEDIATION_GUIDE.get(key)
-    if not guide: return
+    if not guide:
+        print(f"     \033[93m└─ RECOMMENDATION: {key}\033[0m")
+        return
     print(f"     \033[93m└─ INSTALL: {guide['cmd']}\033[0m")
     print(f"        \033[1;96mDocs   : {guide['url']}\033[0m")
     if "auth" in guide:
@@ -197,7 +199,7 @@ def _check(status_bar: StatusBar | None = None):
     # Git Check
     print_header("1a. Git Repository Sanity")
     is_git = (ROOT / ".git").exists()
-    print_result(is_git, "Git Repository", "OK" if is_git else "MISSING")
+    print_result(is_git, "Git Repository", "OK" if is_git else "MISSING", "Run 'git init' to initialize a git repository in the project root")
     if is_git:
         try:
             def git_status():
@@ -281,7 +283,7 @@ def _check(status_bar: StatusBar | None = None):
     ]
     for name, d in docs:
         exists = (ROOT / d).exists()
-        print_result(exists, f"Doc: {name}", "OK" if exists else "MISSING")
+        print_result(exists, f"Doc: {name}", "OK" if exists else "MISSING", f"Create grounding doc file at '{d}' under the project root")
         if not exists:
             print(f"        \033[90m(File: {d})\033[0m")
 
@@ -355,7 +357,7 @@ def _check(status_bar: StatusBar | None = None):
     # 5. Check SSH Config
     print_header("6. SSH & Network")
     ssh_config_path = Path.home() / ".ssh" / "config"
-    print_result(ssh_config_path.exists(), "SSH Config File", "OK" if ssh_config_path.exists() else "MISSING")
+    print_result(ssh_config_path.exists(), "SSH Config File", "OK" if ssh_config_path.exists() else "MISSING", f"Required for remote SSH workers; create config file at '{ssh_config_path}'")
     
     if m_path.exists():
         print("\n\033[1;92m" + "="*20 + " VERIFICATION COMPLETE " + "="*20 + "\033[0m\n")

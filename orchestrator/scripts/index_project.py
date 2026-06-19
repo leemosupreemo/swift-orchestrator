@@ -10,7 +10,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import ROOT, write_text, DOCS_DIR
+from common import ROOT, write_text, DOCS_DIR, safe_relative_path
 
 def index_project():
     print(f"🔍 Indexing project structure in \033[97m{ROOT}\033[0m...")
@@ -95,10 +95,10 @@ def index_project():
     
     arch_path = DOCS_DIR / "architecture.md"
     if arch_path.exists():
-        print(f"  ⚠️  {arch_path.relative_to(ROOT)} already exists. Skipping overwrite.")
+        print(f"  ⚠️  {safe_relative_path(arch_path, ROOT)} already exists. Skipping overwrite.")
     else:
         write_text(arch_path, content)
-        print(f"  ✅ Drafted architecture summary to \033[97m{arch_path.relative_to(ROOT)}\033[0m.")
+        print(f"  ✅ Drafted architecture summary to \033[97m{safe_relative_path(arch_path, ROOT)}\033[0m.")
 
     # 4. Also check for coding standards
     standards_path = DOCS_DIR / "coding-standards.md"
@@ -112,7 +112,7 @@ def index_project():
 - **Tests:** XCTest or Swift Testing.
 """
         write_text(standards_path, standards_content)
-        print(f"  ✅ Drafted coding standards to \033[97m{standards_path.relative_to(ROOT)}\033[0m.")
+        print(f"  ✅ Drafted coding standards to \033[97m{safe_relative_path(standards_path, ROOT)}\033[0m.")
 
 if __name__ == "__main__":
     index_project()

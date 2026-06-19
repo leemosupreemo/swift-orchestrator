@@ -198,6 +198,7 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
     installed_bins = {b: shutil.which(b, path=search_path) is not None for b in binaries}
     if installed_bins.get("agy") or installed_bins.get("antigravity"):
         installed_bins["gemini"] = True
+        installed_bins["antigravity"] = True
 
     git_branch = "unknown"
     git_head_hash = "unknown"

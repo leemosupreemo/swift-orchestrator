@@ -773,8 +773,8 @@ def run_wizard(args: argparse.Namespace) -> int:
                     method = method or prompt_text("Distribution method (ad-hoc, debugging)", detected_method or "debugging", status_bar=status_bar)
 
                     if prompt_yes_no("Configure App Store Connect API keys for automated signing?", False, status_bar=status_bar):
-                        asc_key_id = asc_key_id or prompt_password("ASC Key ID", placeholder="(invisible)")
-                        asc_issuer_id = asc_issuer_id or prompt_password("ASC Issuer ID", placeholder="(invisible)")
+                        asc_key_id = asc_key_id or prompt_password("ASC Key ID", placeholder="(enter to skip)")
+                        asc_issuer_id = asc_issuer_id or prompt_password("ASC Issuer ID", placeholder="(enter to skip)")
                         asc_key_path = asc_key_path or prompt_text("ASC Key Path (.p8)", status_bar=status_bar)
                     if prompt_yes_no("Configure automated keychain unlocking?", True, status_bar=status_bar):
                         run_script("dev_console.py", ["keychain-setup"])
@@ -789,14 +789,20 @@ def run_wizard(args: argparse.Namespace) -> int:
                 if asc_key_path: script_args.extend(["--asc-key-path", asc_key_path])
                 if root: script_args.extend(["--root", str(root)])
 
-                run_script("setup_distribution.py", script_args)
+                res = run_script("setup_distribution.py", script_args)
+                if res != 0:
+                    print("\n❌ iOS signing configuration failed. Please check the errors above.")
+                    return 1
             except SkipSectionException:
                 pass
 
         # Final step: Project Grounding / Indexing
         if not args.non_interactive:
             print(f"\n\033[1;96m{'='*20} Grounding {'='*20}\033[0m")
-            run_script("index_project.py", [])
+            res = run_script("index_project.py", [])
+            if res != 0:
+                print("\n❌ Project grounding/indexing failed. Please check the errors above.")
+                return 1
             
             # Xcode Smoke Test
             from orchestrator.project_config import load_project_config
