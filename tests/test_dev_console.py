@@ -15,7 +15,9 @@ if str(PACKAGE_ROOT) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import importlib
 import dev_console  # noqa: E402
+importlib.reload(dev_console)
 
 class DevConsoleTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -36,10 +38,11 @@ class DevConsoleTests(unittest.TestCase):
     @patch("dev_console.write_json")
     @patch("dev_console.get_key")
     @patch("dev_console.input")
+    @patch("dev_console.prompt_input")
     @patch("dev_console.clear_screen")
     @patch("dev_console.StatusBar")
     @patch("pathlib.Path.exists")
-    def test_handle_email_settings_adds_recipient(self, mock_exists, _mock_status, _mock_clear, mock_input, mock_get_key, mock_write, mock_read):
+    def test_handle_email_settings_adds_recipient(self, mock_exists, _mock_status, _mock_clear, mock_prompt_input, mock_input, mock_get_key, mock_write, mock_read):
         # Initial settings
         mock_exists.return_value = True
         mock_read.return_value = {
@@ -49,7 +52,8 @@ class DevConsoleTests(unittest.TestCase):
         
         # Actions: 'a' (add), then 'new@example.com', then 'b' (back)
         mock_get_key.side_effect = ["a", "b"]
-        mock_input.return_value = "new@example.com"
+        mock_prompt_input.return_value = "new@example.com"
+        mock_input.return_value = ""
         
         dev_console.handle_email_settings([], [])
         
@@ -103,22 +107,24 @@ class DevConsoleTests(unittest.TestCase):
     @patch("dev_console.PROJECT_CONFIG")
     @patch("dev_console.subprocess.run")
     @patch("dev_console.prompt_confirm")
-    def test_handle_role_prompts_manages_templates(self, mock_confirm, mock_run, mock_config, _mock_status, _mock_clear, mock_input, _mock_get_key):
+    def test_handle_role_prompts_manages_templates(self, mock_confirm, mock_run, mock_config, _mock_status, _mock_clear, mock_input, mock_get_key):
         runtime_dir = self.temp_root / ".orchestrator"
         mock_config.runtime_dir = runtime_dir
         prompts_dir = runtime_dir / "prompts"
         
         # Scenario 1: No prompts, user chooses '1' to copy templates
-        mock_input.side_effect = ["1", "b"]
-        dev_console.handle_role_prompts()
+        mock_get_key.side_effect = ["1", "b"]
+        mock_input.return_value = ""
+        dev_console.handle_role_prompts([], [])
         mock_run.assert_called() # Should run 'wizard --copy-prompt-overrides'
         
         # Scenario 2: Prompts exist, user chooses '2' to delete them
         prompts_dir.mkdir(parents=True, exist_ok=True)
         (prompts_dir / "builder_bug.md").write_text("test")
-        mock_input.side_effect = ["2", "b"]
+        mock_get_key.side_effect = ["2", "b"]
+        mock_input.return_value = ""
         mock_confirm.return_value = True
-        dev_console.handle_role_prompts()
+        dev_console.handle_role_prompts([], [])
         self.assertFalse(prompts_dir.exists())
 
     @patch("dev_console.get_key")

@@ -17,7 +17,9 @@ if str(PACKAGE_ROOT) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import importlib
 import dev_console  # noqa: E402
+importlib.reload(dev_console)
 from orchestrator.project_config import PROJECT_CONFIG
 
 
@@ -86,7 +88,8 @@ class DevConsoleIntegrationTests(unittest.TestCase):
 
     @patch("dev_console.get_key")
     @patch("dev_console.input")
-    def test_config_flow_update_email_settings(self, mock_input, mock_get_key):
+    @patch("dev_console.prompt_input")
+    def test_config_flow_update_email_settings(self, mock_prompt_input, mock_input, mock_get_key):
         # Sequence:
         # 'c' -> Enter Configuration
         # 'e' -> Enter Email Settings
@@ -97,7 +100,8 @@ class DevConsoleIntegrationTests(unittest.TestCase):
         mock_get_key.side_effect = ["c", "e", "a", "b", "b", "q"]
         
         # Input provided when asked for the email address
-        mock_input.side_effect = ["integration@example.com", ""]
+        mock_prompt_input.return_value = "integration@example.com"
+        mock_input.return_value = ""
         
         dev_console.main_loop()
         

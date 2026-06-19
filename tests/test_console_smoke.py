@@ -15,8 +15,13 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 # Mock interactive modules before importing dev_console
+orig_common = sys.modules.get('common')
 sys.modules['common'] = MagicMock()
 import dev_console  # noqa: E402
+if orig_common is not None:
+    sys.modules['common'] = orig_common
+else:
+    del sys.modules['common']
 
 class ConsoleSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -57,7 +62,8 @@ class ConsoleSmokeTests(unittest.TestCase):
     @patch("dev_console.read_json")
     @patch("dev_console.write_json")
     @patch("dev_console.PROJECT_CONFIG")
-    def test_job_menu_smoke(self, mock_config, mock_write, mock_read, mock_refresh, mock_save, mock_header, mock_phase, mock_status, mock_clear, mock_input, mock_get_key):
+    @patch("dev_console.prompt_input")
+    def test_job_menu_smoke(self, mock_prompt_input, mock_config, mock_write, mock_read, mock_refresh, mock_save, mock_header, mock_phase, mock_status, mock_clear, mock_input, mock_get_key):
         """Superficially run through Job Selection menu options to ensure no NameErrors or obvious crashes."""
         job = {
             "job_id": "smoke-job",
@@ -76,7 +82,8 @@ class ConsoleSmokeTests(unittest.TestCase):
         mock_read.return_value = job
         
         mock_get_key.side_effect = self._mock_get_key_side_effect(["j", "q", "b"])
-        mock_input.side_effect = ["", "Tell me a joke", ""]
+        mock_prompt_input.side_effect = ["Tell me a joke", ""]
+        mock_input.return_value = ""
         
         # Mock run_llm for Ask AI
         with patch("dev_console.run_llm", return_value=("AI response", "actual-model", "new-session-id")):
@@ -94,7 +101,7 @@ class ConsoleSmokeTests(unittest.TestCase):
         # 'i' (Instructions) -> 'b' (Back)
         # 's' (Setup Guide) -> Enter
         # 'b' (Back/Exit menu)
-        mock_get_key.side_effect = self._mock_get_key_side_effect(["i", "b", "s", "b"])
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["i", "b", "s", "b", "b"])
         mock_input.return_value = "" # For 's' setup guide exit
         
         # Avoid running actual scripts during smoke test
