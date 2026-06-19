@@ -29,6 +29,11 @@ class E2EWorkflowTests(unittest.TestCase):
         self.old_env = os.environ.copy()
         os.environ["ORCHESTRATOR_USER_STATE_DIR"] = self.state_dir.name
         
+        # Set environment variables BEFORE any orchestrator modules are imported or used
+        os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(self.root)
+        os.environ["ORCHESTRATOR_RUNTIME_DIR"] = ".orchestrator"
+        os.environ["ORCHESTRATOR_USER_STATE_DIR"] = self.state_dir.name
+
         # Mock a git repo
         subprocess.run(["git", "init"], cwd=str(self.root), capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(self.root))
@@ -37,11 +42,18 @@ class E2EWorkflowTests(unittest.TestCase):
         subprocess.run(["git", "add", "README.md"], cwd=str(self.root))
         subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(self.root))
         
+        # Reload orchestrator modules to ensure they pick up the new environment
+        import importlib
+        import sys
+        
+        # Clear existing orchestrator modules from sys.modules to force fresh import
+        for mod_name in list(sys.modules.keys()):
+            if mod_name.startswith("orchestrator") or mod_name in ["common", "new_job", "probe_machine", "llm", "model_router", "model_registry"]:
+                del sys.modules[mod_name]
+        
         # Initialize orchestrator in this project
         from orchestrator import cli
         cli.main(["init", "--root", str(self.root), "--project-name", "TestProject", "--base-branch", "master"])
-        
-        os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(self.root)
         
         # Mock some required files for new_job.py
         (self.root / "docs").mkdir(exist_ok=True)

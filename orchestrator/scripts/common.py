@@ -21,15 +21,15 @@ if str(PACKAGE_ROOT.parent) not in sys.path:
 from orchestrator.project_config import PROJECT_CONFIG
 
 ROOT = PROJECT_CONFIG.root
-AI_DIR = PACKAGE_ROOT
-AI_RUNTIME_DIR = PROJECT_CONFIG.runtime_dir
-CONFIG_DIR = AI_RUNTIME_DIR / "config"
-JOBS_DIR = AI_RUNTIME_DIR / "jobs"
+ORCHESTRATOR_DIR = PACKAGE_ROOT
+ORCHESTRATOR_RUNTIME_DIR = PROJECT_CONFIG.runtime_dir
+CONFIG_DIR = ORCHESTRATOR_RUNTIME_DIR / "config"
+JOBS_DIR = ORCHESTRATOR_RUNTIME_DIR / "jobs"
 INBOX_DIR = JOBS_DIR / "inbox"
 ARCHIVE_DIR = JOBS_DIR / "archive"
-LOGS_DIR = AI_RUNTIME_DIR / "logs"
-OUTPUT_DIR = AI_RUNTIME_DIR / "output"
-STATE_DIR = AI_RUNTIME_DIR / "state"
+LOGS_DIR = ORCHESTRATOR_RUNTIME_DIR / "logs"
+OUTPUT_DIR = ORCHESTRATOR_RUNTIME_DIR / "output"
+STATE_DIR = ORCHESTRATOR_RUNTIME_DIR / "state"
 MACHINE_STATE_DIR = STATE_DIR / "machines"
 PROMPTS_DIR = PROJECT_CONFIG.prompts_dir
 DOCS_DIR = ROOT / "docs"
@@ -335,8 +335,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             except:
                 cols = 80
             output.append("-" * (cols - 2))
-            placeholder = " (arrows/space/enter) "
-            output.append(f"Choice: \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D")
+            output.append(get_choice_prompt("Choice:", "(arrows/space/enter)"))
 
             final_output = "\n".join(output)
             lines = final_output.split("\n")
@@ -700,8 +699,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             divider = "-" * (cols - 2)
             output.append(divider)
             
-            placeholder = " (arrows/space/enter) "
-            output.append(f"Choice: \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D")
+            output.append(get_choice_prompt("Choice:", "(arrows/space/enter)"))
             
             final_output = "\n".join(output)
             lines = final_output.split("\n")
@@ -1148,7 +1146,7 @@ def cleanup_terminal():
 def get_choice_prompt(label: str, hint: str) -> str:
     """Returns a styled prompt with a dark grey background and positional offset."""
     placeholder = f" {hint} "
-    return f"\033[1;96m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
+    return f"\033[?25h\033[1;96m{label}\033[0m \033[48;5;236m\033[90m{placeholder}\033[0m\033[{len(placeholder)}D"
 
 def print_choice_prompt(label: str, hint: str) -> None:
     """Prints a choice prompt at the current cursor position."""

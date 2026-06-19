@@ -133,13 +133,11 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
             cmd.extend(["--asc-issuer-id", asc_issuer_id])
             
         asc_key_path = getattr(PROJECT_CONFIG, "asc_key_path", None)
-        if asc_key_path:
+        if PROJECT_CONFIG.asc_key_path:
             key_path = ROOT / asc_key_path if not Path(asc_key_path).is_absolute() else Path(asc_key_path)
             cmd.extend(["--asc-key-path", str(key_path)])
-        
         if PROJECT_CONFIG.firebase_plist_path:
             cmd.extend(["--firebase-plist", PROJECT_CONFIG.firebase_plist_path])
-        
         if job.get("testers"):
             cmd.extend(["--testers", job["testers"]])
         if job.get("groups"):

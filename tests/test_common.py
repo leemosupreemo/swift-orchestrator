@@ -28,7 +28,7 @@ class CommonTests(unittest.TestCase):
             scheme="App",
             derived_data_path="/tmp/dd",
             root=common.ROOT,
-            runtime_dir=common.AI_RUNTIME_DIR,
+            runtime_dir=common.ORCHESTRATOR_RUNTIME_DIR,
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(common, "DOCS_DIR", Path(tmp)), patch.object(common, "PROJECT_CONFIG", project_config):
@@ -49,7 +49,7 @@ class CommonTests(unittest.TestCase):
             scheme="App",
             derived_data_path="/tmp/dd",
             root=common.ROOT,
-            runtime_dir=common.AI_RUNTIME_DIR,
+            runtime_dir=common.ORCHESTRATOR_RUNTIME_DIR,
         )
         with tempfile.TemporaryDirectory() as tmp:
             docs_dir = Path(tmp)
@@ -83,7 +83,7 @@ xcodebuild test -destination 'platform=iOS Simulator,id=EXISTING'
             scheme="App",
             derived_data_path="/tmp/dd",
             root=common.ROOT,
-            runtime_dir=common.AI_RUNTIME_DIR,
+            runtime_dir=common.ORCHESTRATOR_RUNTIME_DIR,
         )
         with tempfile.TemporaryDirectory() as tmp:
             docs_dir = Path(tmp)
@@ -128,6 +128,13 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertEqual(test_command, "swift test")
         self.assertNotIn("-derivedDataPath", build_command)
         self.assertNotIn("-derivedDataPath", test_command)
+
+    def test_choice_prompt_shows_cursor_and_positions_it_in_field(self) -> None:
+        prompt = common.get_choice_prompt("Choice:", "(number or letter)")
+
+        self.assertTrue(prompt.startswith("\033[?25h"))
+        self.assertTrue(prompt.endswith("\033[20D"))
+        self.assertIn("\033[48;5;236m\033[90m (number or letter) ", prompt)
 
 
 if __name__ == "__main__":

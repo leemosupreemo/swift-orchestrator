@@ -162,7 +162,7 @@ def run_builder(job_path: Path, resume: bool = False) -> tuple[bool, bool, Path]
         from generate_test_index import generate_test_index
         
         likely_files = job.get("plan", {}).get("likely_files", [])
-        is_infra = any("ai/" in f or "scripts/" in f for f in likely_files)
+        is_infra = any("orchestrator/" in f or "scripts/" in f for f in likely_files)
         
         if is_infra:
             prompt_name = "builder_infra.md"

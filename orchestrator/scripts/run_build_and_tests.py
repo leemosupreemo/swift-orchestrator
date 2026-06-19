@@ -153,7 +153,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
     ts = nice_timestamp()
 
     likely_files = job.get("plan", {}).get("likely_files", [])
-    is_infra = any("ai/" in f or "scripts/" in f for f in likely_files)
+    is_infra = any("orchestrator/" in f or "scripts/" in f for f in likely_files)
     
     raw_build_cmd, raw_test_cmd = extract_commands()
 

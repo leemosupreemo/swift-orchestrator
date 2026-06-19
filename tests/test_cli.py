@@ -94,7 +94,7 @@ class CliTests(unittest.TestCase):
             list_output = io.StringIO()
             with redirect_stdout(list_output):
                 self.assertEqual(cli.main(["projects"]), 0)
-            self.assertIn("* SampleApp:", list_output.getvalue())
+            self.assertIn("* Project: SampleApp", list_output.getvalue())
 
             use_output = io.StringIO()
             with redirect_stdout(use_output):

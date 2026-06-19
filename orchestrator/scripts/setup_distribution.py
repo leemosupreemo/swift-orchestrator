@@ -29,6 +29,7 @@ EXPORT_METHOD="ad-hoc"
 ASC_KEY_ID=""
 ASC_ISSUER_ID=""
 ASC_KEY_PATH=""
+FIREBASE_PLIST_PATH=""
 RELEASE_NOTES="AI Generated Build"
 TESTERS=""
 GROUPS=""
@@ -45,6 +46,7 @@ while [[ "$#" -gt 0 ]]; do
         --asc-key-id) ASC_KEY_ID="$2"; shift ;;
         --asc-issuer-id) ASC_ISSUER_ID="$2"; shift ;;
         --asc-key-path) ASC_KEY_PATH="$2"; shift ;;
+        --firebase-plist) FIREBASE_PLIST_PATH="$2"; shift ;;
         --release-notes) RELEASE_NOTES="$2"; shift ;;
         --testers) TESTERS="$2"; shift ;;
         --groups) GROUPS="$2"; shift ;;
@@ -145,11 +147,17 @@ xcodebuild -exportArchive \
 
 # 3. Firebase Upload
 echo "🔥 Uploading to Firebase App Distribution..."
-# Extract App ID from GoogleService-Info.plist
-GS_INFO_PATH="${PROJECT_PATH%.*}/GoogleService-Info.plist"
-if [ ! -f "$GS_INFO_PATH" ]; then
-    # Try one level up if not in project dir
-    GS_INFO_PATH="$(dirname "$PROJECT_PATH")/GoogleService-Info.plist"
+
+GS_INFO_PATH=""
+if [ -n "$FIREBASE_PLIST_PATH" ]; then
+    GS_INFO_PATH="$FIREBASE_PLIST_PATH"
+else
+    # Extract App ID from GoogleService-Info.plist via guessing
+    GS_INFO_PATH="${PROJECT_PATH%.*}/GoogleService-Info.plist"
+    if [ ! -f "$GS_INFO_PATH" ]; then
+        # Try one level up if not in project dir
+        GS_INFO_PATH="$(dirname "$PROJECT_PATH")/GoogleService-Info.plist"
+    fi
 fi
 
 if [ -f "$GS_INFO_PATH" ]; then
@@ -161,7 +169,8 @@ if [ -f "$GS_INFO_PATH" ]; then
         $( [ ! -z "$TESTERS" ] && echo "--testers $TESTERS" ) \
         $( [ ! -z "$GROUPS" ] && echo "--groups $GROUPS" )
 else
-    echo "❌ Error: GoogleService-Info.plist not found. Cannot determine App ID."
+    echo "❌ Missing GoogleService-Info.plist: $GS_INFO_PATH"
+    echo "      - You can specify the path with --firebase-plist"
     exit 1
 fi
 

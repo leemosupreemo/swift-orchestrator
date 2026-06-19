@@ -1,3 +1,21 @@
 #!/usr/bin/env sh
+# Robust Orchestrator wrapper.
+# Detects local source in swift-orchestrator repo or falls back to global command.
 set -eu
-exec orchestrator "$@"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -f "$REPO_ROOT/orchestrator/cli.py" ] && [ -f "$REPO_ROOT/pyproject.toml" ]; then
+    # Running inside the development repository
+    export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
+    exec python3 -m orchestrator "$@"
+elif command -v orchestrator >/dev/null 2>&1; then
+    # Running in a project that has orchestrator installed globally/pipx
+    exec orchestrator "$@"
+else
+    echo "Error: 'orchestrator' command not found."
+    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/orchestrator.git'"
+    echo "Or run from source: PYTHONPATH=. python3 -m orchestrator"
+    exit 1
+fi

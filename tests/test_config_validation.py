@@ -78,7 +78,7 @@ class ConfigValidationTests(unittest.TestCase):
             ))
 
             self.assertIn("distribution_script_path does not exist: scripts/distribute_ios.sh. Run 'orchestrator wizard' to generate it.", errors)
-            self.assertIn("firebase_plist_path does not exist: SampleApp/GoogleService-Info.plist", errors)
+            self.assertIn("firebase_plist_path does not exist: SampleApp/GoogleService-Info.plist. Download this from Firebase Console.", errors)
 
     def test_project_config_validates_visual_check_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

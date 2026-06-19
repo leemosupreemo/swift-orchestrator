@@ -187,7 +187,7 @@ def main() -> None:
     parser.add_argument(
         "--ssh-machine",
         default="mac2-ssh",
-        help="Machine name from ai/config/machines.json for the live SSH probe",
+        help="Machine name from .orchestrator/config/machines.json for the live SSH probe",
     )
     parser.add_argument(
         "--models",

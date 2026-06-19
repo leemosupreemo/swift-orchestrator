@@ -2930,6 +2930,7 @@ def main_loop():
                 print("[\033[93mC\033[0m] Configuration & Tools")
                 print("[\033[93mR\033[0m] Refresh & Sync (GitHub)")
                 print("[\033[1;91mQ\033[0m] Quit")
+                print()
                 
                 if error_msg:
                     print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")

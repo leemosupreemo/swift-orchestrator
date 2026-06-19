@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from orchestrator.project_config import DEFAULT_RUNTIME_DIRNAME, find_project_root
+from orchestrator.project_config import DEFAULT_RUNTIME_DIRNAME, find_project_root, load_project_config
 from orchestrator.project_config import load_recent_projects, project_display_name
 from orchestrator.project_config import remember_project, resolve_project_reference
 from orchestrator.config_validation import validate_machine_config, validate_project_config
@@ -21,6 +21,202 @@ logs/
 output/
 state/
 """
+
+
+def write_text_file(path: Path, content: str, force: bool) -> None:
+    if path.exists() and not force:
+        print(f"Already exists: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    
+    # Try to make the path relative to ROOT if possible, otherwise use name
+    try:
+        from orchestrator.scripts.common import ROOT
+        display_path = path.relative_to(ROOT)
+    except Exception:
+        display_path = path.name
+    print(f"  ✅ Created {display_path}")
+
+
+def run_json_command(args: list[str], root: Path) -> dict:
+    try:
+        result = subprocess.run(
+            args,
+            cwd=str(root),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
+    except Exception:
+        return {}
+    if result.returncode != 0:
+        return {}
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+
+
+def infer_xcode(root: Path) -> tuple[str | None, str | None, str, list[str], list[str]]:
+    xcode_project = next(iter(sorted(root.glob("*.xcodeproj"))), None)
+    xcode_workspace = next(iter(sorted(root.glob("*.xcworkspace"))), None)
+    args = ["xcodebuild", "-list", "-json"]
+    if xcode_workspace:
+        args.extend(["-workspace", xcode_workspace.name])
+    elif xcode_project:
+        args.extend(["-project", xcode_project.name])
+    data = run_json_command(args, root) if (xcode_project or xcode_workspace) else {}
+    container = data.get("workspace") or data.get("project") or {}
+    schemes = sorted(container.get("schemes") or [])
+    targets = sorted(container.get("targets") or [])
+    fallback_scheme = (xcode_project or xcode_workspace).stem if (xcode_project or xcode_workspace) else root.name
+    scheme = schemes[0] if schemes else fallback_scheme
+    return (
+        xcode_project.name if xcode_project else None,
+        xcode_workspace.name if xcode_workspace else None,
+        scheme,
+        schemes,
+        targets,
+    )
+
+
+def git_remote(root: Path) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return None
+
+
+def build_test_docs(config: dict) -> str:
+    if config["build_command"]:
+        build_command = config["build_command"]
+    elif config["xcode_workspace"]:
+        build_command = f"xcodebuild build -workspace {config['xcode_workspace']} -scheme {config['scheme']}"
+    elif config["xcode_project"]:
+        build_command = f"xcodebuild build -project {config['xcode_project']} -scheme {config['scheme']}"
+    else:
+        build_command = "swift build"
+
+    if config["test_command"]:
+        test_command = config["test_command"]
+    elif config["xcode_workspace"]:
+        test_command = f"xcodebuild test -workspace {config['xcode_workspace']} -scheme {config['scheme']}"
+    elif config["xcode_project"]:
+        test_command = f"xcodebuild test -project {config['xcode_project']} -scheme {config['scheme']}"
+    else:
+        test_command = "swift test"
+
+    return f"""# Build And Test Commands
+
+Canonical validation commands for this project.
+
+## iOS app build
+
+```bash
+{build_command}
+```
+
+## iOS app tests
+
+```bash
+{test_command}
+```
+
+## Orchestrator config check
+
+```bash
+orchestrator check-config
+```
+"""
+
+
+def ai_workflow_docs(project_name: str) -> str:
+    return f"""# AI Workflow
+
+Use `orchestrator console` from the repository root to create and manage jobs for {project_name}.
+
+Recommended flow:
+
+1. Run `orchestrator check` after initial setup or toolchain changes.
+2. Run `orchestrator check-config` after editing `.orchestrator/project.json` or machine config.
+3. Create jobs from the console.
+4. Review generated branches and pull requests before merging.
+5. Keep generated `.orchestrator/jobs/`, `logs/`, `output/`, and `state/` files out of Git.
+"""
+
+
+def agents_docs(project_name: str) -> str:
+    return f"""# AGENTS.md
+
+Repository guidance for coding agents working on {project_name}.
+
+- Use `docs/build-test-commands.md` for canonical validation commands.
+- Prefer minimal, reviewable diffs.
+- Do not modify unrelated files.
+- Do not commit secrets, generated runtime logs, or unrelated environment changes.
+- Run `orchestrator check-config` after changing `.orchestrator/project.json`.
+"""
+
+
+def helper_script() -> str:
+    return """#!/usr/bin/env sh
+# Robust Orchestrator wrapper.
+# Detects local source in swift-orchestrator repo or falls back to global command.
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ -f "$REPO_ROOT/orchestrator/cli.py" ] && [ -f "$REPO_ROOT/pyproject.toml" ]; then
+    # Running inside the development repository
+    export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
+    exec python3 -m orchestrator "$@"
+elif command -v orchestrator >/dev/null 2>&1; then
+    # Running in a project that has orchestrator installed globally/pipx
+    exec orchestrator "$@"
+else
+    echo "Error: 'orchestrator' command not found."
+    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/orchestrator.git'"
+    echo "Or run from source: PYTHONPATH=. python3 -m orchestrator"
+    exit 1
+fi
+"""
+
+
+def write_starter_docs(root: Path, config: dict, force: bool) -> list[Path]:
+    paths = [
+        root / "AGENTS.md",
+        root / "docs" / "build-test-commands.md",
+        root / "docs" / "ai-workflow.md",
+    ]
+    write_text_file(paths[1], build_test_docs(config), force)
+    write_text_file(paths[2], ai_workflow_docs(config["project_name"]), force)
+    write_text_file(paths[0], agents_docs(config["project_name"]), force)
+    return paths
+
+
+def write_helper_script(root: Path, force: bool) -> Path:
+    script_path = root / "scripts" / "orchestrator"
+    write_text_file(script_path, helper_script(), force)
+    if script_path.exists():
+        script_path.chmod(script_path.stat().st_mode | 0o111)
+    return script_path
+
+
+def read_json_file(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json_file(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    print(f"Updated {path}")
 
 
 def resolve_cli_project(project: str | None) -> Path | None:
@@ -39,6 +235,9 @@ def resolve_cli_project(project: str | None) -> Path | None:
 
 
 def print_project_context(root: Path) -> None:
+    from orchestrator.project_config import project_display_name
+    name = project_display_name(root)
+    print(f"\033[1;92mProject: {name}\033[0m")
     print(f"\033[90mContext: {root}\033[0m")
 
 
@@ -301,6 +500,13 @@ def run_wizard(args: argparse.Namespace) -> int:
             print(str(exc))
             return 1
 
+        if args.non_interactive and firebase_enabled:
+            # Validate required args for non-interactive firebase setup
+            if not firebase_plist_path or not team_id or not method:
+                print("❌ Error: --firebase in non-interactive mode requires --firebase-plist-path, --team-id, and --method.")
+                status_bar.reset_scroll_region()
+                return 1
+
         runtime_dir = root / DEFAULT_RUNTIME_DIRNAME
         project_file = runtime_dir / "project.json"
         needs_init = args.force or not project_file.exists()
@@ -315,8 +521,8 @@ def run_wizard(args: argparse.Namespace) -> int:
                 test_target=args.test_target,
                 base_branch=args.base_branch,
                 force=args.force,
-                with_starter_docs=not args.non_interactive,
-                with_helper_script=not args.non_interactive
+                with_starter_docs=True,
+                with_helper_script=True
             )
             init_project(init_args)
             review_paths.append(project_file)
@@ -731,10 +937,26 @@ def validate_config_command() -> int:
 
 
 def run_script(script_name: str, script_args: list[str]) -> int:
-    scripts_dir = Path(__file__).resolve().parent / "scripts"
+    # Resolve scripts directory relative to this file
+    current_dir = Path(__file__).resolve().parent
+    scripts_dir = current_dir / "scripts"
+    
+    # Fallback: if not found (e.g. due to rename), try to find via project root
+    if not (scripts_dir / script_name).exists():
+        root = find_project_root()
+        candidate = root / "orchestrator" / "scripts"
+        if (candidate / script_name).exists():
+            scripts_dir = candidate
+            
+    script_path = scripts_dir / script_name
+    if not script_path.exists():
+        print(f"Error: Script not found: {script_path}")
+        print("This might happen if the project directory was renamed. Try: pip install -e .")
+        return 1
+
     env = os.environ.copy()
     env.setdefault("ORCHESTRATOR_PROJECT_ROOT", str(find_project_root()))
-    return subprocess.call([sys.executable, str(scripts_dir / script_name), *script_args], env=env)
+    return subprocess.call([sys.executable, str(script_path), *script_args], env=env)
 
 
 def list_projects_command() -> int:
@@ -746,7 +968,8 @@ def list_projects_command() -> int:
         return 0
     for project in projects:
         marker = "*" if project.get("name") == active else " "
-        print(f"{marker} {project.get('name')}: {project.get('root')}")
+        print(f"{marker} Project: {project.get('name')}")
+        print(f"  Root:    {project.get('root')}")
     return 0
 
 
@@ -969,84 +1192,6 @@ def _main(argv: list[str] | None = None) -> int:
             return 1
         return run_script(args.script_name, args.script_args)
     return 1
-
-
-def read_json_file(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write_json_file(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
-def git_remote(root: Path) -> str | None:
-    try:
-        return subprocess.check_output(
-            ["git", "remote", "get-url", "origin"],
-            cwd=str(root),
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except Exception:
-        return None
-
-
-def infer_xcode(root: Path) -> tuple[Path | None, Path | None, str | None, list[str], list[str]]:
-    workspaces = list(root.glob("*.xcworkspace"))
-    projects = list(root.glob("*.xcodeproj"))
-    workspace = workspaces[0] if workspaces else None
-    project = projects[0] if projects else None
-    
-    schemes: list[str] = []
-    targets: list[str] = []
-    
-    target_file = workspace or project
-    if target_file:
-        try:
-            res = subprocess.run(
-                ["xcodebuild", "-list", "-json"],
-                cwd=str(root),
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if res.returncode == 0:
-                data = json.loads(res.stdout)
-                info = data.get("workspace") or data.get("project")
-                if info:
-                    schemes = info.get("schemes", [])
-                    targets = info.get("targets", [])
-        except Exception:
-            pass
-            
-    scheme = schemes[0] if schemes else None
-    return project, workspace, scheme, schemes, targets
-
-
-def write_starter_docs(root: Path, config: dict, force: bool) -> None:
-    docs_dir = root / "docs"
-    docs_dir.mkdir(exist_ok=True)
-    
-    architecture = docs_dir / "architecture.md"
-    if not architecture.exists() or force:
-        architecture.write_text("# Project Architecture\n\nAdd your system overview here.\n", encoding="utf-8")
-        
-    standards = docs_dir / "coding-standards.md"
-    if not standards.exists() or force:
-        standards.write_text("# Coding Standards\n\nDefine your project style and rules here.\n", encoding="utf-8")
-        
-    commands = docs_dir / "build-test-commands.md"
-    if not commands.exists() or force:
-        commands.write_text("# Build & Test Commands\n\n```bash\nxcodebuild build -scheme {scheme}\n```\n".format(scheme=config["scheme"]), encoding="utf-8")
-
-
-def write_helper_script(root: Path, force: bool) -> None:
-    script_path = root / "orchestrator.sh"
-    if not script_path.exists() or force:
-        script_path.write_text("#!/bin/bash\norchestrator \"$@\"\n", encoding="utf-8")
-        script_path.chmod(0o755)
 
 
 if __name__ == "__main__":
