@@ -36,7 +36,7 @@ The package has no Python runtime dependencies outside the standard library. Som
 - Xcode project build/test: `xcodebuild`, `xcrun`
 - GitHub issue and pull request workflow: `gh`
 - Remote workers: `ssh`, `scp`, `rsync`
-- AI providers: at least one of `codex`, `gemini`, `claude`, `opencode`, `ollama`, or matching API key configuration
+- AI providers: at least one of `codex`, `antigravity`, `claude`, `opencode`, `ollama`, or matching API key configuration
 - Firebase delivery: `firebase` plus a project-local distribution script
 
 ## First-Run Wizard
@@ -53,7 +53,7 @@ Scriptable example:
 
 ```bash
 orchestrator wizard \
-  --models codex,gemini \
+  --models codex,antigravity \
   --copy-prompt-overrides \
   --ssh-machine mac2=mac2:/Users/me/Documents/MyApp \
   --firebase \
@@ -242,6 +242,9 @@ The orchestrator can use model provider CLIs or API keys. The setup check looks 
 orchestrator check
 ```
 
+Model definitions are bundled with the installed package. Registry sync is optional and only refreshes those defaults when a remote registry is available.
+Live discovery can also query provider APIs from environment keys and can query Antigravity through the signed-in `agy` CLI; no `GEMINI_API_KEY` is required for that Antigravity path.
+
 Practical options:
 
 - Install and authenticate a CLI, such as `codex login`, `claude auth login`, or the equivalent command for your provider.
@@ -264,7 +267,7 @@ Example local machine:
   "ssh_target": null,
   "repo_path": "/Users/me/Documents/MyApp",
   "roles": ["planner", "reviewer", "worker", "build", "test"],
-  "models": ["gemini", "codex", "claude"],
+  "models": ["antigravity", "codex", "claude"],
   "priority": 100,
   "max_concurrent_jobs": 1,
   "max_heavy_jobs": 1,
@@ -288,7 +291,7 @@ Example SSH worker:
   "orchestrator_package_path": "~/.orchestrator/package",
   "orchestrator_runtime_dir": ".orchestrator",
   "roles": ["worker", "build", "test"],
-  "models": ["codex", "gemini"],
+  "models": ["codex", "antigravity"],
   "priority": 90,
   "max_concurrent_jobs": 1,
   "max_heavy_jobs": 1,

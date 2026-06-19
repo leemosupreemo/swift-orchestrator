@@ -115,7 +115,7 @@ class ModelRegistryTests(unittest.TestCase):
 
     @patch("pathlib.Path.home")
     @patch("urllib.request.urlopen")
-    def test_sync_models_failure_404(self, mock_urlopen, mock_home):
+    def test_sync_models_falls_back_to_bundled_registry_on_404(self, mock_urlopen, mock_home):
         mock_home.return_value = self.tmp_home
         
         # Mock HTTPError 404
@@ -125,18 +125,138 @@ class ModelRegistryTests(unittest.TestCase):
         )
         
         success, msg = model_registry.sync_models()
-        self.assertFalse(success)
-        self.assertIn("Registry not found at", msg)
+        self.assertTrue(success)
+        self.assertIn("bundled registry", msg)
+
+        config_path = self.tmp_home / ".orchestrator" / "custom_models.json"
+        data = json.loads(config_path.read_text())
+        ids = [m["id"] for m in data["models"]]
+        self.assertIn("gemini-3.1-pro-preview", ids)
 
     @patch("pathlib.Path.home")
     @patch("urllib.request.urlopen")
-    def test_sync_models_generic_failure(self, mock_urlopen, mock_home):
+    def test_sync_models_falls_back_to_bundled_registry_on_network_failure(self, mock_urlopen, mock_home):
         mock_home.return_value = self.tmp_home
         mock_urlopen.side_effect = Exception("Network error")
         
         success, msg = model_registry.sync_models()
+        self.assertTrue(success)
+        self.assertIn("bundled registry", msg)
+
+    def test_antigravity_alias_resolves_to_gemini_family(self):
+        model = model_registry.get_model("antigravity")
+        self.assertIsNotNone(model)
+        self.assertEqual(model.id, "gemini-3.1-pro-preview")
+        self.assertEqual(model.family, "gemini")
+
+    def test_agy_alias_resolves_to_gemini_family(self):
+        model = model_registry.get_model("agy")
+        self.assertIsNotNone(model)
+        self.assertEqual(model.id, "gemini-3.1-pro-preview")
+        self.assertEqual(model.family, "gemini")
+
+    def test_bundled_models_load_without_custom_registry(self):
+        all_models = model_registry.get_all_models()
+        model_ids = [m.id for m in all_models]
+        self.assertIn("gemini-3.1-pro-preview", model_ids)
+        self.assertIn("gpt-5.4", model_ids)
+
+    @patch("pathlib.Path.home")
+    def test_custom_models_override_bundled_without_duplicates(self, mock_home):
+        mock_home.return_value = self.tmp_home
+        config_dir = self.tmp_home / ".orchestrator"
+        config_dir.mkdir(parents=True)
+        (config_dir / "custom_models.json").write_text(json.dumps({
+            "models": [
+                {
+                    "id": "gpt-5.4",
+                    "family": "openai",
+                    "tier": "LOW",
+                    "capabilities": ["speed"],
+                    "aliases": ["codex"]
+                }
+            ]
+        }))
+
+        all_models = model_registry.get_all_models()
+        gpt54_models = [m for m in all_models if m.id == "gpt-5.4"]
+        self.assertEqual(len(gpt54_models), 1)
+        self.assertEqual(gpt54_models[0].tier, model_registry.ModelTier.LOW)
+
+    def test_preferred_cli_prefers_antigravity_when_available(self):
+        installed = {"agy": True, "antigravity": True, "gemini": True}
+        self.assertTrue(model_registry.cli_is_available("gemini", installed))
+        self.assertEqual(model_registry.preferred_cli("gemini", installed), "agy")
+
+    def test_parse_agy_models_output_extracts_gemini_ids(self):
+        output = """
+Available models:
+  gemini-3.1-pro-preview
+* models/gemini-3-flash-preview
+  claude-sonnet-4-6
+"""
+        self.assertEqual(
+            model_registry.parse_agy_models_output(output),
+            ["gemini-3-flash-preview", "gemini-3.1-pro-preview"],
+        )
+
+    def test_summarize_cli_error_prefers_actionable_error_line(self):
+        output = """
+E0619 05:00:20.212383 main.go:273] Failed to redirect output for CLI
+Error: Please sign in to view available models.
+"""
+        self.assertEqual(
+            model_registry.summarize_cli_error(output),
+            "Error: Please sign in to view available models.",
+        )
+
+    def test_summarize_cli_error_compacts_permission_failure(self):
+        output = "E0619 main.go:273] opening log file: operation not permitted"
+        self.assertEqual(
+            model_registry.summarize_cli_error(output),
+            "CLI could not start (operation not permitted)",
+        )
+
+    @patch("urllib.request.urlopen")
+    @patch("model_registry.subprocess.run")
+    @patch("model_registry.shutil.which")
+    def test_live_discovery_uses_agy_models_when_signed_in(self, mock_which, mock_run, mock_urlopen):
+        mock_which.side_effect = lambda name: "/usr/bin/agy" if name == "agy" else None
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="gemini-3.1-pro-preview\ngemini-3-flash-preview\n",
+            stderr="",
+        )
+        mock_urlopen.side_effect = Exception("no network")
+
+        with patch.dict(os.environ, {}, clear=True):
+            models = model_registry.discover_from_sources()
+
+        ids = [m.id for m in models]
+        self.assertIn("gemini-3.1-pro-preview", ids)
+        self.assertIn("gemini-3-flash-preview", ids)
+        mock_run.assert_called_with(["agy", "models"], capture_output=True, text=True, timeout=10)
+
+    @patch("urllib.request.urlopen")
+    @patch("model_registry.subprocess.run")
+    @patch("model_registry.shutil.which")
+    def test_live_discovery_reports_each_source(self, mock_which, mock_run, mock_urlopen):
+        mock_which.side_effect = lambda name: "/usr/bin/agy" if name == "agy" else None
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="Error: Please sign in to view available models.",
+        )
+        mock_urlopen.side_effect = Exception("no network")
+
+        with patch.dict(os.environ, {}, clear=True):
+            success, msg = model_registry.sync_models(live_discovery=True)
+
         self.assertFalse(success)
-        self.assertIn("Sync failed: Network error", msg)
+        self.assertIn("OpenAI API: skipped", msg)
+        self.assertIn("Gemini API: skipped", msg)
+        self.assertIn("Antigravity CLI (agy): unavailable", msg)
+        self.assertIn("Ollama: unavailable", msg)
 
 if __name__ == "__main__":
     unittest.main()

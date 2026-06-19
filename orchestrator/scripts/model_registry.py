@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any
+import shutil
+import subprocess
 
 # We use IntEnum to allow comparison (tier 1 < tier 2)
 class ModelTier(IntEnum):
@@ -29,6 +31,11 @@ class ModelMetadata:
     required_clis: list[str] = field(default_factory=list)
     api_model_id: str | None = None
     reasoning_effort: str | None = None
+
+@dataclass
+class DiscoveryResult:
+    models: list[ModelMetadata]
+    details: list[str] = field(default_factory=list)
 
 MODELS = [
     ModelMetadata(
@@ -70,7 +77,7 @@ MODELS = [
         tier=ModelTier.HIGH,
         capabilities=[ModelCapability.REASONING, ModelCapability.CODING, ModelCapability.CONTEXT, ModelCapability.VISION],
         cost_factor=5.0,
-        aliases=["gemini"],
+        aliases=["gemini", "antigravity", "agy"],
         required_clis=["gemini"]
     ),
     ModelMetadata(
@@ -219,10 +226,69 @@ from pathlib import Path
 # Legacy / Base IDs from llm.py that we should support as aliases or direct lookups
 LEGACY_IDS = {
     "gemini": "gemini-3.1-pro-preview",
+    "antigravity": "gemini-3.1-pro-preview",
+    "agy": "gemini-3.1-pro-preview",
     "claude": "claude-sonnet-4-6",
     "codex": "gpt-5.4",
     "opencode": "opencode/big-pickle",
 }
+
+CLI_ALIASES = {
+    "gemini": ("agy", "antigravity", "gemini"),
+}
+
+def model_from_dict(item: dict[str, Any]) -> ModelMetadata:
+    tier_str = item.get("tier", "HIGH").upper()
+    tier = getattr(ModelTier, tier_str, ModelTier.HIGH)
+
+    caps = []
+    for c in item.get("capabilities", ["coding", "reasoning"]):
+        try:
+            caps.append(ModelCapability(c.lower()))
+        except ValueError:
+            pass
+
+    return ModelMetadata(
+        id=item["id"],
+        family=item.get("family", "custom"),
+        tier=tier,
+        capabilities=caps,
+        cost_factor=item.get("cost_factor", 1.0),
+        aliases=item.get("aliases", []),
+        required_clis=item.get("required_clis", []),
+        api_model_id=item.get("api_model_id"),
+        reasoning_effort=item.get("reasoning_effort")
+    )
+
+def load_bundled_models() -> list[ModelMetadata]:
+    """Loads the package-owned registry shipped with the installed orchestrator."""
+    bundled_path = Path(__file__).resolve().parents[1] / "config" / "models.json"
+    try:
+        data = json.loads(bundled_path.read_text(encoding="utf-8"))
+        return [model_from_dict(item) for item in data.get("models", [])]
+    except Exception as e:
+        print(f"Warning: Failed to load bundled model registry from {bundled_path}: {e}")
+        return []
+
+def cli_is_available(cli_name: str, installed: dict[str, bool] | None = None) -> bool:
+    """Returns whether a CLI is installed, honoring provider-specific aliases."""
+    candidates = CLI_ALIASES.get(cli_name, (cli_name,))
+    if installed is not None:
+        return any(installed.get(candidate, False) for candidate in candidates)
+    return any(shutil.which(candidate) is not None for candidate in candidates)
+
+def preferred_cli(cli_name: str, installed: dict[str, bool] | None = None) -> str:
+    """Returns the preferred installed CLI name for a provider."""
+    candidates = CLI_ALIASES.get(cli_name, (cli_name,))
+    if installed is not None:
+        for candidate in candidates:
+            if installed.get(candidate, False):
+                return candidate
+        return candidates[0]
+    for candidate in candidates:
+        if shutil.which(candidate) is not None:
+            return candidate
+    return candidates[0]
 
 def load_custom_models() -> list[ModelMetadata]:
     """Loads custom models from ~/.orchestrator/custom_models.json or project config."""
@@ -241,29 +307,7 @@ def load_custom_models() -> list[ModelMetadata]:
             try:
                 data = json.loads(config_path.read_text(encoding="utf-8"))
                 for item in data.get("models", []):
-                    # Map string tiers back to Enums
-                    tier_str = item.get("tier", "HIGH").upper()
-                    tier = getattr(ModelTier, tier_str, ModelTier.HIGH)
-                    
-                    caps_str = item.get("capabilities", ["coding", "reasoning"])
-                    caps = []
-                    for c in caps_str:
-                        try:
-                            caps.append(ModelCapability(c.lower()))
-                        except ValueError:
-                            pass
-                            
-                    custom_models.append(ModelMetadata(
-                        id=item["id"],
-                        family=item.get("family", "custom"),
-                        tier=tier,
-                        capabilities=caps,
-                        cost_factor=item.get("cost_factor", 1.0),
-                        aliases=item.get("aliases", []),
-                        required_clis=item.get("required_clis", []),
-                        api_model_id=item.get("api_model_id"),
-                        reasoning_effort=item.get("reasoning_effort")
-                    ))
+                    custom_models.append(model_from_dict(item))
             except Exception as e:
                 print(f"Warning: Failed to load custom models from {config_path}: {e}")
                 
@@ -274,7 +318,11 @@ _ALL_MODELS_CACHE = None
 def get_all_models() -> list[ModelMetadata]:
     global _ALL_MODELS_CACHE
     if _ALL_MODELS_CACHE is None:
-        _ALL_MODELS_CACHE = MODELS + load_custom_models()
+        bundled_models = load_bundled_models()
+        merged = {m.id: m for m in (bundled_models or MODELS)}
+        for m in load_custom_models():
+            merged[m.id] = m
+        _ALL_MODELS_CACHE = list(merged.values())
     return _ALL_MODELS_CACHE
 
 def get_model(model_id: str) -> ModelMetadata | None:
@@ -330,15 +378,50 @@ def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
         api_model_id=model_id
     )
 
-def discover_from_sources() -> list[ModelMetadata]:
+def parse_agy_models_output(output: str) -> list[str]:
+    """Extracts Gemini-family model IDs from `agy models` text output."""
+    models = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith(("available", "model ", "models")):
+            continue
+
+        line = line.lstrip("-*• \t")
+        token = line.split()[0].strip("`'\",")
+        if token.startswith("models/"):
+            token = token.split("/", 1)[1]
+        if token.lower().startswith("gemini-"):
+            models.append(token)
+
+    return sorted(set(models))
+
+def summarize_cli_error(output: str) -> str:
+    """Returns the most actionable single line from CLI output."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return "unknown error"
+
+    for line in lines:
+        if line.lower().startswith("error:"):
+            return line
+    for line in lines:
+        if "sign in" in line.lower() or "login" in line.lower():
+            return line
+    if "operation not permitted" in output.lower():
+        return "CLI could not start (operation not permitted)"
+    return lines[0]
+
+def discover_from_sources_with_details() -> DiscoveryResult:
     """Pings various provider APIs to find new models."""
     import urllib.request
     import json
     discovered = []
+    details = []
     
     # 1. OpenAI
     openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
+        before = len(discovered)
         try:
             req = urllib.request.Request("https://api.openai.com/v1/models", 
                                          headers={"Authorization": f"Bearer {openai_key}"})
@@ -348,11 +431,16 @@ def discover_from_sources() -> list[ModelMetadata]:
                     mid = m["id"]
                     if mid.startswith(("gpt-", "o1-")):
                         discovered.append(heuristic_classify(mid, "openai"))
-        except: pass
+            details.append(f"OpenAI API: found {len(discovered) - before} model(s).")
+        except Exception as e:
+            details.append(f"OpenAI API: failed ({e}).")
+    else:
+        details.append("OpenAI API: skipped (OPENAI_API_KEY not set).")
 
     # 2. Gemini
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if gemini_key:
+        before = len(discovered)
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}"
             with urllib.request.urlopen(url, timeout=5) as resp:
@@ -361,24 +449,53 @@ def discover_from_sources() -> list[ModelMetadata]:
                     mid = m["name"].split("/")[-1]
                     if "gemini" in mid.lower():
                         discovered.append(heuristic_classify(mid, "gemini"))
-        except: pass
+            details.append(f"Gemini API: found {len(discovered) - before} model(s).")
+        except Exception as e:
+            details.append(f"Gemini API: failed ({e}).")
+    else:
+        details.append("Gemini API: skipped (GEMINI_API_KEY not set).")
 
-    # 3. Ollama (Local)
+    # 3. Antigravity CLI (OAuth/session-backed)
+    agy_cli = preferred_cli("gemini")
+    if agy_cli in {"agy", "antigravity"} and shutil.which(agy_cli):
+        before = len(discovered)
+        try:
+            res = subprocess.run([agy_cli, "models"], capture_output=True, text=True, timeout=10)
+            if res.returncode == 0:
+                for mid in parse_agy_models_output(res.stdout):
+                    discovered.append(heuristic_classify(mid, "gemini"))
+                details.append(f"Antigravity CLI ({agy_cli}): found {len(discovered) - before} model(s).")
+            else:
+                msg = summarize_cli_error(f"{res.stderr}\n{res.stdout}")
+                details.append(f"Antigravity CLI ({agy_cli}): unavailable ({msg}).")
+        except Exception as e:
+            details.append(f"Antigravity CLI ({agy_cli}): failed ({e}).")
+    else:
+        details.append("Antigravity CLI: skipped (agy not installed or not on PATH).")
+
+    # 4. Ollama (Local)
+    before = len(discovered)
     try:
         with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2) as resp:
             data = json.loads(resp.read())
             for m in data.get("models", []):
                 mid = m["name"]
                 discovered.append(heuristic_classify(mid, "ollama"))
-    except: pass
+        details.append(f"Ollama: found {len(discovered) - before} model(s).")
+    except Exception as e:
+        details.append(f"Ollama: unavailable ({e}).")
     
-    return discovered
+    return DiscoveryResult(models=discovered, details=details)
+
+def discover_from_sources() -> list[ModelMetadata]:
+    """Pings various provider APIs to find new models."""
+    return discover_from_sources_with_details().models
 
 def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
     """
     Fetches latest model definitions and updates ~/.orchestrator/custom_models.json.
     - if live_discovery=True: Pings OpenAI/Gemini/Ollama APIs directly.
-    - else: Fetches from the remote JSON registry.
+    - else: Fetches from the remote JSON registry, falling back to bundled models.
     """
     import urllib.request
     import urllib.error
@@ -392,12 +509,18 @@ def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
 
     if live_discovery:
         source_name = "live provider APIs"
-        new_models = discover_from_sources()
+        discovery = discover_from_sources_with_details()
+        new_models = discovery.models
+        discovery_report = "\n".join(f"- {detail}" for detail in discovery.details)
         if not new_models:
-            return False, "Live discovery found no new models (check your API keys)."
+            suffix = f"\n{discovery_report}" if discovery_report else ""
+            return False, f"Live discovery found no new models.{suffix}"
     else:
         # Try to load registry URL from settings
-        registry_url = "https://raw.githubusercontent.com/google/swift-orchestrator/main/orchestrator/config/models.json"
+        registry_url = os.environ.get(
+            "MODEL_REGISTRY_URL",
+            "https://raw.githubusercontent.com/leemosupreemo/swift-orchestrator/main/orchestrator/config/models.json",
+        )
         settings_path = Path.home() / ".orchestrator" / "config" / "settings.json"
         if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
             p_settings = Path(os.environ["ORCHESTRATOR_PROJECT_ROOT"]) / ".orchestrator" / "config" / "settings.json"
@@ -416,14 +539,20 @@ def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
                 remote_data = json.loads(response.read().decode("utf-8"))
                 remote_models = remote_data.get("models", [])
                 for rm in remote_models:
-                    # Convert dict to ModelMetadata for consistency
-                    new_models.append(heuristic_classify(rm["id"], rm.get("family", "custom")))
+                    new_models.append(model_from_dict(rm))
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                return False, f"Sync failed: Registry not found at {registry_url}."
-            return False, f"Sync failed: HTTP Error {e.code}"
+                source_name = "bundled registry (remote not found)"
+                new_models = load_bundled_models()
+                if not new_models:
+                    return False, f"Sync failed: Registry not found at {registry_url}, and no bundled registry was available."
+            else:
+                return False, f"Sync failed: HTTP Error {e.code}"
         except Exception as e:
-            return False, f"Sync failed: {e}"
+            source_name = "bundled registry (remote unavailable)"
+            new_models = load_bundled_models()
+            if not new_models:
+                return False, f"Sync failed: {e}"
 
     if not new_models:
         return False, f"No models found from {source_name}."
@@ -445,9 +574,12 @@ def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
             "tier": nm.tier.name,
             "capabilities": [c.value for c in nm.capabilities],
             "cost_factor": nm.cost_factor,
+            "aliases": nm.aliases,
             "required_clis": nm.required_clis,
-            "api_model_id": nm.api_model_id
+            "api_model_id": nm.api_model_id,
+            "reasoning_effort": nm.reasoning_effort
         }
+        m_dict = {k: v for k, v in m_dict.items() if v not in (None, [], "")}
         merged_map[nm.id] = m_dict
         
     new_data = {"models": sorted(list(merged_map.values()), key=lambda x: x["id"])}
@@ -457,4 +589,8 @@ def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
     global _ALL_MODELS_CACHE
     _ALL_MODELS_CACHE = None
     
+    if live_discovery:
+        suffix = f"\n{discovery_report}" if discovery_report else ""
+        return True, f"Successfully synced {len(new_models)} models from {source_name}.{suffix}"
+
     return True, f"Successfully synced {len(new_models)} models from {source_name}."

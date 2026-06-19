@@ -16,7 +16,7 @@ Unlike generic AI coding tools, Orchestrator is built specifically for the compl
     *   **Verifier**: Validates that the implementation meets the original goal and maintains system integrity.
 *   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote Macs via SSH. The Orchestrator manages code syncing, package installation, and log retrieval automatically.
 *   **Project-Local Intelligence**: Store role-specific prompt overrides (`.orchestrator/prompts/`) and architecture guides (`AGENTS.md`) directly in your repo to keep agents grounded in your project's conventions.
-*   **Interactive AI Login**: Missing an API key or session? Log in to providers (`gemini`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
+*   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
 *   **Automated PR & Issue Workflow**: Seamlessly integrates with `gh` CLI to create issues, open PRs, and post-automated status updates.
 
 ---

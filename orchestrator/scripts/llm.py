@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 
 from common import CONFIG_DIR, ROOT, append_log, ProgressIndicator, colorize_diff_line
-from model_registry import get_model, ModelTier, get_all_models
+from model_registry import get_model, ModelTier, get_all_models, preferred_cli
 from model_router import get_prioritized_models, ModelRole
 
 class LLMTimeoutError(RuntimeError):
@@ -171,6 +171,7 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None, sessi
         if m_meta and m_meta.reasoning_effort:
             cmd_base += f" -c model_reasoning_effort={m_meta.reasoning_effort}"
     elif model_id.startswith("gemini-"):
+        provider_cli = preferred_cli("gemini")
         # Safe Agentic Planning: Allow read/search/docs servers for intelligence, 
         # but hide mutating/heavy servers (maestro, XcodeBuildMCP, ssh-manager, github) 
         # to prevent recursive loops and security blocks that cause hangs.
@@ -178,15 +179,16 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None, sessi
         safe_tools = "read_file,grep_search,glob"
         if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
             safe_tools += ",replace,write_file"
-        cmd_base = f"gemini --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+        cmd_base = f"{provider_cli} --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
         if session_id:
             cmd_base += f" --session-id {session_id}"
     elif model_id == "gemini":
+        provider_cli = preferred_cli("gemini")
         safe_servers = "context7,exa,swiftlens"
         safe_tools = "read_file,grep_search,glob"
         if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
             safe_tools += ",replace,write_file"
-        cmd_base = f"gemini --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+        cmd_base = f"{provider_cli} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
         if session_id:
             cmd_base += f" --session-id {session_id}"
     elif model_id.startswith("claude-"):
@@ -217,6 +219,8 @@ def get_llm_env() -> dict[str, str]:
     """Returns the environment dictionary with common CLI paths added to PATH and keys from settings."""
     env = os.environ.copy()
     env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
+    env["ANTIGRAVITY_CLI_TRUST_WORKSPACE"] = "true"
+    env["AGY_CLI_TRUST_WORKSPACE"] = "true"
     
     # Load keys from settings.json as fallbacks
     try:

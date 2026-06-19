@@ -6,6 +6,9 @@ import subprocess
 import json
 import re
 import shutil
+import time
+import threading
+import shlex
 from pathlib import Path
 
 # Add scripts dir to path
@@ -14,7 +17,8 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import CONFIG_DIR, DOCS_DIR, ROOT, read_json, print_header, print_divider
+from common import CONFIG_DIR, DOCS_DIR, ROOT, read_json, print_header, print_divider, ProgressIndicator, StatusBar
+from model_registry import cli_is_available, preferred_cli
 from orchestrator.project_config import PROJECT_CONFIG
 
 REMEDIATION_GUIDE = {
@@ -31,10 +35,10 @@ REMEDIATION_GUIDE = {
         "cmd": "brew install gh",
         "auth": "gh auth login"
     },
-    "Gemini CLI": {
-        "url": "https://geminicli.com",
-        "cmd": "brew install gemini-cli",
-        "auth": "gemini"
+    "Antigravity CLI": {
+        "url": "https://antigravity.google/",
+        "cmd": "agy",
+        "auth": "agy"
     },
     "Claude Code": {
         "url": "https://code.claude.com",
@@ -93,8 +97,8 @@ def check_cli_auth(cli_name: str) -> tuple[bool, str]:
         elif cli_name == "codex":
             res = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=5)
             ready = res.returncode == 0
-        elif cli_name == "gemini":
-            # Gemini CLI doesn't have a status command yet, so we assume if it's installed it's ready
+        elif cli_name in {"gemini", "antigravity"}:
+            # Antigravity/Gemini CLI doesn't have a status command yet, so we assume if it's installed it's ready
             ready = True
         elif cli_name == "opencode":
             res = subprocess.run(["opencode", "auth", "status"], capture_output=True, text=True, timeout=5)
@@ -112,14 +116,70 @@ def get_auth_command(cli_name: str) -> str | None:
     """Returns the auth command for a given CLI binary name."""
     mapping = {
         "gh": "gh auth login",
-        "gemini": "gemini",
+        "gemini": preferred_cli("gemini"),
+        "antigravity": preferred_cli("gemini"),
+        "agy": "agy",
         "claude": "claude auth login",
         "codex": "codex login",
         "opencode": "opencode auth login"
     }
     return mapping.get(cli_name)
 
+def should_render_progress_ui() -> bool:
+    if os.environ.get("AI_PROGRESS_SILENT") == "1":
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+def run_with_activity(label: str, operation, status_bar: StatusBar | None = None):
+    """Run a blocking check while keeping the terminal footer and spinner alive."""
+    if status_bar is None or not should_render_progress_ui():
+        return operation()
+
+    indicator = ProgressIndicator(label=label, hint="working")
+    result = {}
+
+    def target():
+        try:
+            result["value"] = operation()
+        except BaseException as exc:
+            result["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    while thread.is_alive():
+        status_bar.render(at_bottom=True, activity=indicator)
+        time.sleep(0.1)
+    thread.join()
+    status_bar.render(at_bottom=True, activity=indicator, force=True)
+
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
+
+def xcode_list_command() -> list[str]:
+    args = ["xcodebuild", "-list", "-json"]
+    if PROJECT_CONFIG.xcode_workspace:
+        args.extend(["-workspace", PROJECT_CONFIG.xcode_workspace])
+    elif PROJECT_CONFIG.xcode_project:
+        args.extend(["-project", PROJECT_CONFIG.xcode_project])
+    return args
+
 def check():
+    progress_ui = should_render_progress_ui()
+    status_context = StatusBar({"allowed_machines": [], "allowed_models": []}, is_processing=True) if progress_ui else None
+    if status_context:
+        status_context.__enter__()
+        status_context.set_scroll_region()
+        status_context.render(at_bottom=True, force=True)
+
+    try:
+        return _check(status_context)
+    finally:
+        if status_context:
+            status_context.clear_footer()
+            status_context.__exit__(None, None, None)
+
+def _check(status_bar: StatusBar | None = None):
     print_header("AI Agent 'Plug & Play' Verification")
     settings_path = CONFIG_DIR / "settings.json"
     
@@ -140,7 +200,17 @@ def check():
     print_result(is_git, "Git Repository", "OK" if is_git else "MISSING")
     if is_git:
         try:
-            status = subprocess.check_output(["git", "status", "--short"], cwd=str(ROOT), text=True).strip()
+            def git_status():
+                return subprocess.run(
+                    ["git", "status", "--short"],
+                    cwd=str(ROOT),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+            res = run_with_activity("Refreshing Git index", git_status, status_bar)
+            status = res.stdout.strip() if res.returncode == 0 else ""
             if status:
                 print(f"     \033[1;93m⚠️  Warning: Uncommitted changes detected.\033[0m")
                 print("        AI workflows work best with a clean slate.")
@@ -170,19 +240,34 @@ def check():
     # Xcode Sanity
     if PROJECT_CONFIG.xcode_project or PROJECT_CONFIG.xcode_workspace:
         print_header("2a. Xcode Build Settings")
+        cmd = xcode_list_command()
+        display_cmd = " ".join(shlex.quote(part) for part in cmd)
         try:
             # Quick check if scheme exists
-            res = subprocess.run(["xcodebuild", "-list"], cwd=str(ROOT), capture_output=True, text=True, timeout=20)
-            if PROJECT_CONFIG.scheme and PROJECT_CONFIG.scheme in res.stdout:
+            res = run_with_activity(
+                "Reading Xcode build settings",
+                lambda: subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=45),
+                status_bar,
+            )
+            if res.returncode != 0:
+                stderr = (res.stderr or res.stdout or "").strip().splitlines()
+                detail = stderr[0] if stderr else f"Command failed: {display_cmd}"
+                print(f"     \033[1;91m⚠️  Error checking Xcode: {detail}\033[0m")
+                print(f"        \033[90mCommand: {display_cmd}\033[0m")
+            elif PROJECT_CONFIG.scheme and PROJECT_CONFIG.scheme in res.stdout:
                 print_result(True, f"Scheme: {PROJECT_CONFIG.scheme}", "FOUND")
             else:
-                print_result(False, f"Scheme: {PROJECT_CONFIG.scheme}", "NOT FOUND", f"Ensure scheme exists in 'xcodebuild -list'")
+                print_result(False, f"Scheme: {PROJECT_CONFIG.scheme}", "NOT FOUND", f"Ensure scheme exists in '{display_cmd}'")
             
             if PROJECT_CONFIG.test_target and PROJECT_CONFIG.test_target in res.stdout:
                 print_result(True, f"Test Target: {PROJECT_CONFIG.test_target}", "FOUND")
             else:
                 # Test targets aren't always in -list stdout as directly as schemes, but good enough for a heuristic
                 pass
+        except subprocess.TimeoutExpired:
+            print("     \033[1;91m⚠️  Error checking Xcode: timed out after 45 seconds.\033[0m")
+            print(f"        \033[90mCommand: {display_cmd}\033[0m")
+            print("        \033[90mTry running it directly; Xcode may be indexing, resolving packages, or waiting on a corrupted project state.\033[0m")
         except Exception as e:
             print(f"     \033[1;91m⚠️  Error checking Xcode: {e}\033[0m")
 
@@ -206,7 +291,11 @@ def check():
     print_result(has_gh, "GitHub CLI (gh)", "INSTALLED" if has_gh else "MISSING", "GitHub CLI (gh)")
     if has_gh:
         try:
-            res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+            res = run_with_activity(
+                "Checking GitHub authentication",
+                lambda: subprocess.run(["gh", "auth", "status"], capture_output=True, text=True),
+                status_bar,
+            )
             is_auth = res.returncode == 0
             print_result(is_auth, "GitHub Auth session", "LOGGED IN" if is_auth else "EXPIRED", "GitHub CLI (gh)")
         except: pass
@@ -235,7 +324,11 @@ def check():
             return False
         
         try:
-            res = subprocess.run([cli_name] + status_args, capture_output=True, text=True, timeout=5)
+            res = run_with_activity(
+                f"Checking {cli_name} authentication",
+                lambda: subprocess.run([cli_name] + status_args, capture_output=True, text=True, timeout=5),
+                status_bar,
+            )
             is_auth = res.returncode == 0
             print_result(is_auth, f"{cli_name} Auth", "LOGGED IN" if is_auth else "NOT LOGGED IN", fix_key if not is_auth else None)
             return is_auth
@@ -245,16 +338,16 @@ def check():
 
     claude_ok = check_cli_status("claude", "Claude Code", ["auth", "status"])
     codex_ok = check_cli_status("codex", "Codex CLI", ["login", "status"])
-    gemini_ok = shutil.which("gemini") is not None
-    if gemini_ok:
-        print_result(True, "Gemini CLI", "INSTALLED")
+    antigravity_ok = cli_is_available("gemini")
+    if antigravity_ok:
+        print_result(True, "Antigravity CLI", "INSTALLED")
     else:
-        print_result(False, "Gemini CLI", "MISSING", "Gemini CLI")
+        print_result(False, "Antigravity CLI", "MISSING", "Antigravity CLI")
         
     ollama_ok = shutil.which("ollama") is not None
     print_result(ollama_ok, "Ollama (Local AI)", "INSTALLED" if ollama_ok else "MISSING", "Ollama")
 
-    if not (has_env_key or has_settings_key or claude_ok or codex_ok or gemini_ok or ollama_ok):
+    if not (has_env_key or has_settings_key or claude_ok or codex_ok or antigravity_ok or ollama_ok):
         print("\n\033[1;91m❌ CRITICAL ERROR: No AI providers found. The Orchestrator will fail.\033[0m")
     else:
         print("\n\033[1;92m✅ READY: At least one AI provider is configured.\033[0m")

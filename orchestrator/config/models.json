@@ -39,7 +39,7 @@
       "tier": "HIGH",
       "capabilities": ["reasoning", "coding", "context", "vision"],
       "cost_factor": 5.0,
-      "aliases": ["gemini"],
+      "aliases": ["gemini", "antigravity", "agy"],
       "required_clis": ["gemini"]
     },
     {

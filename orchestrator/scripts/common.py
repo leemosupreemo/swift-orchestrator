@@ -309,7 +309,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 sys.stdout.write(f"\033[{num_rendered_lines}A")
 
             output = []
-            output.append(f"\n{label}")
+            output.append(get_header_string(label))
             output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
 
             for i, opt in enumerate(options):
@@ -613,7 +613,7 @@ def format_job_id(job_id: str) -> str:
 def format_index(i: int) -> str:
     return f"[\033[96m{i}\033[0m]"
 
-def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None = None, extra_keys: list[str] | None = None, footer: str | None = None, details_map: dict[str, list[str]] | None = None, status_bar: StatusBar | None = None, clear_screen: bool = True, max_selections: int | None = None) -> list[str]:
+def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None = None, extra_keys: list[str] | None = None, footer: str | None = None, details_map: dict[str, list[str]] | None = None, status_bar: StatusBar | None = None, clear_screen: bool = True, max_selections: int | None = None, footer_actions: list[str] | None = None, details_title: str | None = None) -> list[str]:
     """Displays interactive checkboxes navigated by arrow keys, toggled by space (vertical)."""
     if not sys.stdin.isatty():
         return defaults or []
@@ -645,7 +645,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
 
             output = []
             # 1. Print Header
-            output.append(f"\n{label}")
+            output.append(get_header_string(label))
             output.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
             
             if error_msg:
@@ -679,7 +679,12 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 output.append(f"  \033[90m(Fleet limit: {max_selections} active machines max)\033[0m")
             
             # 3. Print footer
-            if footer:
+            if footer_actions:
+                output.append("")
+                output.append("\033[1;97mActions\033[0m")
+                for action in footer_actions:
+                    output.append(f"  {action}")
+            elif footer:
                 output.append(f"\n{footer}")
             
             # 4. Print details for current selection
@@ -688,6 +693,8 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 details = details_map.get(current_option, [])
                 if details:
                     output.append(f"\033[90m{'-'*20}\033[0m")
+                    if details_title:
+                        output.append(f"\033[1;97m{details_title}\033[0m")
                     for line in details:
                         output.append(f"\033[90m{line}\033[0m")
             
@@ -739,7 +746,13 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                             continue
                         checked = "[\033[1;96mx\033[0m]" if i in selected_indices else "[ ]"
                         final_render.append(f"  {checked} {opt}")
-                    if footer: final_render.append(f"\n{footer}")
+                    if footer_actions:
+                        final_render.append("")
+                        final_render.append("\033[1;97mActions\033[0m")
+                        for action in footer_actions:
+                            final_render.append(f"  {action}")
+                    elif footer:
+                        final_render.append(f"\n{footer}")
                     final_render.append("-" * (cols - 2))
                     final_render.append(f"Choice: \033[1;96m{len(selected_indices)} selected\033[0m")
                     sys.stdout.write("\n".join(final_render) + "\n")
@@ -1158,8 +1171,9 @@ def clear_choice_placeholder() -> None:
     sys.stdout.write("\033[K")
     sys.stdout.flush()
 
-def print_header(text: str):
-    """Prints a centered header with equals signs, responsive to terminal width."""
+def get_header_string(text: str) -> str:
+    """Returns a centered header string with equals signs in cyan, responsive to terminal width."""
+    text = text.strip().rstrip(":")
     try:
         cols, _ = os.get_terminal_size()
     except:
@@ -1174,9 +1188,13 @@ def print_header(text: str):
     
     # Final check: if text itself is too long, don't use padding at all
     if len(text) + 6 > safe_cols:
-        print(f"\n\033[1;96m== {text} ==\033[0m")
+        return f"\n\033[1;96m== {text} ==\033[0m"
     else:
-        print(f"\n\033[1;96m{'=' * side_padding} {text} {'=' * side_padding}\033[0m")
+        return f"\n\033[1;96m{'=' * side_padding} {text} {'=' * side_padding}\033[0m"
+
+def print_header(text: str):
+    """Prints a centered header with equals signs, responsive to terminal width."""
+    print(get_header_string(text))
 
 def print_phase(phase: str, subtext: str | None = None):
     p_map = {

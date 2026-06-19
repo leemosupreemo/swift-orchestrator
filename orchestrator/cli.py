@@ -345,6 +345,14 @@ def parse_csv(value: str | None) -> list[str]:
 
 
 def check_cli_auth(cli_name: str) -> tuple[bool, str]:
+    if cli_name == "gemini":
+        if shutil.which("agy") is not None:
+            cli_name = "agy"
+        elif shutil.which("antigravity") is not None:
+            cli_name = "antigravity"
+        else:
+            cli_name = "gemini"
+
     if shutil.which(cli_name) is None:
         return False, "\033[1;91mNOT INSTALLED\033[0m"
     
@@ -355,7 +363,7 @@ def check_cli_auth(cli_name: str) -> tuple[bool, str]:
         elif cli_name == "codex":
             res = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=5)
             ready = res.returncode == 0
-        elif cli_name == "gemini":
+        elif cli_name in {"gemini", "antigravity", "agy"}:
             ready = True
         elif cli_name == "opencode":
             res = subprocess.run(["opencode", "auth", "status"], capture_output=True, text=True, timeout=5)
@@ -376,7 +384,9 @@ def check_cli_auth(cli_name: str) -> tuple[bool, str]:
 def get_auth_command(cli_name: str) -> str | None:
     mapping = {
         "gh": "gh auth login",
-        "gemini": "gemini",
+        "gemini": "agy",
+        "antigravity": "antigravity",
+        "agy": "agy",
         "claude": "claude auth login",
         "codex": "codex login",
         "opencode": "opencode auth login"
@@ -1107,7 +1117,7 @@ def _main(argv: list[str] | None = None) -> int:
     wizard_parser.add_argument("--test-target")
     wizard_parser.add_argument("--base-branch", default="main")
     wizard_parser.add_argument("--force", action="store_true")
-    wizard_parser.add_argument("--models", help="Comma-separated model aliases or model IDs, for example codex,gemini")
+    wizard_parser.add_argument("--models", help="Comma-separated model aliases or model IDs, for example codex,antigravity")
     wizard_parser.add_argument("--copy-prompt-overrides", action="store_true")
     wizard_parser.add_argument("--ssh-machine", action="append", default=[], help="Add SSH worker as NAME=SSH_TARGET:/absolute/repo/path")
     wizard_parser.add_argument("--firebase", action="store_true")

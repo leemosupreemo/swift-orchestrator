@@ -27,7 +27,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -53,7 +53,7 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
     
     family_display_names = {
         "claude": "ANTHROPIC (Claude)",
-        "gemini": "GOOGLE (Gemini)",
+        "gemini": "GOOGLE (Antigravity)",
         "openai": "OPENAI (GPT)",
         "opencode": "OPENCODE",
         "deepseek": "DEEPSEEK (Ollama)",
@@ -365,7 +365,10 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
 
         # Special case: interactive or simple local scripts should take over terminal directly
         if script_name in ["new_job.py", "check_setup.py", "discover_machines.py"]:
-            returncode = subprocess.run(cmd, cwd=str(ROOT), stdin=sys.stdin, stdout=None, stderr=None).returncode
+            sub_env = os.environ.copy()
+            if sub_menu:
+                sub_env["AI_PROGRESS_SILENT"] = "1"
+            returncode = subprocess.run(cmd, cwd=str(ROOT), stdin=sys.stdin, stdout=None, stderr=None, env=sub_env).returncode
         else:
             returncode = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)
             
@@ -523,23 +526,23 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
         if advanced:
             preset_options = [
                 "--- Recommended Tiers ---",
-                "balanced (Gemini/Codex/Gemini) (Standard balance of cost and quality)",
-                "fast (Codex/Codex/Gemini) (Cheapest/fastest models for simple fixes)",
+                "balanced (Antigravity/Codex/Antigravity) (Standard balance of cost and quality)",
+                "fast (Codex/Codex/Antigravity) (Cheapest/fastest models for simple fixes)",
                 "--- Professional Tiers ---",
-                "hard-bug (Gemini/Claude-Opus/Gemini) (Opus for complex logic and debugging)",
-                "architecture (Claude-Opus/Claude-Opus/Gemini) (Opus for both planning and building)",
+                "hard-bug (Antigravity/Claude-Opus/Antigravity) (Opus for complex logic and debugging)",
+                "architecture (Claude-Opus/Claude-Opus/Antigravity) (Opus for both planning and building)",
                 "--- Custom ---",
                 "skip (manual setup) (Select each model role manually)"
             ]
-            preset_choice = prompt_radio("LLM Model Configuration - Select a Preset:", preset_options, "balanced (Gemini/Codex/Gemini) (Standard balance of cost and quality)")
+            preset_choice = prompt_radio("LLM Model Configuration - Select a Preset:", preset_options, "balanced (Antigravity/Codex/Antigravity) (Standard balance of cost and quality)")
             
             # Extract preset key from choice (everything before the first space)
             preset = preset_choice.split(" ")[0]
             if "skip" in preset:
-                model_opts = ["gemini", "claude-opus-4-7", "codex"]
-                planner = prompt_radio("Select Planner:", model_opts, "gemini")
+                model_opts = ["antigravity", "claude-opus-4-7", "codex"]
+                planner = prompt_radio("Select Planner:", model_opts, "antigravity")
                 builder = prompt_radio("Select Builder:", model_opts, "claude-opus-4-7")
-                reviewer = prompt_radio("Select Reviewer:", model_opts, "gemini")
+                reviewer = prompt_radio("Select Reviewer:", model_opts, "antigravity")
                 args.extend(["--planner", planner, "--builder", builder, "--reviewer", reviewer])
             else:
                 args.extend(["--preset", preset])
@@ -580,7 +583,6 @@ def check_machine_availability(machine: dict[str, Any]) -> bool:
         return False
 
 def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
-    from probe_machine import load_machines
     global FLEET_AVAILABILITY
     
     # Pre-check availability for all machines (in parallel if we had many, but 2 is fine)
@@ -621,24 +623,46 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                 name = m.get("name", "unknown")
                 is_online = FLEET_AVAILABILITY.get(name, False)
                 status_str = "\033[92mONLINE\033[0m" if is_online else "\033[1;91mOFFLINE\033[0m"
+                capabilities = []
+                if m.get("supports_xcode"):
+                    capabilities.append("Xcode")
+                if m.get("supports_simulator"):
+                    capabilities.append("Simulator")
+                if m.get("supports_backend_tests"):
+                    capabilities.append("Backend tests")
                 
                 details = [
-                    f"Status: {status_str}",
-                    f"Mode: {m.get('execution_mode', 'unknown')}",
-                    f"Roles: {', '.join(m.get('roles', []))}",
-                    f"Models: {', '.join(m.get('models', []))}",
-                    f"Priority: {m.get('priority', 'N/A')}",
-                    f"Capabilities: {'Xcode ' if m.get('supports_xcode') else ''}{'Sim ' if m.get('supports_simulator') else ''}{'Backend' if m.get('supports_backend_tests') else ''}"
+                    f"Status       {status_str}",
+                    f"Mode         {m.get('execution_mode', 'unknown')}",
+                    f"Roles        {', '.join(m.get('roles', [])) or 'none'}",
+                    f"Models       {', '.join(m.get('models', [])) or 'none'}",
+                    f"Priority     {m.get('priority', 'N/A')}",
+                    f"Capabilities {', '.join(capabilities) or 'none'}"
                 ]
                 details_map[name] = details
             
-            print(f"Current Fleet Size: {len(machines_config)}")
+            print(f"\033[90mConfigured machines: {len(machines_config)}\033[0m\n")
             
             try:
                 # We use prompt_checkbox with 'd' as an extra key for discovery and 'n' for rename
                 # Enforce 10 machine limit via max_selections
-                footer = "[\033[1;92mD\033[0m] Discover    [\033[1;92mN\033[0m] Rename    [\033[1;92mZ\033[0m] Hygiene    [\033[1;91mB\033[0m] Back"
-                new_allowed = prompt_checkbox("Active Machines for Session:", machine_names, session_allowed_machines, extra_keys=["d", "n", "z", "b"], footer=footer, details_map=details_map, status_bar=status_bar, max_selections=10)
+                footer_actions = [
+                    "[\033[1;92mD\033[0m] Discover remote machines",
+                    "[\033[1;92mN\033[0m] Rename selected machine",
+                    "[\033[1;92mZ\033[0m] Fleet hygiene",
+                    "[\033[1;91mB\033[0m] Back",
+                ]
+                new_allowed = prompt_checkbox(
+                    "\033[1;97mActive Machines for This Session\033[0m",
+                    machine_names,
+                    session_allowed_machines,
+                    extra_keys=["d", "n", "z", "b"],
+                    footer_actions=footer_actions,
+                    details_map=details_map,
+                    details_title="Selected Machine",
+                    status_bar=status_bar,
+                    max_selections=10
+                )
                 
                 if not new_allowed:
                     print("\n\033[1;91m⚠️  ERROR: You must select at least one machine to continue.\033[0m")
@@ -806,6 +830,7 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
                 error_msg = f"'{choice}'"
 
 def handle_update_orchestrator(session_allowed_machines: list[str]):
+    clear_screen()
     print_header("Update Orchestrator")
     
     from orchestrator.project_config import PACKAGE_ROOT
@@ -1839,7 +1864,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         sid = s.get("id", "unknown")
                         print(f"  {i:3} | {model:30} | \033[97m{sid}\033[0m")
                 
-                print("\n  Tip: You can resume these in the Gemini CLI using: gemini --resume <ID>")
+                print("\n  Tip: You can resume these in the Antigravity CLI using: antigravity --resume <ID>")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i" and "i" in actions:
                 print_header("AI Modified Files")
@@ -2282,7 +2307,69 @@ You MUST NOT propose or perform any code changes. Be concise, accurate, and focu
     return
 
 def handle_api_keys(session_allowed_machines, session_allowed_models):
+    settings_path = CONFIG_DIR / "settings.json"
+
+    def get_cli_status(cmd_args):
+        import shutil
+        if not shutil.which(cmd_args[0]):
+            return "Not Installed"
+        try:
+            res = subprocess.run(cmd_args, capture_output=True, text=True, timeout=3)
+            if res.returncode == 0:
+                combined = (res.stdout + res.stderr).lower()
+                if "logged in" in combined or "account:" in combined or "email:" in combined:
+                    return "Logged In"
+                return "Ready"
+            return "Not Logged In"
+        except:
+            return "Unknown"
+
+    def get_gemini_status():
+        import shutil
+        import os
+        if not (shutil.which("agy") or shutil.which("antigravity") or shutil.which("gemini")): return "Not Installed"
+        if os.path.exists(os.path.expanduser("~/.gemini/oauth_creds.json")) or os.path.exists(os.path.expanduser("~/.gemini/google_accounts.json")):
+            return "Logged In"
+        return "Not Logged In"
+
+    def get_ollama_status():
+        import shutil
+        if not shutil.which("ollama"): return "Not Installed"
+        try:
+            res = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=2)
+            return "Running" if res.returncode == 0 else "Offline"
+        except:
+            return "Offline"
+
+    def get_opencode_status():
+        import shutil
+        if not shutil.which("opencode"): return "Not Installed"
+        try:
+            # OpenCode is ready if 'opencode models' returns models
+            res = subprocess.run(['opencode', 'models'], capture_output=True, text=True, timeout=3)
+            if res.returncode == 0 and res.stdout.strip():
+                return "Ready"
+            return "Not Logged In"
+        except:
+            return "Offline"
+
+    # We cache CLI statuses here so we don't query them on every loop/invalid keypress.
+    cli_statuses = {}
+    def refresh_cli_statuses():
+        cli_statuses["gemini"] = get_gemini_status()
+        cli_statuses["claude"] = get_cli_status(['claude', 'auth', 'status'])
+        cli_statuses["codex"] = get_cli_status(['codex', 'login', 'status'])
+        cli_statuses["gh"] = get_cli_status(['gh', 'auth', 'status'])
+        cli_statuses["opencode"] = get_opencode_status()
+        cli_statuses["ollama"] = get_ollama_status()
+
+    # Initial query on entering menu
+    refresh_cli_statuses()
+
     while True:
+        # Settings file read on each loop is extremely fast, so we do it here.
+        settings = read_json(settings_path) if settings_path.exists() else {}
+
         clear_screen()
         # Setup status bar
         with StatusBar({
@@ -2293,63 +2380,16 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             status_bar.set_scroll_region()
 
             print_header("AI Provider API Keys & Logins")
-            settings_path = CONFIG_DIR / "settings.json"
-            settings = read_json(settings_path) if settings_path.exists() else {}
-
             print("\033[90mAccess to models is provided via logged-in CLIs (preferred) or manual keys.\033[0m\n")
 
-            def get_cli_status(cmd_args):
-                import shutil
-                if not shutil.which(cmd_args[0]):
-                    return "Not Installed"
-                try:
-                    res = subprocess.run(cmd_args, capture_output=True, text=True, timeout=3)
-                    if res.returncode == 0:
-                        combined = (res.stdout + res.stderr).lower()
-                        if "logged in" in combined or "account:" in combined or "email:" in combined:
-                            return "Logged In"
-                        return "Ready"
-                    return "Not Logged In"
-                except:
-                    return "Unknown"
-
-            def get_gemini_status():
-                import shutil
-                import os
-                if not shutil.which("gemini"): return "Not Installed"
-                if os.path.exists(os.path.expanduser("~/.gemini/oauth_creds.json")) or os.path.exists(os.path.expanduser("~/.gemini/google_accounts.json")):
-                    return "Logged In"
-                return "Not Logged In"
-
-            def get_ollama_status():
-                import shutil
-                if not shutil.which("ollama"): return "Not Installed"
-                try:
-                    res = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=2)
-                    return "Running" if res.returncode == 0 else "Offline"
-                except:
-                    return "Offline"
-
-            def get_opencode_status():
-                import shutil
-                if not shutil.which("opencode"): return "Not Installed"
-                try:
-                    # OpenCode is ready if 'opencode models' returns models
-                    res = subprocess.run(['opencode', 'models'], capture_output=True, text=True, timeout=3)
-                    if res.returncode == 0 and res.stdout.strip():
-                        return "Ready"
-                    return "Not Logged In"
-                except:
-                    return "Offline"
-
-            # Gather Status Data
+            # Gather Status Data using cached CLI statuses
             providers = [
-                {"label": "Gemini CLI", "cli": "gemini", "key_id": "gemini_api_key", "status": get_gemini_status()},
-                {"label": "Claude Code", "cli": "claude", "key_id": "anthropic_api_key", "status": get_cli_status(['claude', 'auth', 'status'])},
-                {"label": "Codex / GPT-5", "cli": "codex", "key_id": "openai_api_key", "status": get_cli_status(['codex', 'login', 'status'])},
-                {"label": "GitHub CLI", "cli": "gh", "key_id": None, "status": get_cli_status(['gh', 'auth', 'status'])},
-                {"label": "OpenCode CLI", "cli": "opencode", "key_id": None, "status": get_opencode_status()},
-                {"label": "Ollama (Local)", "cli": "ollama", "key_id": None, "status": get_ollama_status()},
+                {"label": "Antigravity CLI", "cli": "agy", "key_id": "gemini_api_key", "status": cli_statuses["gemini"]},
+                {"label": "Claude Code", "cli": "claude", "key_id": "anthropic_api_key", "status": cli_statuses["claude"]},
+                {"label": "Codex / GPT-5", "cli": "codex", "key_id": "openai_api_key", "status": cli_statuses["codex"]},
+                {"label": "GitHub CLI", "cli": "gh", "key_id": None, "status": cli_statuses["gh"]},
+                {"label": "OpenCode CLI", "cli": "opencode", "key_id": None, "status": cli_statuses["opencode"]},
+                {"label": "Ollama (Local)", "cli": "ollama", "key_id": None, "status": cli_statuses["ollama"]},
             ]
 
             # Table Header - Narrower for better responsiveness
@@ -2408,12 +2448,12 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             
             # Single-column Layout for Actions
             print(f"  \033[1;96mManual Key Updates\033[0m")
-            print(f"    [\033[1;92mG\033[0m] Update Gemini Key")
+            print(f"    [\033[1;92mG\033[0m] Update Antigravity Key")
             print(f"    [\033[1;92mA\033[0m] Update Anthropic Key")
             print(f"    [\033[1;92mO\033[0m] Update OpenAI Key")
 
             print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
-            print(f"    [\033[1;92m1\033[0m] Login Gemini")
+            print(f"    [\033[1;92m1\033[0m] Login Antigravity")
             print(f"    [\033[1;92m2\033[0m] Login Claude")
             print(f"    [\033[1;92m3\033[0m] Login Codex")
             print(f"    [\033[1;92m4\033[0m] Login GitHub")
@@ -2437,7 +2477,12 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             if choice == "g": key_to_update = "gemini_api_key"
             elif choice == "a": key_to_update = "anthropic_api_key"
             elif choice == "o": key_to_update = "openai_api_key"
-            elif choice == "1": login_cmd = ["gemini"]
+            elif choice == "1":
+                if cli_statuses["gemini"] == "Logged In":
+                    print("\n\033[1;93mYou are already logged in to Antigravity CLI.\033[0m")
+                    if not prompt_confirm("Do you still want to launch it?", default=False):
+                        continue
+                login_cmd = ["agy"]
             elif choice == "2": login_cmd = ["claude", "auth", "login"]
             elif choice == "3": login_cmd = ["codex", "login"]
             elif choice == "4": login_cmd = ["gh", "auth", "login"]
@@ -2466,11 +2511,18 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 print_header(f"Launching {' '.join(login_cmd)}")
                 print("The CLI will open your browser for authentication.")
                 print("Follow the prompts and return here when finished.\n")
+                if choice == "1":
+                    print("\033[1;93m⚠️  NOTE: Antigravity CLI will launch its interactive session.")
+                    print("To return to this menu, type '/exit' or 'exit' and press Enter inside the prompt.\033[0m")
+                    input("\n\033[1;96mTap Enter to launch Antigravity CLI...\033[0m")
                 subprocess.run(login_cmd)
+                refresh_cli_statuses()
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str]):
     # 1. Local Prerequisites & Environment (formerly check_setup.py)
     run_script("check_setup.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt="")
+    sys.stdout.write("\033[r\033[2J\033[H\033[?25h")
+    sys.stdout.flush()
     
     # 2. Fleet-Wide Dependency Matrix
     print_header("Fleet Dependency Matrix")
@@ -2479,7 +2531,7 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
     machines_config = load_machines()
     machines = [m for m in machines_config if m["name"] in session_allowed_machines]
     
-    binaries = ["gemini", "claude", "codex", "gh", "ollama", "opencode", "xcodebuild", "firebase"]
+    binaries = ["antigravity", "gemini", "claude", "codex", "gh", "ollama", "opencode", "xcodebuild", "firebase"]
     results = []
     for m in machines:
         if m["name"] != "local":
@@ -2487,24 +2539,40 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
         probe = probe_machine(m)
         results.append((m["name"], probe))
 
-    # Header: Machine | gemini | claude | ...
-    # We use dynamic spacing for the binaries
-    matrix_header = f"  {'Machine':15}"
-    for b in binaries:
-        matrix_header += f" | {b:10}"
-    print("\n" + matrix_header)
-    print("  " + "-" * (len(matrix_header) - 2))
+    labels = {
+        "antigravity": "Antigravity",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "codex": "Codex",
+        "gh": "GitHub CLI",
+        "ollama": "Ollama",
+        "opencode": "OpenCode",
+        "xcodebuild": "Xcode",
+        "firebase": "Firebase",
+    }
     
+    print("\n\033[1;97mMachine Capability Report\033[0m")
+    print("\033[90mEach machine is checked for the CLIs required by planner, builder, review, delivery, and local test workflows.\033[0m")
+
     for name, probe in results:
-        row = f"  {name:15}"
         bins = probe.get("binaries", {})
-        for b in binaries:
-            status = bins.get(b, False)
-            icon = "✅" if status else "❌"
-            color = "\033[92m" if status else "\033[1;91m"
-            # 10 chars matches the header spacing. icon is usually 2 chars.
-            row += f" | {color}{icon:8}\033[0m" 
-        print(row)
+        installed = [labels.get(binary, binary) for binary in binaries if bins.get(binary, False)]
+        missing = [labels.get(binary, binary) for binary in binaries if not bins.get(binary, False)]
+        reachable = probe.get("reachable", True)
+        status = "\033[92mONLINE\033[0m" if reachable else "\033[1;91mUNREACHABLE\033[0m"
+        installed_count = len(installed)
+        total_count = len(binaries)
+        readiness_color = "\033[92m" if not missing and reachable else "\033[93m" if reachable else "\033[1;91m"
+        readiness = "complete" if not missing and reachable else "partial" if reachable else "offline"
+
+        print(f"\n  \033[90m┌─\033[0m \033[1;97m{name}\033[0m")
+        print(f"  \033[90m│\033[0m  Status:    {status}")
+        print(f"  \033[90m│\033[0m  Coverage:  {readiness_color}{installed_count}/{total_count} tools, {readiness}\033[0m")
+        if probe.get("probe_error"):
+            print(f"  \033[90m│\033[0m  Error:     \033[1;91m{probe.get('probe_error')}\033[0m")
+        print(f"  \033[90m│\033[0m  Available: \033[92m{', '.join(installed) if installed else 'none'}\033[0m")
+        print(f"  \033[90m│\033[0m  Missing:   \033[1;91m{', '.join(missing) if missing else 'none'}\033[0m")
+        print(f"  \033[90m└─\033[0m")
         
     print(f"\n\033[90mTotal Machines in session: {len(machines)}\033[0m")
     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -2605,6 +2673,166 @@ def handle_role_prompts(session_allowed_machines, session_allowed_models):
                     print("✅ Custom prompts deleted. Reverted to system defaults.")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 
+def handle_change_target_project(status_bar: StatusBar) -> None:
+    from orchestrator.project_config import load_recent_projects, remember_project
+
+    selected_idx = 0
+
+    while True:
+        recent = load_recent_projects()
+        projects = recent.get("projects", [])
+        active_name = recent.get("active")
+
+        if selected_idx >= len(projects):
+            selected_idx = max(0, len(projects) - 1)
+
+        clear_screen()
+        status_bar.set_scroll_region()
+        print_header("Change Target Project")
+
+        print("\033[1;97mCurrent Project\033[0m")
+        print(f"  Name: \033[97m{PROJECT_CONFIG.project_name}\033[0m")
+        print(f"  Root: \033[90m{ROOT}\033[0m")
+        print("\n\033[90mChanging projects restarts the console with that project as the active workspace.\033[0m\n")
+
+        if not projects:
+            print("\033[1;97mRecent Projects\033[0m")
+            print("  No recent projects found.\n")
+            print("\033[1;97mActions\033[0m")
+            print("  [\033[1;92mA\033[0m] Add Project Path")
+            print("  [\033[1;91mB\033[0m] Back")
+
+            prompt = get_choice_prompt("Choice:", "(A/B)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            key = get_key().strip().lower()
+            clear_choice_placeholder()
+            if key == "b":
+                return
+        else:
+            print("\033[1;97mRecent Projects\033[0m")
+            print("\033[90mUse arrows to inspect projects, Enter to switch, A to add project, B to go back.\033[0m\n")
+
+            for idx, project in enumerate(projects):
+                is_selected = idx == selected_idx
+                is_active = project.get("name") == active_name
+                cursor = "> " if is_selected else "  "
+                active_marker = " \033[92m(active)\033[0m" if is_active else ""
+                name = project.get("name", "Unnamed Project")
+                root = project.get("root", "unknown")
+                if is_selected:
+                    print(f"\033[1;97;48;5;25m{cursor}{name}{active_marker}\033[K\033[0m")
+                else:
+                    print(f"{cursor}{name}{active_marker}")
+                print(f"    \033[90mRoot: {root}\033[0m")
+                print("    \033[90mAction: Restart console with this project selected.\033[0m")
+
+            print("\n\033[1;97mActions\033[0m")
+            print("  [\033[1;92mEnter\033[0m] Switch to highlighted project")
+            print("  [\033[1;92mA\033[0m] Add Project Path")
+            print("  [\033[1;92mO\033[0m] Show add-project command help")
+            print("  [\033[1;91mB\033[0m] Back")
+
+            prompt = get_choice_prompt("Choice:", "(arrows/enter/A/O/B)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            key = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if key == "b":
+                return
+            if key in {"up", "k"}:
+                selected_idx = (selected_idx - 1) % len(projects)
+                continue
+            if key in {"down", "j"}:
+                selected_idx = (selected_idx + 1) % len(projects)
+                continue
+            if key == "o":
+                clear_screen()
+                status_bar.set_scroll_region()
+                print_header("Add Target Project CLI Help")
+                print("Run one of these commands from a terminal, then return to this menu:\n")
+                print("  \033[1;96morchestrator use /path/to/project\033[0m")
+                print("  \033[1;96morchestrator init --project /path/to/project\033[0m")
+                prompt = get_choice_prompt("Continue:", "(Enter)")
+                status_bar.render(at_bottom=True, force=True, prompt=prompt)
+                get_key()
+                clear_choice_placeholder()
+                continue
+            if key == "enter":
+                selected = projects[selected_idx]
+                remember_project(Path(selected["root"]), selected["name"], active=True)
+                clear_screen()
+                status_bar.set_scroll_region()
+                print_header("Switching Target Project")
+                print(f"  Project: \033[97m{selected['name']}\033[0m")
+                print(f"  Root:    \033[90m{selected['root']}\033[0m")
+                print("\nRestarting console...")
+                status_bar.render(at_bottom=True, force=True)
+                if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
+                    del os.environ["ORCHESTRATOR_PROJECT_ROOT"]
+                os.execvp("orchestrator", ["orchestrator", "console"])
+
+        if key == "a":
+            clear_screen()
+            status_bar.set_scroll_region()
+            print_header("Add Project Path")
+            print("Register a project by specifying its absolute or relative path.\n")
+            status_bar.render(at_bottom=True, force=True)
+            try:
+                path_str = prompt_input("Project path:", placeholder="(B or Enter to cancel)")
+            except BackException:
+                continue
+            if not path_str:
+                continue
+            path_str = path_str.strip("'\"").strip()
+            if not path_str:
+                continue
+            p = Path(path_str).expanduser()
+            if not p.is_absolute():
+                p = (ROOT / p).resolve()
+            else:
+                p = p.resolve()
+
+            if not p.exists():
+                print(f"\n\033[1;91mError: Path does not exist.\033[0m")
+                print(f"  Path checked: \033[90m{p}\033[0m")
+                prompt = get_choice_prompt("Continue:", "(Enter)")
+                status_bar.render(at_bottom=True, force=True, prompt=prompt)
+                get_key()
+                clear_choice_placeholder()
+                continue
+
+            if not p.is_dir():
+                print(f"\n\033[1;91mError: Path is not a directory.\033[0m")
+                print(f"  Path: \033[90m{p}\033[0m")
+                prompt = get_choice_prompt("Continue:", "(Enter)")
+                status_bar.render(at_bottom=True, force=True, prompt=prompt)
+                get_key()
+                clear_choice_placeholder()
+                continue
+
+            try:
+                from orchestrator.project_config import project_display_name
+                proj_name = project_display_name(p)
+            except:
+                proj_name = p.name
+
+            print(f"\nFound project: \033[1;92m{proj_name}\033[0m")
+            print(f"Path: \033[90m{p}\033[0m\n")
+
+            if prompt_confirm("Add this project and switch to it now?"):
+                remember_project(p, proj_name, active=True)
+                clear_screen()
+                status_bar.set_scroll_region()
+                print_header("Switching Target Project")
+                print(f"  Project: \033[97m{proj_name}\033[0m")
+                print(f"  Root:    \033[90m{p}\033[0m")
+                print("\nRestarting console...")
+                status_bar.render(at_bottom=True, force=True)
+                if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
+                    del os.environ["ORCHESTRATOR_PROJECT_ROOT"]
+                os.execvp("orchestrator", ["orchestrator", "console"])
+            continue
+
 def handle_configuration_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> tuple[list[str], list[str]]:
     """Secondary menu for advanced setup, tools, and configuration."""
     while True:
@@ -2634,7 +2862,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print(f"    [\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
             print("    [\033[93mC\033[0m] Change Target Project")
             print("    [\033[93mA\033[0m] Manage Archived Jobs")
-            print("    [\033[93mI\033[0m] Project Instructions & Agent Customization")
+            print("    [\033[93mI\033[0m] AI Instruction Settings (.md files)")
             print("    [\033[93mE\033[0m] Email Notification Settings")
             print("    [\033[93mS\033[0m] Documentation & Architecture Guides")
 
@@ -2730,34 +2958,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 
             elif choice == "c":
-                from orchestrator.project_config import load_recent_projects, remember_project
-                recent = load_recent_projects()
-                projects = recent.get("projects", [])
-                if not projects:
-                    print("No recent projects found.")
-                    input("\n\033[1;96mTap Enter to continue...\033[0m")
-                    continue
-                options = [p["name"] for p in projects]
-                options.append("Other...")
-                try:
-                    idx_label = prompt_radio("Select target project (will restart console):", options, status_bar=status_bar)
-                except BackException:
-                    continue
-
-                if idx_label is not None:
-                    idx = options.index(idx_label)
-                    if idx == len(projects):
-                        print("\nRun 'orchestrator use <path>' in your terminal to select a new project.")
-                        input("\033[1;96mTap Enter to continue...\033[0m")
-                        continue
-                    selected = projects[idx]
-                    remember_project(Path(selected["root"]), selected["name"], active=True)
-                    print(f"\nChanged target project to {selected['name']}.")
-                    print("Restarting console...")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                    if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:
-                        del os.environ["ORCHESTRATOR_PROJECT_ROOT"]
-                    os.execvp("orchestrator", ["orchestrator", "console"])
+                handle_change_target_project(status_bar)
             elif choice == "a":
                 handle_archived_jobs_menu(session_allowed_machines, session_allowed_models)
             elif choice == "i":
@@ -2786,7 +2987,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                             name = doc.stem.replace("-", " ").title()
                             if doc.parent.name == "docs":
                                 name = f"[DOCS] {name}"
-                            print(f"    [\033[1;96m{i:2}\033[0m] {name:30} \033[90m({doc.name})\033[0m")
+                            print(f"    [\033[1;96m{i:2}\033[0m] {name}")
                         
                         print("\n    [\033[1;91mB\033[0m] Back")
                         
@@ -3066,7 +3267,7 @@ def main_loop():
 
 def handle_instruction_files():
     cli_files = {
-        "Gemini CLI": "GEMINI.md",
+        "Antigravity CLI": "GEMINI.md",
         "Claude Code": "CLAUDE.md",
         "Codex": "AGENTS.md",
         "Copilot": ".github/copilot-instructions.md",
@@ -3373,6 +3574,71 @@ def handle_keychain_setup(status_bar: StatusBar):
         print("\nAfter running this once, you won't need to provide a password for background builds on this machine.")
         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 
+def handle_import_email_recipients(status_bar: StatusBar, settings_path: Path, settings: dict[str, Any], emails: list[str]) -> None:
+    clear_screen()
+    status_bar.set_scroll_region()
+    print_header("Import Recipients from CSV")
+
+    print("\033[1;97mWhat this does\033[0m")
+    print("  Scans a CSV or text file for email addresses and adds any new unique recipients.")
+    print("  The file does not need a specific column name; every email-looking value is imported.\n")
+
+    print("\033[1;97mFile Path\033[0m")
+    print("  Drag and drop a CSV file here, or type a path manually.")
+    print("  Examples:")
+    print("    \033[90m~/Downloads/testers.csv\033[0m")
+    print("    \033[90m./emails.csv\033[0m\n")
+
+    status_bar.render(at_bottom=True, force=True)
+    try:
+        csv_path = prompt_input("CSV path:", placeholder="(B or Enter to cancel)")
+    except BackException:
+        return
+    if not csv_path:
+        return
+
+    path = Path(csv_path.strip("'\"")).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+
+    if not path.exists():
+        print(f"\n\033[1;91mError: File not found.\033[0m")
+        print(f"  Path checked: \033[90m{path}\033[0m")
+        prompt = get_choice_prompt("Continue:", "(Enter)")
+        status_bar.render(at_bottom=True, force=True, prompt=prompt)
+        get_key()
+        clear_choice_placeholder()
+        return
+    
+    try:
+        content = path.read_text(encoding="utf-8")
+        found = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', content)
+        existing = {email.lower() for email in emails}
+        added_count = 0
+        for email in found:
+            email_lower = email.lower()
+            if email_lower not in existing:
+                emails.append(email_lower)
+                existing.add(email_lower)
+                added_count += 1
+        
+        print("\n\033[1;97mImport Results\033[0m")
+        print(f"  File:             \033[90m{path}\033[0m")
+        print(f"  Email candidates: \033[97m{len(found)}\033[0m")
+        if added_count > 0:
+            settings["notification_emails"] = emails
+            write_json(settings_path, settings)
+            print(f"  Added:            \033[92m{added_count} new recipient(s)\033[0m")
+        else:
+            print("  Added:            \033[93m0 new recipients; all matches were duplicates or none were found.\033[0m")
+    except Exception as ex:
+        print(f"\n\033[1;91mError reading CSV: {ex}\033[0m")
+
+    prompt = get_choice_prompt("Continue:", "(Enter)")
+    status_bar.render(at_bottom=True, force=True, prompt=prompt)
+    get_key()
+    clear_choice_placeholder()
+
 def handle_email_settings(session_allowed_machines: list[str], session_allowed_models: list[str]):
     settings_path = CONFIG_DIR / "settings.json"
     settings = {}
@@ -3448,48 +3714,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print(f"✅ Added: {email}")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i":
-                import re
-                print("\n    \033[1;96m--- Import Recipients from CSV ---\033[0m")
-                print("    (You can drag and drop a file here to paste its path)")
-                print("    Example: ~/Downloads/testers.csv or ./emails.csv")
-                try:
-                    csv_path = prompt_input("Enter path to CSV file:", placeholder="(or Enter to cancel)")
-                except BackException:
-                    continue
-                if not csv_path:
-                    print("⚠️  Import cancelled.")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                    continue
-
-                # Remove quotes if user dragged/dropped file
-                csv_path = csv_path.strip("'\"")
-                path = Path(csv_path)
-                if not path.exists():
-                    print(f"\033[1;91m    Error: File not found at {path}\033[0m")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                    continue
-                
-                try:
-                    content = path.read_text(encoding="utf-8")
-                    # Simple regex for emails
-                    found = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', content)
-                    added_count = 0
-                    for e in found:
-                        e_lower = e.lower()
-                        if e_lower not in [existing.lower() for e in emails]: # Avoid duplicates
-                            emails.append(e_lower)
-                            added_count += 1
-                    
-                    if added_count > 0:
-                        settings["notification_emails"] = emails
-                        write_json(settings_path, settings)
-                        print(f"\033[92m    Successfully imported {added_count} new email(s).\033[0m")
-                    else:
-                        print("\033[93m    No new unique email addresses found in file.\033[0m")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                except Exception as ex:
-                    print(f"\033[1;91m    Error reading CSV: {ex}\033[0m")
-                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                handle_import_email_recipients(status_bar, settings_path, settings, emails)
             elif choice == "c":
                 clear_screen()
                 print_header("Configure Email Provider")

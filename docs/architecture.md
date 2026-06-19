@@ -11,7 +11,7 @@ The orchestrator operates as a standalone CLI tool that can be integrated into a
 1.  **CLI Entry Point (`orchestrator/cli.py`)**: The primary interface for users to interact with the orchestrator.
 2.  **Project Config (`orchestrator/project_config.py`)**: Manages project-specific settings, Xcode configurations, and worker definitions.
 3.  **Agent Loop (`orchestrator/scripts/agent_loop.py`)**: The core execution engine that sequences agent tasks.
-4.  **LLM Integration (`orchestrator/scripts/llm.py`)**: Provides a unified interface to multiple AI providers (Gemini, Claude, OpenAI, Ollama).
+4.  **LLM Integration (`orchestrator/scripts/llm.py`)**: Provides a unified interface to multiple AI providers (Antigravity, Claude, OpenAI, Ollama).
 5.  **Job Management**: State is persisted in `.orchestrator/jobs/` as JSON files, allowing for asynchronous execution and recovery.
 
 ## Multi-Agent Workflow

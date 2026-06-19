@@ -188,7 +188,7 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
     
     # Dependency check for CLIs
     import shutil
-    binaries = ["gemini", "claude", "codex", "gh", "ollama", "opencode", "xcodebuild", "firebase"]
+    binaries = ["agy", "antigravity", "gemini", "claude", "codex", "gh", "ollama", "opencode", "xcodebuild", "firebase"]
     
     # Robust path checking for Apple Silicon and common installer locations
     extra_paths = ["/opt/homebrew/bin", "/usr/local/bin", os.path.expanduser("~/.npm-global/bin")]
@@ -196,6 +196,8 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
     search_path = ":".join([current_path] + extra_paths)
     
     installed_bins = {b: shutil.which(b, path=search_path) is not None for b in binaries}
+    if installed_bins.get("agy") or installed_bins.get("antigravity"):
+        installed_bins["gemini"] = True
 
     git_branch = "unknown"
     git_head_hash = "unknown"
