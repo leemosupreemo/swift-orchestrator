@@ -18,3 +18,7 @@ test_onboarding_proj/
 
 # Runtime directories generated when testing project initialization.
 .orchestrator/
+
+# Swift build artifacts and module cache
+.build/
+*.pcm

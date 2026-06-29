@@ -2,6 +2,8 @@
 
 This guide covers using the standalone package from any Swift/Xcode project.
 
+If you are new to Orchestrator, start with [Getting Started](getting-started.md) for the short overview and first-run path.
+
 ## Install
 
 Recommended CLI install:
@@ -38,6 +40,8 @@ The package has no Python runtime dependencies outside the standard library. Som
 - Remote workers: `ssh`, `scp`, `rsync`
 - AI providers: at least one of `codex`, `antigravity`, `claude`, `opencode`, `ollama`, or matching API key configuration
 - Firebase delivery: `firebase` plus a project-local distribution script
+
+Optional Codex-side MCP servers and plugins can improve repo, GitHub, iOS Simulator, Sentry, and browser inspection workflows. See [Recommended MCP Servers, Plugins, and Extensions](recommended-mcp-plugins.md).
 
 ## First-Run Wizard
 

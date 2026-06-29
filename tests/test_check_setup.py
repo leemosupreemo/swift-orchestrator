@@ -44,6 +44,9 @@ class TestCheckSetup(unittest.TestCase):
         
         self.assertIn("❌ GitHub CLI (gh)", output)
         self.assertIn("❌ CRITICAL ERROR: No AI providers found", output)
+        self.assertIn("OPTIONAL MCP / CODEX EXTENSIONS", output)
+        self.assertIn("○ GitHub MCP/plugin", output)
+        self.assertIn("recommended, not required", output)
         
         self.assertIn("💡 NEXT STEP: Create", output)
 
@@ -77,6 +80,38 @@ class TestCheckSetup(unittest.TestCase):
         self.assertIn("✅ GitHub Auth session", output)
         self.assertIn("✅ READY: At least one AI provider is configured.", output)
         self.assertIn("✅ Manual API Keys", output)
+
+    @patch("shutil.which")
+    @patch("pathlib.Path.exists")
+    @patch("subprocess.run")
+    @patch("os.environ", {"GEMINI_API_KEY": "fake_key"})
+    @patch("sys.stdout", new_callable=io.StringIO)
+    def test_check_detects_optional_codex_integrations(self, mock_stdout, mock_run, mock_exists, mock_which) -> None:
+        mock_which.side_effect = lambda x: "/usr/bin/" + x if x in ["brew", "node", "xcodebuild", "gh"] else None
+        mock_exists.side_effect = lambda: True
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        config_text = """
+[mcp_servers.xcodebuildmcp]
+command = "npx"
+[mcp_servers.playwright]
+command = "npx"
+[plugins."github@openai-curated"]
+enabled = true
+[plugins."sentry@openai-curated"]
+enabled = true
+"""
+
+        with patch("check_setup.check_file_content", return_value=True), \
+             patch("check_setup.read_codex_config_text", return_value=config_text):
+            check_setup.check()
+
+        output = mock_stdout.getvalue()
+        self.assertIn("✅ GitHub MCP/plugin", output)
+        self.assertIn("✅ XcodeBuildMCP / iOS plugin", output)
+        self.assertIn("✅ Sentry MCP/plugin", output)
+        self.assertIn("✅ Playwright MCP", output)
 
     @patch("shutil.which")
     @patch("sys.stdout", new_callable=io.StringIO)

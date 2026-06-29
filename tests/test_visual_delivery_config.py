@@ -83,6 +83,54 @@ class VisualDeliveryConfigTests(unittest.TestCase):
             self.assertIn("--project", cmd)
             self.assertIn(str(root / "SampleApp.xcodeproj"), cmd)
 
+    @patch("simulator_visual_check.plistlib.load")
+    @patch("simulator_visual_check.open", create=True)
+    @patch("pathlib.Path.exists")
+    @patch("simulator_visual_check.get_best_simulator_destination")
+    @patch("simulator_visual_check.simulator_udid")
+    @patch("simulator_visual_check.stream_command")
+    @patch("simulator_visual_check.run_simctl")
+    @patch("simulator_visual_check.write_text")
+    @patch("simulator_visual_check.time.sleep")
+    @patch("simulator_visual_check.cleanup_logs")
+    def test_visual_check_auto_resolves_bundle_id(
+        self, mock_cleanup_logs, mock_sleep, mock_write_text, mock_run_simctl, mock_stream_cmd,
+        mock_udid, mock_best_dest, mock_path_exists, mock_open_file, mock_plist_load
+    ) -> None:
+        # Mock sys.argv / argparse
+        test_args = SimpleNamespace(
+            no_build=False,
+            bundle_id="",
+            app_path="/tmp/test.app",
+            wait=3.0,
+            screenshots=1,
+            interval=1.0
+        )
+
+        mock_path_exists.return_value = True
+        mock_plist_load.return_value = {"CFBundleIdentifier": "com.test.resolved-bundle-id"}
+        mock_best_dest.return_value = "id=test-udid"
+        mock_udid.return_value = "test-udid"
+        mock_stream_cmd.return_value = True
+        mock_run_simctl.return_value = True
+
+        with (
+            patch("argparse.ArgumentParser.parse_args", return_value=test_args),
+            patch("pathlib.Path.mkdir"),
+            patch("pathlib.Path.unlink"),
+            patch("pathlib.Path.is_symlink", return_value=False),
+            patch("pathlib.Path.symlink_to"),
+        ):
+            try:
+                simulator_visual_check.main()
+            except SystemExit as e:
+                self.assertEqual(e.code, 0)
+
+            # Verify simctl launch step was called with the resolved bundle ID
+            launch_call = [call for call in mock_run_simctl.call_args_list if call[0][0][0] == "launch"]
+            self.assertTrue(len(launch_call) > 0)
+            self.assertEqual(launch_call[0][0][0][2], "com.test.resolved-bundle-id")
+
 
 if __name__ == "__main__":
     unittest.main()

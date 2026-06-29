@@ -120,6 +120,7 @@ orchestrator update --fleet  # Updates all remote workers
 
 ## 📚 Documentation
 
+- [Getting Started](docs/getting-started.md): What Orchestrator does and the first commands to run.
 - [User Guide](docs/user-guide.md): Comprehensive setup, commands, and troubleshooting.
 - [Migration Guide](docs/migration-guide.md): Transitioning from legacy local scripts.
 - [AI Workflow](docs/ai-workflow.md): Understanding the agentic lifecycle.

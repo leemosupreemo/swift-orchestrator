@@ -170,7 +170,26 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
             print("\n✨ ALL DONE.", flush=True)
             sys.exit(0)
         else:
-            print(f"\n❌ Distribution script failed with exit code {res}.", flush=True)
+            print(f"\n❌ Distribution failed (exit {res}).", flush=True)
+
+            # Diagnose common Xcode / Apple Developer login issues
+            if dist_log.exists():
+                log_content = dist_log.read_text()
+                if "Unable to log in with account" in log_content or "rejected" in log_content:
+                    print("\n\033[1;91mXcode Apple ID session needs attention\033[0m")
+                    print("Xcode could not authenticate with the Apple Developer Portal.")
+                    print("\nNext steps:")
+                    print("  1. Open Xcode > Settings > Accounts.")
+                    print("  2. Re-authenticate your Apple ID, including 2FA if prompted.")
+                    print("  3. Re-run the delivery smoke test.")
+                elif "No profiles for" in log_content or "No signing certificate" in log_content:
+                    print("\n\033[1;91mSigning setup needs attention\033[0m")
+                    print("Xcode could not find a certificate or provisioning profile for this app.")
+                    print("\nNext steps:")
+                    print("  1. Run the Dev Console signing validation checks.")
+                    print("  2. Confirm project.json has the correct Team ID and Bundle Identifier.")
+                    print("  3. Run orchestrator wizard if signing settings need to be regenerated.")
+
             send_final_notification(job, title, branch, False)
             sys.exit(res)
             

@@ -136,6 +136,133 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertTrue(prompt.endswith("\033[20D"))
         self.assertIn("\033[48;5;236m\033[90m (number or letter) ", prompt)
 
+    def test_header_string_normalizes_title_to_caps(self) -> None:
+        header = common.get_header_string("select models")
+
+        self.assertIn("SELECT MODELS", header)
+        self.assertNotIn("select models", header)
+
+    def test_header_string_keeps_parenthetical_helper_text_lowercase(self) -> None:
+        header = common.get_header_string(
+            "Load spec from a local file or web address? (useful for large multi-page docs)"
+        )
+
+        self.assertIn("LOAD SPEC FROM A LOCAL FILE OR WEB ADDRESS?", header)
+        self.assertIn("(useful for large multi-page docs)", header)
+        self.assertNotIn("(USEFUL FOR LARGE MULTI-PAGE DOCS)", header)
+
+    @patch("common.sys.stdout.isatty", return_value=True)
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_progress_indicator_hides_cursor_while_rendering(self, mock_write, _mock_flush, _mock_isatty) -> None:
+        indicator = common.ProgressIndicator()
+
+        indicator.render(force=True)
+        indicator.clear()
+
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("\033[?25l", written)
+        self.assertIn("\033[?25h", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.sys.stdout.isatty", return_value=True)
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_processing_status_bar_hides_cursor_until_reset(
+        self, mock_write, _mock_flush, _mock_stdout_isatty, _mock_stdin_isatty
+    ) -> None:
+        status_bar = common.StatusBar(is_processing=True)
+
+        status_bar.set_scroll_region()
+        status_bar.reset_scroll_region()
+
+        writes = [call.args[0] for call in mock_write.call_args_list]
+        self.assertTrue(writes[0].startswith("\033[?25l"))
+        self.assertIn("\033[?25h", writes[-1])
+
+    @patch("common.StatusBar._get_branch", return_value="main")
+    @patch("common.StatusBar._get_size", return_value=(100, 24))
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_status_bar_prompt_has_compact_pipe_spacing(
+        self, mock_write, _mock_flush, _mock_size, _mock_branch
+    ) -> None:
+        status_bar = common.StatusBar(sub_menu=True)
+
+        status_bar.render(force=True)
+
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn(" B to go back | dir:", written)
+        self.assertNotIn(" B to go back       | dir:", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_radio_prompt_uses_aligned_selector_gutter(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        options = [
+            "✨ Brand New Feature (Design-First)",
+            "🛠️ Iterating / Small Refactor (Plan or Quick Mode)",
+        ]
+
+        choice = common.prompt_radio("Select Job Type:", options, default=options[1])
+
+        self.assertEqual(choice, options[1])
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("\033[?25l\033[r\033[2J\033[H", written)
+        self.assertIn("(Arrows: navigate, Enter: select, B: back)\033[0m\n\n", written)
+        self.assertIn("  [ ]  ✨ Brand New Feature", written)
+        self.assertIn("> [x]  🛠️ Iterating", written)
+        self.assertIn("\033[J", written)
+        self.assertIn("Choice: \033[1;96m🛠️ Iterating / Small Refactor", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_confirm_prompt_uses_plain_banner_title(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        result = common.prompt_confirm("Load spec from a local file or web address?", default=False)
+
+        self.assertFalse(result)
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("LOAD SPEC FROM A LOCAL FILE OR WEB ADDRESS?", written)
+        self.assertNotIn("\033[1;97mLoad spec", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_footer_actions_are_visible_above_options(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        footer = "[R] Sync Registry  [D] Live Discovery  [B] Back"
+
+        common.prompt_checkbox("select models", ["model-a"], ["model-a"], footer=footer)
+
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertLess(written.index(footer), written.index("model-a"))
+        self.assertIn("(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m\n\n", written)
+        self.assertIn(f"{footer}\n\n", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_max_selection_line_shows_selected_count(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        common.prompt_checkbox("active machines", ["macair"], ["macair"], max_selections=10)
+
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("Selected machines:", written)
+        self.assertIn("1 of 10", written)
+        self.assertIn("machine limit", written)
+        self.assertNotIn("Fleet limit:", written)
+
     @patch("common.sys.stdin.isatty", return_value=True)
     @patch("common.get_key")
     @patch("sys.stdout.write")

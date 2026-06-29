@@ -163,6 +163,7 @@ class ProjectConfig:
     remote_package_install_path: str = "~/.orchestrator/package"
     firebase_distribution: bool = False
     notification_display_name: str = ""
+    signing_style: str | None = None
 
     @property
     def config_dir(self) -> Path:
@@ -177,16 +178,19 @@ class ProjectConfig:
             errors.append("Distribution method (delivery_method) is not set (e.g., 'ad-hoc' or 'development').")
         
         # Check for either ASC keys OR a confirmed local account setup via provisioning profile
-        has_asc_keys = all([self.asc_key_id, self.asc_issuer_id, self.asc_key_path])
-        has_manual_profile = bool(self.provisioning_profile_specifier)
+        # Only if signing style is not automatic
+        signing_style = self.signing_style or "automatic"
+        if signing_style != "automatic":
+            has_asc_keys = all([self.asc_key_id, self.asc_issuer_id, self.asc_key_path])
+            has_manual_profile = bool(self.provisioning_profile_specifier)
 
-        if not has_asc_keys and not has_manual_profile:
-            errors.append(
-                "Neither App Store Connect API keys nor a manual Provisioning Profile Specifier are configured. "
-                "For automated builds, providing ASC API keys is highly recommended to avoid 'No Accounts' errors."
-            )
-        elif any([self.asc_key_id, self.asc_issuer_id, self.asc_key_path]) and not has_asc_keys:
-             errors.append("App Store Connect API keys are partially configured. Please provide all three (ID, Issuer, Path).")
+            if not has_asc_keys and not has_manual_profile:
+                errors.append(
+                    "Neither App Store Connect API keys nor a manual Provisioning Profile Specifier are configured. "
+                    "For automated builds, providing ASC API keys is highly recommended to avoid 'No Accounts' errors."
+                )
+            elif any([self.asc_key_id, self.asc_issuer_id, self.asc_key_path]) and not has_asc_keys:
+                 errors.append("App Store Connect API keys are partially configured. Please provide all three (ID, Issuer, Path).")
         
         return errors
 
@@ -253,6 +257,7 @@ def load_project_config() -> ProjectConfig:
         remote_package_install_path=data.get("remote_package_install_path", "~/.orchestrator/package"),
         firebase_distribution=bool(data.get("firebase_distribution", False)),
         notification_display_name=data.get("notification_display_name", f"{project_name} AI Orchestrator"),
+        signing_style=data.get("signing_style", "automatic"),
     )
 
 

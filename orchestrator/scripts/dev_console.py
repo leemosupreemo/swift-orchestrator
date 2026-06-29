@@ -31,7 +31,7 @@ from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
-from orchestrator.project_config import PROJECT_CONFIG
+from orchestrator.project_config import PACKAGE_ROOT, PROJECT_CONFIG
 
 from orchestrator import __version__
 
@@ -202,7 +202,48 @@ def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
 
     # New compact layout: [ID] | Type | Status | Title | Logs
     return f"{format_index(f'{idx:2}')} | {type_str} | {color}{short_status:6}{reset} | {title:{title_width}} | {log_display}"
-def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None) -> int:
+
+def script_failure_summary(output_log: str) -> str | None:
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+    lines = [ansi_re.sub("", line).strip() for line in output_log.splitlines()]
+    lines = [line for line in lines if line]
+
+    diagnostic_titles = {
+        "Signing setup needs attention",
+        "Xcode Apple ID session needs attention",
+    }
+    for idx, line in enumerate(lines):
+        if line not in diagnostic_titles:
+            continue
+        summary_lines = [line]
+        for follow in lines[idx + 1:idx + 9]:
+            if follow == "Next steps:":
+                continue
+            if follow.startswith("Triggering final") or follow.startswith("- Sending notifications"):
+                break
+            summary_lines.append(follow)
+            if len(summary_lines) >= 5:
+                break
+        return "\n".join(summary_lines)
+
+    generic_failure_patterns = (
+        "❌ Distribution failed",
+        "❌ Distribution script failed",
+        "❌ Smoke delivery failed",
+        "❌ SMOKE TEST FAILED",
+    )
+    error_lines = []
+    for line in lines:
+        if line.startswith(generic_failure_patterns):
+            continue
+        if "❌" in line or line.lower().startswith("error:") or "exception:" in line.lower():
+            if line not in error_lines:
+                error_lines.append(line)
+    if error_lines:
+        return "\n".join(error_lines[:5])
+    return None
+
+def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None) -> tuple[int, str]:
     if job:
         job["online_machines"] = get_online_machines(job.get("allowed_machines", []))
     else:
@@ -217,6 +258,7 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
     last_render = 0.0
     last_output_time = time.monotonic()
     indicator = ProgressIndicator(label="Thinking", hint="Ctrl-C to abort")
+    output_chunks = []
 
     with StatusBar(job, is_processing=True, sub_menu=sub_menu) as status_bar:
         if show_status_bar:
@@ -282,6 +324,7 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                         if chunk:
                             last_output_time = time.monotonic()
                             data = chunk.decode("utf-8", errors="replace")
+                            output_chunks.append(data)
                             
                             # Safety: Force cursor back into scroll region (bottom line)
                             # before printing remote logs. This prevents 'last line only' bug
@@ -307,6 +350,7 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                         if not chunk:
                             break
                         data = chunk.decode("utf-8", errors="replace")
+                        output_chunks.append(data)
                         indicator.clear()
                         sys.stdout.write(data)
                         sys.stdout.flush()
@@ -321,7 +365,7 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                 status_bar.clear_footer()
                 status_bar.reset_scroll_region()
 
-    return process.returncode or 0
+    return process.returncode or 0, "".join(output_chunks)
 
 def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None, prompt: str | None = None):
     import shlex
@@ -342,10 +386,15 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
                 test_targets.append(part.split()[0].strip())
 
     if test_targets:
+        try:
+            cols, _ = os.get_terminal_size()
+        except Exception:
+            cols = 80
+        box_width = max(45, min(60, cols - 2))
         target_str = ", ".join(test_targets)
-        print("\033[1;95m" + "★"*60)
+        print("\033[1;95m" + "★" * box_width)
         print(f"  🧪 TESTS CHOSEN TO BE RUN: {target_str}")
-        print("★"*60 + "\033[0m\n")
+        print("★" * box_width + "\033[0m\n")
 
     returncode = 1
     try:
@@ -371,13 +420,12 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
             if sub_menu:
                 sub_env["AI_PROGRESS_SILENT"] = "1"
             returncode = subprocess.run(cmd, cwd=str(ROOT), stdin=sys.stdin, stdout=None, stderr=None, env=sub_env).returncode
+            output_log = ""
         else:
-            returncode = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)
+            returncode, output_log = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)
             
         if returncode != 0:
-            print("\n" + "\033[1;91m" + "!"*60)
-            print("  🚨  SCRIPT FAILURE DETECTED (Code " + str(returncode) + ")  🚨")
-            print("!"*60 + "\033[0m")
+            print(f"\n\033[1;91mScript failed (exit {returncode}).\033[0m")
 
             # Try to provide a succinct summary
             summary = None
@@ -396,12 +444,26 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
                         if match:
                             summary = "Blocker: " + match.group(1).strip()
 
+            # 2. Extract diagnostics or error lines from the output log if no summary found
+            if not summary and output_log:
+                summary = script_failure_summary(output_log)
+                if not summary:
+                    lines = [line.strip() for line in output_log.splitlines() if line.strip()]
+                    if lines:
+                        recent_lines = []
+                        for line in reversed(lines):
+                            if len(recent_lines) >= 5:
+                                break
+                            if line.startswith("$ ") or "progress" in line.lower():
+                                continue
+                            recent_lines.insert(0, line)
+                        if not recent_lines:
+                            recent_lines = lines[-5:]
+                        summary = "Recent output:\n  " + "\n  ".join(recent_lines)
+
             if summary:
-                print("\n\033[1;93m", end="")
-                print_divider("-")
-                print(f"🔍 FAILURE SUMMARY:\n{summary}")
-                print_divider("-")
-                print("\033[0m", end="")
+                print("\n\033[1;93mFailure summary\033[0m")
+                print(summary)
             else:
                 print("\n\033[90m(No detailed summary available from artifacts)\033[0m")
         else:
@@ -657,7 +719,7 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                     "[\033[1;91mB\033[0m] Back",
                 ]
                 new_allowed = prompt_checkbox(
-                    "\033[1;97mActive Machines for This Session\033[0m",
+                    "Active Machines for This Session",
                     machine_names,
                     session_allowed_machines,
                     extra_keys=["d", "n", "z", "b"],
@@ -844,6 +906,100 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
             else:
                 error_msg = f"'{choice}'"
 
+def check_origin_update_status(pkg_dir: Path) -> dict[str, Any]:
+    """Best-effort check for remote package updates without changing the worktree."""
+    try:
+        subprocess.run(
+            ["git", "fetch", "--quiet", "origin"],
+            cwd=str(pkg_dir),
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(pkg_dir),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        if not branch or branch == "HEAD":
+            return {"state": "unknown", "reason": "Current checkout is detached."}
+
+        remote_ref = f"origin/{branch}"
+        counts = subprocess.check_output(
+            ["git", "rev-list", "--left-right", "--count", f"HEAD...{remote_ref}"],
+            cwd=str(pkg_dir),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip().split()
+        ahead = int(counts[0])
+        behind = int(counts[1])
+        if behind == 0:
+            return {"state": "current", "ahead": ahead, "behind": behind, "remote_ref": remote_ref}
+        if ahead:
+            return {"state": "diverged", "ahead": ahead, "behind": behind, "remote_ref": remote_ref}
+        return {"state": "behind", "ahead": ahead, "behind": behind, "remote_ref": remote_ref}
+    except Exception as e:
+        return {"state": "unknown", "reason": str(e)}
+
+DOC_MENU_DESCRIPTIONS = {
+    "getting-started.md": "Start here: what Orchestrator does and the first commands to run.",
+    "user-guide.md": "Full setup, project selection, commands, and troubleshooting.",
+    "dev-console.md": "How to use the interactive console and common job actions.",
+    "ai-workflow.md": "How planning, building, review, and verification fit together.",
+    "recommended-mcp-plugins.md": "Optional MCP servers, plugins, and extensions that improve workflows.",
+    "architecture.md": "Internal architecture for contributors and maintainers.",
+    "build-test-commands.md": "Canonical build and test commands agents should use.",
+    "coding-standards.md": "Repo conventions for code style, testing, and docs.",
+    "migration-guide.md": "Moving from older local scripts to the package workflow.",
+    "README.md": "Project overview, install, features, and quick start.",
+    "AGENTS.md": "Instructions coding agents should follow in this repo.",
+    "AI_AGENT_SETUP.md": "Project-specific AI agent setup notes.",
+}
+
+DOC_MENU_ORDER = [
+    "getting-started.md",
+    "user-guide.md",
+    "dev-console.md",
+    "ai-workflow.md",
+    "recommended-mcp-plugins.md",
+    "architecture.md",
+    "build-test-commands.md",
+    "coding-standards.md",
+    "migration-guide.md",
+    "README.md",
+    "AGENTS.md",
+    "AI_AGENT_SETUP.md",
+]
+
+ORCHESTRATOR_HELP_DOCS_DIR = PACKAGE_ROOT.parent / "docs"
+ORCHESTRATOR_HELP_DOC_NAMES = [
+    "getting-started.md",
+    "user-guide.md",
+    "recommended-mcp-plugins.md",
+]
+
+def doc_menu_sort_key(path: Path) -> tuple[int, str]:
+    try:
+        idx = DOC_MENU_ORDER.index(path.name)
+    except ValueError:
+        idx = len(DOC_MENU_ORDER)
+    return idx, path.name.lower()
+
+def doc_menu_display_name(path: Path) -> str:
+    name = path.stem.replace("-", " ").title()
+    try:
+        parent = path.parent.resolve()
+    except Exception:
+        parent = path.parent
+    if parent == ORCHESTRATOR_HELP_DOCS_DIR.resolve():
+        return f"[HELP] {name}"
+    if path.parent.name == "docs":
+        return f"[DOCS] {name}"
+    return name
+
 def handle_update_orchestrator(session_allowed_machines: list[str]):
     clear_screen()
     print_header("Update Orchestrator")
@@ -857,7 +1013,29 @@ def handle_update_orchestrator(session_allowed_machines: list[str]):
     
     if is_git:
         print("\n  \033[1;96mGit Repository detected.\033[0m")
-        if prompt_confirm("Pull latest changes from origin and re-install locally?", default=True):
+        print("  Checking origin for updates...")
+        update_status = check_origin_update_status(pkg_dir)
+        state = update_status.get("state")
+        should_update = False
+
+        if state == "current":
+            ahead = update_status.get("ahead", 0)
+            suffix = f" Local branch is {ahead} commit(s) ahead." if ahead else ""
+            print(f"  \033[92mAlready up to date with {update_status.get('remote_ref', 'origin')}.\033[0m{suffix}")
+        elif state == "behind":
+            behind = update_status.get("behind", 0)
+            print(f"  \033[1;93m{behind} update(s) available from {update_status.get('remote_ref', 'origin')}.\033[0m")
+            should_update = prompt_confirm("Pull available updates and re-install locally?", default=True)
+        elif state == "diverged":
+            ahead = update_status.get("ahead", 0)
+            behind = update_status.get("behind", 0)
+            print(f"  \033[1;93mRemote has {behind} update(s), and this branch has {ahead} local commit(s).\033[0m")
+            should_update = prompt_confirm("Pull from origin anyway and re-install locally?", default=False)
+        else:
+            print(f"  \033[1;93mCould not check origin automatically: {update_status.get('reason', 'unknown error')}\033[0m")
+            should_update = prompt_confirm("Pull latest changes from origin and re-install locally?", default=True)
+
+        if should_update:
             print("\n  Updating local package...")
             try:
                 subprocess.run(["git", "pull"], cwd=str(pkg_dir), check=False)
@@ -2419,8 +2597,8 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
         }, sub_menu=True) as status_bar:
             status_bar.set_scroll_region()
 
-            print_header("AI Provider API Keys & Logins")
-            print("\033[90mAccess to models is provided via logged-in CLIs (preferred) or manual keys.\033[0m\n")
+            print_header("AI Provider Access")
+            print("\033[90mAccess is checked through provider CLIs first; saved credentials are fallback only.\033[0m\n")
 
             # Gather Status Data using cached CLI statuses
             providers = [
@@ -2433,7 +2611,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             ]
 
             # Table Header - Narrower for better responsiveness
-            header = f"{'Provider / Tool':18} | {'CLI Status':13} | {'Manual Key':13} | {'Access'}"
+            header = f"{'Provider / Tool':18} | {'CLI Readiness':18} | {'Credential Source':18} | {'Access'}"
             print(f"\033[1;97m{header}\033[0m")
             print_divider("-")
 
@@ -2442,42 +2620,58 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 
                 # 1. CLI Column
                 if status == "Checking...":
-                    cli_display = f"\033[93m{status:13}\033[0m"
+                    raw_cli_status = "Checking..."
+                    cli_display = f"\033[93m{raw_cli_status:18}\033[0m"
                     cli_ready = False
                 elif status in ["Logged In", "Ready", "Running"]:
-                    cli_display = f"\033[92m{status:13}\033[0m"
+                    raw_cli_status = {
+                        "Logged In": "Signed in",
+                        "Ready": "CLI ready",
+                        "Running": "Local service up",
+                    }[status]
+                    cli_display = f"\033[92m{raw_cli_status:18}\033[0m"
                     cli_ready = True
                 elif status == "Not Installed":
-                    cli_display = f"\033[90m{status:13}\033[0m"
+                    raw_cli_status = "Not installed"
+                    cli_display = f"\033[90m{raw_cli_status:18}\033[0m"
+                    cli_ready = False
+                elif status == "Not Logged In":
+                    raw_cli_status = "Sign in needed"
+                    cli_display = f"\033[1;91m{raw_cli_status:18}\033[0m"
+                    cli_ready = False
+                elif status == "Offline":
+                    raw_cli_status = "Service offline"
+                    cli_display = f"\033[1;91m{raw_cli_status:18}\033[0m"
                     cli_ready = False
                 else:
-                    cli_display = f"\033[1;91m{status:13}\033[0m"
+                    raw_cli_status = "Check failed"
+                    cli_display = f"\033[1;91m{raw_cli_status:18}\033[0m"
                     cli_ready = False
 
-                # 2. Key Column
+                # 2. Credential Column
                 key_ready = False
-                raw_key_status = "Not Set"
+                raw_key_status = "No fallback"
                 key_color = "\033[90m" # Default grey
 
                 if p["key_id"]:
                     current_key = settings.get(p["key_id"], "")
                     if current_key:
-                        raw_key_status = "Active"
+                        raw_key_status = "Saved fallback"
                         key_color = "\033[92m" # Green
                         key_ready = True
                     elif p["key_id"].upper() in os.environ:
-                        raw_key_status = "Environment"
+                        raw_key_status = "Env fallback"
                         key_color = "\033[1;96m" # Blue
                         key_ready = True
                     elif cli_ready:
-                        raw_key_status = "Delegated"
+                        raw_key_status = "Using CLI login"
                         key_color = "\033[1;96m" # Cyan
                         key_ready = False
                 else:
-                    raw_key_status = "N/A"
+                    raw_key_status = "CLI only"
                     key_color = "\033[90m"
 
-                key_display = f"{key_color}{raw_key_status:13}\033[0m"
+                key_display = f"{key_color}{raw_key_status:18}\033[0m"
 
                 # 3. Overall Ready Column
                 if cli_ready or key_ready:
@@ -2489,18 +2683,15 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 
                 print(f"{p['label']:18} | {cli_display} | {key_display} | {ready_display}")
 
-            print()
-            print(f"\033[1;90mStatus Key:\033[0m")
-            print(f"  \033[92mLogged In/Ready\033[0m: CLI authenticated/ready       | \033[92mActive\033[0m: Key saved in settings.json")
-            print(f"  \033[1;96mEnvironment\033[0m: Key set via shell env var       | \033[1;96mDelegated\033[0m: Auth handled via active CLI")
+            print("\n\033[90mCLI readiness shows whether the local tool can run now. Credential source only matters when CLI auth is unavailable.\033[0m")
 
             print_header("ACTIONS")
             
             # Single-column Layout for Actions
-            print(f"  \033[1;96mManual Key Updates\033[0m")
-            print(f"    [\033[1;92mG\033[0m] Update Antigravity Key")
-            print(f"    [\033[1;92mA\033[0m] Update Anthropic Key")
-            print(f"    [\033[1;92mO\033[0m] Update OpenAI Key")
+            print(f"  \033[1;96mFallback Credentials\033[0m")
+            print(f"    [\033[1;92mG\033[0m] Update Antigravity credential")
+            print(f"    [\033[1;92mA\033[0m] Update Anthropic credential")
+            print(f"    [\033[1;92mO\033[0m] Update OpenAI credential")
 
             print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
             print(f"    [\033[1;92m1\033[0m] Login Antigravity")
@@ -2510,8 +2701,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             print(f"    [\033[1;92m5\033[0m] Login OpenCode")
 
             print_header("MANAGEMENT")
-            print(f"    [\033[1;91mC\033[0m] Clear Saved Keys")
-            print(f"    [\033[1;91mB\033[0m] Back")
+            print(f"    [\033[1;91mC\033[0m] Clear saved credentials")
 
             # If we are loading statuses for the first time, render the loading indicator,
             # wait for threads, and redraw immediately.
@@ -2760,7 +2950,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             print("\033[1;97mRecent Projects\033[0m")
             print("  No recent projects found.\n")
             print("\033[1;97mActions\033[0m")
-            print("  [\033[1;92mA\033[0m] Add Project Path")
+            print("  [\033[1;92mA\033[0m] Add Project")
             print("  [\033[1;91mB\033[0m] Back")
 
             prompt = get_choice_prompt("Choice:", "(A/B)")
@@ -2771,29 +2961,29 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
                 return
         else:
             print("\033[1;97mRecent Projects\033[0m")
-            print("\033[90mUse arrows to inspect projects, Enter to switch, A to add project, B to go back.\033[0m\n")
+            print("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m\n")
 
             for idx, project in enumerate(projects):
                 is_selected = idx == selected_idx
                 is_active = project.get("name") == active_name
-                cursor = "> " if is_selected else "  "
+                cursor = ">" if is_selected else " "
+                icon = "[x]" if is_selected else "[ ]"
+                prefix = f"{cursor} {icon}  "
                 active_marker = " \033[92m(active)\033[0m" if is_active else ""
                 name = project.get("name", "Unnamed Project")
-                root = project.get("root", "unknown")
                 if is_selected:
-                    print(f"\033[1;97;48;5;25m{cursor}{name}{active_marker}\033[K\033[0m")
+                    hl = "\033[1;97;48;5;25m"
+                    res = "\033[0m"
+                    marker = active_marker.replace(res, hl)
+                    print(f"{hl}{prefix}{name}{marker}\033[K{res}")
                 else:
-                    print(f"{cursor}{name}{active_marker}")
-                print(f"    \033[90mRoot: {root}\033[0m")
-                print("    \033[90mAction: Restart console with this project selected.\033[0m")
+                    print(f"{prefix}{name}{active_marker}")
 
             print("\n\033[1;97mActions\033[0m")
-            print("  [\033[1;92mEnter\033[0m] Switch to highlighted project")
-            print("  [\033[1;92mA\033[0m] Add Project Path")
-            print("  [\033[1;92mO\033[0m] Show add-project command help")
-            print("  [\033[1;91mB\033[0m] Back")
+            print("  [\033[1;92mA\033[0m] Add Project")
+            print("  [\033[1;92mO\033[0m] Other ways to add projects")
 
-            prompt = get_choice_prompt("Choice:", "(arrows/enter/A/O/B)")
+            prompt = get_choice_prompt("Choice:", "(action)")
             status_bar.render(at_bottom=True, force=True, prompt=prompt)
             key = get_key().strip().lower()
             clear_choice_placeholder()
@@ -2809,10 +2999,14 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             if key == "o":
                 clear_screen()
                 status_bar.set_scroll_region()
-                print_header("Add Target Project CLI Help")
-                print("Run one of these commands from a terminal, then return to this menu:\n")
-                print("  \033[1;96morchestrator use /path/to/project\033[0m")
-                print("  \033[1;96morchestrator init --project /path/to/project\033[0m")
+                print_header("Add Target Project")
+                print("\033[1;97mRecommended\033[0m")
+                print("  Press \033[1;92mA\033[0m from the project menu, then paste or drag the project folder path.")
+                print("  The console will add it to Recent Projects and switch to it after you confirm.\n")
+                print("\033[1;97mTerminal alternative\033[0m")
+                print("  Run one of these from any terminal, then return to this menu:\n")
+                print("    \033[1;96morchestrator use /path/to/project\033[0m")
+                print("    \033[1;96morchestrator init --project /path/to/project\033[0m")
                 prompt = get_choice_prompt("Continue:", "(Enter)")
                 status_bar.render(at_bottom=True, force=True, prompt=prompt)
                 get_key()
@@ -2835,11 +3029,12 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
         if key == "a":
             clear_screen()
             status_bar.set_scroll_region()
-            print_header("Add Project Path")
-            print("Register a project by specifying its absolute or relative path.")
-            print("  Examples:")
-            print("    \033[90m~/projects/my-ios-app\033[0m")
-            print("    \033[90m./my-ios-app\033[0m\n")
+            print_header("Add Target Project")
+            print("Paste or drag the project folder path here.")
+            print("Relative paths are resolved from the current active project.\n")
+            print("\033[1;97mExamples\033[0m")
+            print("  \033[90m~/projects/my-ios-app\033[0m")
+            print("  \033[90m./my-ios-app\033[0m\n")
             status_bar.render(at_bottom=True, force=True)
             try:
                 path_str = prompt_input("Project path:", placeholder="(Enter to cancel)")
@@ -3026,7 +3221,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             elif choice == "a":
                 handle_archived_jobs_menu(session_allowed_machines, session_allowed_models)
             elif choice == "i":
-                handle_instruction_files()
+                handle_instruction_files(session_allowed_machines, session_allowed_models)
             elif choice == "d":
                 handle_firebase_distro(session_allowed_machines, session_allowed_models)
             elif choice == "s":
@@ -3039,19 +3234,24 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     }, sub_menu=True) as status_bar:
                         status_bar.set_scroll_region()
                         print_header("Documentation & Architecture Guides")
-                        print("  Select a guide to read in your terminal:\n")
+                        print("  New here? Start with Getting Started, then User Guide.\n")
                         
-                        docs = sorted(list(DOCS_DIR.glob("*.md")))
+                        docs = list(DOCS_DIR.glob("*.md"))
+                        help_docs = [
+                            ORCHESTRATOR_HELP_DOCS_DIR / name
+                            for name in ORCHESTRATOR_HELP_DOC_NAMES
+                            if (ORCHESTRATOR_HELP_DOCS_DIR / name).exists()
+                        ]
                         # Add some common root files too
                         root_docs = [ROOT / "README.md", ROOT / "AGENTS.md", ROOT / "AI_AGENT_SETUP.md"]
-                        all_docs = docs + [d for d in root_docs if d.exists()]
+                        all_docs = sorted(help_docs + docs + [d for d in root_docs if d.exists()], key=doc_menu_sort_key)
                         
                         for i, doc in enumerate(all_docs):
-                            # Pretty name
-                            name = doc.stem.replace("-", " ").title()
-                            if doc.parent.name == "docs":
-                                name = f"[DOCS] {name}"
+                            name = doc_menu_display_name(doc)
+                            description = DOC_MENU_DESCRIPTIONS.get(doc.name)
                             print(f"    [\033[1;96m{i:2}\033[0m] {name}")
+                            if description:
+                                print(f"         \033[90m{description}\033[0m")
                         
                         print("\n    [\033[1;91mB\033[0m] Back")
                         
@@ -3172,7 +3372,8 @@ def main_loop():
                 print_header("AI Job History")
                 jobs = list_jobs()
                 if not jobs:
-                    print("No jobs found in ai/jobs/")
+                    print("No jobs found in ai/jobs/.")
+                    print("Create a new job to populate this history.")
                 else:
                     # Responsive width calculation
                     try:
@@ -3329,7 +3530,10 @@ def main_loop():
         except BackException:
             continue
 
-def handle_instruction_files():
+def handle_instruction_files(session_allowed_machines: list[str] | None = None, session_allowed_models: list[str] | None = None):
+    session_allowed_machines = session_allowed_machines or []
+    session_allowed_models = session_allowed_models or []
+
     cli_files = {
         "Antigravity CLI": "GEMINI.md",
         "Claude Code": "CLAUDE.md",
@@ -3379,8 +3583,8 @@ Read these files first and treat them as authoritative:
             status_bar.set_scroll_region()
 
             print_header("Manage CLI Instructions (.md files)")
-            print("  This menu ensures that the individual default md files for each")
-            print("  model/CLI are properly created and pointing towards the universal md files.\n")
+            print("  Checks the instruction files used by each AI CLI.")
+            print("  Each file should point agents back to the shared project docs.\n")
             
             keys = list(cli_files.keys())
             file_statuses = {}

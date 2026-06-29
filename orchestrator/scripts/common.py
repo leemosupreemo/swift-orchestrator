@@ -306,6 +306,17 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
     sys.stdout.write("\033[?25l")
     sys.stdout.flush()
 
+    def render_radio_option(option: str, option_idx: int, selected_idx: int, highlighted: bool = True) -> str:
+        cursor = ">" if option_idx == selected_idx else " "
+        icon = "[x]" if option_idx == selected_idx else "[ ]"
+        prefix = f"{cursor} {icon}  "
+        line = f"{prefix}{option}"
+        if highlighted and option_idx == selected_idx:
+            hl = "\033[1;97;48;5;25m"
+            res = "\033[0m"
+            line = f"{hl}{prefix}{option.replace(res, hl)}\033[K{res}"
+        return line
+
     try:
         first_render = True
         num_rendered_lines = 0
@@ -314,10 +325,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             # 1. Clear screen (flickery but safe)
             # 2. OR move cursor back up (smooth but requires knowing height)
             if clear_screen:
-                sys.stdout.write("\033[r\033[?25h\033[0m\r")
-                sys.stdout.flush()
-                os.system("clear" if os.name != "nt" else "cls")
-                sys.stdout.write("\033[?25l")
+                sys.stdout.write("\033[?25l\033[r\033[2J\033[H")
                 sys.stdout.flush()
             elif not first_render:
                 # Move up by the number of lines we printed last time
@@ -326,23 +334,13 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             output = []
             output.append(get_header_string(label))
             output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
+            output.append("")
 
             for i, opt in enumerate(options):
                 if opt.startswith("---"):
                     output.append(f"  \033[1;90m{opt}\033[0m")
                     continue
-                cursor = "> " if i == idx else "  "
-                icon = "(*)" if i == idx else "( )"
-                line = f"{cursor}{icon} {opt}"
-                if i == idx:
-                    # White text on Navy Blue background for the active row (consistent with status bar)
-                    hl = "\033[1;97;48;5;25m"
-                    res = "\033[0m"
-                    # Ensure reset codes inside 'opt' don't break the whole row highlight
-                    opt_fixed = opt.replace(res, hl)
-                    # \033[K ensures the background color extends to the end of the terminal line
-                    line = f"{hl}{cursor}{icon} {opt_fixed}\033[K{res}"
-                output.append(line)
+                output.append(render_radio_option(opt, i, idx))
 
             # Print current choice placeholder at the bottom
             try:
@@ -379,26 +377,9 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                     # Print ONLY the final choice concisely
                     print(f"Choice: \033[1;96m{options[idx]}\033[0m")
                 else:
-                    # Final render without blue highlight to avoid double-blue-highlights on screen
-                    sys.stdout.write(f"\r\033[{num_rendered_lines}A")
-                    final_render = []
-                    final_render.append(f"\n{label}")
-                    final_render.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
-                    for i, opt in enumerate(options):
-                        if opt.startswith("---"):
-                            final_render.append(f"  \033[1;90m{opt}\033[0m")
-                            continue
-                        cursor = "> " if i == idx else "  "
-                        icon = "(*)" if i == idx else "( )"
-                        final_render.append(f"{cursor}{icon} {opt}")
-                    
-                    try:
-                        cols, _ = os.get_terminal_size()
-                    except:
-                        cols = 80
-                    final_render.append("-" * (cols - 2))
-                    final_render.append(f"Choice: \033[1;96m{options[idx]}\033[0m")
-                    sys.stdout.write("\n".join(final_render) + "\n")
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
+                    sys.stdout.flush()
+                    print(f"Choice: \033[1;96m{options[idx]}\033[0m")
                 break
             elif len(key) == 1 and key.lower() == "b": # Back
                 if not clear_screen:
@@ -406,7 +387,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                     sys.stdout.write(f"\r\033[{num_rendered_lines-1}A\033[J")
                     sys.stdout.flush()
                 else:
-                    sys.stdout.write("\n")
+                    sys.stdout.write(f"\r\033[{num_rendered_lines}A\033[J")
                 raise BackException()
             elif key == "up" or key == "k":
                 idx = (idx - 1) % len(options)
@@ -428,13 +409,9 @@ def prompt_confirm(question: str, default: bool = True) -> bool:
     if question.startswith("Would you Would you"):
         question = "Would you" + question[len("Would you Would you"):]
     
-    # Use standard white/gray for questions to follow conventions
-    # Blue is reserved for highlighted options in multiselect menus
-    formatted_question = f"\033[1;97m{question}\033[0m"
-
     default_str = "yes" if default else "no"
 
-    choice = prompt_radio(formatted_question, ["yes", "no"], default_str, clear_screen=False)
+    choice = prompt_radio(question, ["yes", "no"], default_str)
     return choice == "yes"
 
 def prompt_multiline(prompt: str) -> str:
@@ -663,6 +640,10 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             # 1. Print Header
             output.append(get_header_string(label))
             output.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
+            output.append("")
+            if footer:
+                output.append(footer)
+                output.append("")
             
             if error_msg:
                 output.append(f"\033[1;91m      ⚠️  {error_msg}\033[0m")
@@ -692,7 +673,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             
             # Max selections disclaimer
             if max_selections:
-                output.append(f"  \033[90m(Fleet limit: {max_selections} active machines max)\033[0m")
+                output.append(f"\033[1;97mSelected machines:\033[0m \033[1;96m{len(selected_indices)} of {max_selections}\033[0m \033[90mmachine limit\033[0m")
             # 3. Print details for current selection
             if details_map:
                 current_option = options[idx]
@@ -714,8 +695,6 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 output.append("\033[1;97mActions\033[0m")
                 for action in footer_actions:
                     output.append(f"  {action}")
-            elif footer:
-                output.append(f"\n{footer}")
             
             # 5. Print Bottom UI
             try:
@@ -755,8 +734,12 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     # Final render without blue highlight
                     sys.stdout.write(f"\r\033[{num_rendered_lines}A")
                     final_render = []
-                    final_render.append(f"\n{label}")
+                    final_render.append(get_header_string(label))
                     final_render.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
+                    final_render.append("")
+                    if footer:
+                        final_render.append(footer)
+                        final_render.append("")
                     for i, opt in enumerate(options):
                         if opt.startswith("---"):
                             final_render.append(f"  \033[1;90m{opt}\033[0m")
@@ -768,8 +751,6 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                         final_render.append("\033[1;97mActions\033[0m")
                         for action in footer_actions:
                             final_render.append(f"  {action}")
-                    elif footer:
-                        final_render.append(f"\n{footer}")
                     final_render.append("-" * (cols - 2))
                     final_render.append(f"Choice: \033[1;96m{len(selected_indices)} selected\033[0m")
                     sys.stdout.write("\n".join(final_render) + "\n")
@@ -964,10 +945,25 @@ class ProgressIndicator:
         self.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.frame_idx = 0
         self.last_render_time = 0.0
+        self._cursor_hidden = False
         # Silent mode ONLY if we are being called by a worker/orchestrator
         # 'dev_console' is the UI parent and should NOT be silent,
         # UNLESS specifically requested (e.g. to avoid double spinners).
         self.is_silent = os.environ.get("AI_REQUEST_SOURCE") == "orchestrator" or os.environ.get("AI_PROGRESS_SILENT") == "1"
+
+    def hide_cursor(self):
+        if self.is_silent or self._cursor_hidden or not sys.stdout.isatty():
+            return
+        sys.stdout.write("\033[?25l")
+        sys.stdout.flush()
+        self._cursor_hidden = True
+
+    def restore_cursor(self):
+        if self.is_silent or not self._cursor_hidden:
+            return
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
+        self._cursor_hidden = False
 
     def get_line(self, last_activity_time: float | None = None) -> str:
         """Returns the formatted progress line without escape sequences for positioning."""
@@ -995,6 +991,7 @@ class ProgressIndicator:
         # If a status bar is active, we don't draw directly.
         # The parent loop will call StatusBar.render(activity=indicator)
         if _STATUS_BAR_NESTING == 0:
+            self.hide_cursor()
             sys.stdout.write(f"\0337\r\033[K{self.get_line(last_activity_time)}\0338")
             sys.stdout.flush()
         self.last_render_time = now
@@ -1004,6 +1001,7 @@ class ProgressIndicator:
         if _STATUS_BAR_NESTING == 0:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
+        self.restore_cursor()
 
 _STATUS_BAR_NESTING = 0
 
@@ -1019,6 +1017,7 @@ class StatusBar:
         self._last_size = (0, 0)
         self._last_render_time = 0.0
         self.activity_indicator: ProgressIndicator | None = None
+        self._cursor_hidden = False
         # Silent mode ONLY if we are being called by a worker/orchestrator
         self.is_silent = os.environ.get("AI_REQUEST_SOURCE") == "orchestrator" or os.environ.get("AI_PROGRESS_SILENT") == "1"
         
@@ -1061,7 +1060,11 @@ class StatusBar:
         cols, lines = self._get_size()
         self._last_size = (cols, lines)
         # Scroll region ends at lines-4.
-        sys.stdout.write(f"\0337\033[1;{lines-4}r\0338")
+        cursor_code = ""
+        if self.is_processing and sys.stdout.isatty():
+            cursor_code = "\033[?25l"
+            self._cursor_hidden = True
+        sys.stdout.write(f"{cursor_code}\0337\033[1;{lines-4}r\0338")
         sys.stdout.flush()
         self._scroll_region_set = True
 
@@ -1070,10 +1073,11 @@ class StatusBar:
             _, lines = self._get_size()
             # \033[r: reset scroll region
             # \033[?25h: show cursor
-            # \033[H: move to top-left
-            sys.stdout.write("\033[r\033[?25h")
+            # \033[{lines};1H\n: move cursor to bottom line and print newline to avoid overwriting content
+            sys.stdout.write(f"\033[r\033[?25h\033[{lines};1H\n")
             sys.stdout.flush()
             self._scroll_region_set = False
+            self._cursor_hidden = False
 
     def clear_footer(self):
         """Fully wipes the bottom 4 lines where the footer lives."""
@@ -1119,7 +1123,8 @@ class StatusBar:
             self.set_scroll_region()
 
         cols = max(10, columns - 2)
-        content = f" {q_msg:<18} | {meta}"
+        prompt_width = max(12, len(q_msg))
+        content = f" {q_msg:<{prompt_width}} | {meta}"
         if len(content) > cols:
             content = content[:cols-3] + "..."
         else:
@@ -1192,7 +1197,8 @@ def clear_choice_placeholder() -> None:
 
 def get_header_string(text: str) -> str:
     """Returns a centered header string with equals signs in cyan, responsive to terminal width."""
-    text = text.strip().rstrip(":")
+    text = text.strip().rstrip(":").upper()
+    text = re.sub(r"\(([^)]*)\)", lambda match: f"({match.group(1).lower()})", text)
     try:
         cols, _ = os.get_terminal_size()
     except:

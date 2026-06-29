@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import plistlib
 import re
 import shlex
 import subprocess
@@ -62,6 +63,14 @@ def run_simctl(args: list[str], log_file: Path) -> bool:
     return args[:1] == ["boot"] and "Unable to boot device in current state: Booted" in result.stderr
 
 
+def markdown_link(label: str, path: Path) -> str:
+    return f"[{label}]({path.relative_to(ROOT)})"
+
+
+def screenshot_report_block(idx: int, path: Path) -> str:
+    return f"### Screenshot {idx}\n[![Screenshot {idx}]({path.name})]({path.name})\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build, launch, and screenshot the iOS simulator for visual UI review.")
     parser.add_argument("--no-build", action="store_true", help="Skip xcodebuild and reuse the existing built app.")
@@ -71,9 +80,7 @@ def main() -> None:
     parser.add_argument("--screenshots", type=int, default=1, help="Number of screenshots to capture.")
     parser.add_argument("--interval", type=float, default=1.0, help="Seconds between screenshots.")
     args = parser.parse_args()
-    if not args.bundle_id:
-        print("❌ Bundle id is required. Set app_bundle_id in project.json or pass --bundle-id.")
-        sys.exit(1)
+    bundle_id = args.bundle_id
 
     manual_base = OUTPUT_DIR / "manual"
     out_dir = manual_base / f"{timestamp()}-visual-check"
@@ -112,11 +119,31 @@ def main() -> None:
         print(f"❌ Built app not found: {app_path}")
         sys.exit(1)
 
+    # Automatically resolve bundle_id from Info.plist if not specified.
+    if not bundle_id:
+        print("🔍 Attempting to automatically extract bundle identifier from Info.plist...")
+        plist_path = app_path / "Info.plist"
+        if plist_path.exists():
+            try:
+                with open(plist_path, "rb") as f:
+                    plist = plistlib.load(f)
+                    bundle_id = plist.get("CFBundleIdentifier")
+            except Exception as exc:
+                print(f"Warning: Could not parse Info.plist: {exc}")
+
+        if not bundle_id:
+            print(
+                "❌ Bundle id is required. Set app_bundle_id in project.json, "
+                "pass --bundle-id, or ensure the built app's Info.plist contains CFBundleIdentifier."
+            )
+            sys.exit(1)
+        print(f"✅ Automatically resolved Bundle ID: {bundle_id}")
+
     steps = [
         ["boot", udid],
         ["bootstatus", udid, "-b"],
         ["install", udid, str(app_path)],
-        ["launch", udid, args.bundle_id],
+        ["launch", udid, bundle_id],
     ]
     for step in steps:
         if not run_simctl(step, run_log):
@@ -139,14 +166,17 @@ def main() -> None:
         "# Simulator Visual Check",
         "",
         f"- Destination: `{destination}`",
-        f"- Bundle ID: `{args.bundle_id}`",
+        f"- Bundle ID: `{bundle_id}`",
         f"- App path: `{app_path}`",
         f"- Build: `{'skipped' if args.no_build else 'passed'}`",
         "",
         "## Screenshots",
         "",
     ]
-    report_lines.extend(f"- `{path.name}`" for path in screenshot_paths)
+    report_lines.extend(
+        screenshot_report_block(idx, path)
+        for idx, path in enumerate(screenshot_paths, start=1)
+    )
     report_lines.extend([
         "",
         "Review the screenshots for layout clipping, overlap, blank views, and incorrect positioning.",
@@ -154,10 +184,10 @@ def main() -> None:
     ])
     write_text(out_dir / "report.md", "\n".join(report_lines))
 
-    print("\n✅ Simulator visual check captured.")
-    print(f"Report: {(out_dir / 'report.md').relative_to(ROOT)}")
+    print("\n# ✅ Simulator Visual Check Captured")
+    print(f"Report: {markdown_link('Open report', out_dir / 'report.md')}")
     for path in screenshot_paths:
-        print(f"Screenshot: {path.relative_to(ROOT)}")
+        print(f"Screenshot: {markdown_link(path.name, path)}")
     cleanup_logs(manual_base)
 
 

@@ -71,6 +71,11 @@ def print_result(success: bool, name: str, info: str = "", fix_key: str | None =
     if not success and fix_key:
         print_remediation(fix_key)
 
+def print_optional_result(success: bool, name: str, info: str = ""):
+    icon = "✅" if success else "○"
+    status = info or ("DETECTED" if success else "OPTIONAL")
+    print(f"  {icon} {name:30} {status}")
+
 def print_remediation(key: str):
     guide = REMEDIATION_GUIDE.get(key)
     if not guide:
@@ -131,6 +136,26 @@ def should_render_progress_ui() -> bool:
     if os.environ.get("AI_PROGRESS_SILENT") == "1":
         return False
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+def codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+
+def read_codex_config_text() -> str:
+    config_path = codex_home() / "config.toml"
+    try:
+        return config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    except Exception:
+        return ""
+
+def detect_codex_integration(names: list[str]) -> bool:
+    haystacks = [read_codex_config_text().lower()]
+    plugin_cache = codex_home() / "plugins" / "cache"
+    if plugin_cache.exists():
+        try:
+            haystacks.extend(str(path).lower() for path in plugin_cache.rglob("*"))
+        except Exception:
+            pass
+    return any(name.lower() in haystack for name in names for haystack in haystacks)
 
 def run_with_activity(label: str, operation, status_bar: StatusBar | None = None):
     """Run a blocking check while keeping the terminal footer and spinner alive."""
@@ -353,6 +378,19 @@ def _check(status_bar: StatusBar | None = None):
         print("\n\033[1;91m❌ CRITICAL ERROR: No AI providers found. The Orchestrator will fail.\033[0m")
     else:
         print("\n\033[1;92m✅ READY: At least one AI provider is configured.\033[0m")
+
+    # Optional Codex-side MCP/plugin enhancements
+    print_header("5a. Optional MCP / Codex Extensions")
+    optional_integrations = [
+        ("GitHub MCP/plugin", ["github"]),
+        ("XcodeBuildMCP / iOS plugin", ["xcodebuildmcp", "build-ios-apps"]),
+        ("Sentry MCP/plugin", ["sentry"]),
+        ("Playwright MCP", ["playwright"]),
+    ]
+    for label, names in optional_integrations:
+        detected = detect_codex_integration(names)
+        print_optional_result(detected, label, "DETECTED" if detected else "recommended, not required")
+    print("     \033[90mSee docs/recommended-mcp-plugins.md for setup guidance.\033[0m")
 
     # 5. Check SSH Config
     print_header("6. SSH & Network")

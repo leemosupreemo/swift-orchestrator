@@ -80,22 +80,22 @@ def run_smoke_delivery():
         if res == 0:
             print("\n✨ SMOKE TEST SUCCESSFUL!")
             print("      - Build should be appearing on your device soon.")
+            print("\n\033[1;96mCheck the logs above for Firebase distribution URLs.\033[0m")
         else:
-            print(f"\n❌ SMOKE TEST FAILED with exit code {res}.")
+            print("\n❌ Smoke delivery failed during build/distribution.")
+            print("   See the diagnostic above for the fix.")
             # We don't exit immediately because we want to cleanup the mock job
             
-        print("\n\033[1;96mCheck the logs above for Firebase distribution URLs.\033[0m")
-        print("\033[90m(The smoke test creates a temporary mock job in ai/jobs/ for the distribution pipeline.)\033[0m")
+        print("\n\033[90mCleaning up the temporary smoke-test job.\033[0m")
         
         # We use a forced final wait here only if we aren't in CI mode
         # But actually, the dev_console run_script handles this better.
         # We'll just do the cleanup and exit.
         
         if prompt_confirm("Cleanup: Delete temporary mock job?", default=True):
-            print("      - Deleting temporary job file...")
             if job_file.exists():
                 os.remove(job_file)
-            print("      - Done.")
+            print("      - Temporary job deleted.")
         else:
             print("      - Temporary job file preserved in ai/jobs/.")
             

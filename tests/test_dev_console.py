@@ -101,6 +101,17 @@ class DevConsoleTests(unittest.TestCase):
             self.assertIn("Source of truth", gemini_md.read_text())
 
     @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.handle_role_prompts")
+    def test_handle_instruction_files_custom_prompt_action_uses_session_state(self, mock_role_prompts, _mock_status, _mock_clear, mock_get_key):
+        mock_get_key.side_effect = ["p", "b"]
+
+        dev_console.handle_instruction_files(["mac1"], ["codex"])
+
+        mock_role_prompts.assert_called_once_with(["mac1"], ["codex"])
+
+    @patch("dev_console.get_key")
     @patch("dev_console.input")
     @patch("dev_console.clear_screen")
     @patch("dev_console.StatusBar")
@@ -160,6 +171,73 @@ class DevConsoleTests(unittest.TestCase):
             ["feature", "--no-dispatch", "--update", "test.json", "--feedback", "### USER CLARIFICATION ###\nBlue"],
             sub_menu=True
         )
+
+    @patch("dev_console.run_streaming_process")
+    @patch("dev_console.print_divider")
+    @patch("dev_console.input")
+    @patch("dev_console.print")
+    def test_run_script_extracts_failure_summary_from_logs(self, mock_print, mock_input, mock_print_divider, mock_run_streaming):
+        # Setup run_streaming_process to fail with a non-zero exit code and output_log containing an error
+        mock_run_streaming.return_value = (1, "Some generic logs\n❌ Bundle id is required. Set app_bundle_id in project.json or pass --bundle-id.\nMore logs")
+        mock_input.return_value = ""
+
+        # Run script
+        dev_console.run_script("some_script.py", [])
+
+        # Verify summary output was printed containing the bundle ID error
+        printed_args = [call[0][0] for call in mock_print.call_args_list if call[0]]
+        full_printed = "".join(printed_args)
+        self.assertIn("Bundle id is required", full_printed)
+
+    @patch("dev_console.subprocess.check_output")
+    @patch("dev_console.subprocess.run")
+    def test_check_origin_update_status_detects_remote_updates(self, mock_run, mock_check_output):
+        mock_check_output.side_effect = [
+            "main\n",
+            "0\t3\n",
+        ]
+
+        status = dev_console.check_origin_update_status(Path("/tmp/pkg"))
+
+        self.assertEqual(status["state"], "behind")
+        self.assertEqual(status["behind"], 3)
+        self.assertEqual(status["remote_ref"], "origin/main")
+        mock_run.assert_called_once()
+
+    @patch("dev_console.subprocess.check_output")
+    @patch("dev_console.subprocess.run")
+    def test_check_origin_update_status_detects_current_branch(self, _mock_run, mock_check_output):
+        mock_check_output.side_effect = [
+            "main\n",
+            "0\t0\n",
+        ]
+
+        status = dev_console.check_origin_update_status(Path("/tmp/pkg"))
+
+        self.assertEqual(status["state"], "current")
+        self.assertEqual(status["behind"], 0)
+
+    def test_script_failure_summary_prefers_signing_diagnostic(self):
+        output = """
+❌ Distribution failed (exit 65).
+
+\033[1;91mSigning setup needs attention\033[0m
+Xcode could not find a certificate or provisioning profile for this app.
+
+Next steps:
+  1. Run the Dev Console signing validation checks.
+  2. Confirm project.json has the correct Team ID and Bundle Identifier.
+  3. Run orchestrator wizard if signing settings need to be regenerated.
+
+❌ Smoke delivery failed during build/distribution.
+"""
+
+        summary = dev_console.script_failure_summary(output)
+
+        self.assertIn("Signing setup needs attention", summary)
+        self.assertIn("Run the Dev Console signing validation checks", summary)
+        self.assertNotIn("Smoke delivery failed", summary)
+
 
 if __name__ == "__main__":
     unittest.main()
