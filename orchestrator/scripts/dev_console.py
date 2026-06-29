@@ -35,8 +35,39 @@ from orchestrator.project_config import PACKAGE_ROOT, PROJECT_CONFIG
 
 from orchestrator import __version__
 
+def input(prompt: str = "") -> str:
+    """Wrapper around get_key that avoids termios raw/cooked mode input lockups during pauses."""
+    import builtins
+    if any(phrase in prompt for phrase in ["Tap Enter", "Press Enter", "to return", "to continue", "to go back"]):
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        try:
+            get_key(blocking=True)
+        except (KeyboardInterrupt, EOFError):
+            pass
+        return ""
+    
+    try:
+        return builtins.input(prompt)
+    except (KeyboardInterrupt, EOFError):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return ""
+
 FLEET_AVAILABILITY: dict[str, bool] = {}
 FLEET_DETAILS: dict[str, dict[str, Any]] = {}
+
+SELF_TEST_STATIC_COMMANDS: dict[str, tuple[str, str, list[str]]] = {
+    "3": ("Running Resume Logic Smoke Test", "smoke_test_cli_workflow.py", ["--scenario", "resume"]),
+    "4": ("Running ALL Tooling Tests", "-m unittest discover", ["tests"]),
+    "5": ("Running Console UI Smoke Tests", "-m unittest", ["tests/test_console_smoke.py"]),
+    "6": ("Running Model Registry & Discovery Tests", "-m unittest", ["tests/test_model_registry.py"]),
+    "7": ("Running Fleet-Wide LLM Connectivity Check", "fleet_llm_check.py", []),
+    "8": ("Running Fleet Github Synchronization", "sync_fleet.py", []),
+    "9": ("Running Local Model Connectivity Ping Tests", "live_check_workflow.py", ["--checks", "models", "--models", "all"]),
+    "10": ("Running Build & Delivery Smoke Test", "smoke_test_delivery.py", []),
+    "p": ("Plug & Play Self-Tests", "-m unittest", ["tests/test_check_setup.py"]),
+}
 
 import shutil
 
@@ -62,6 +93,59 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         "codex": "OPENAI (Legacy)"
     }
 
+    settings_path = CONFIG_DIR / "settings.json"
+    settings = read_json(settings_path) if settings_path.exists() else {}
+
+    # Cache for CLI auth check: {cli_name: is_authed}
+    cli_auth_cache = {}
+
+    def is_cli_authed(cli: str) -> bool:
+        if cli in cli_auth_cache:
+            return cli_auth_cache[cli]
+
+        binary = cli
+        if cli == "gemini":
+            if shutil.which("agy") is not None:
+                binary = "agy"
+            elif shutil.which("antigravity") is not None:
+                binary = "antigravity"
+
+        if shutil.which(binary) is None:
+            cli_auth_cache[cli] = False
+            return False
+
+        ready = False
+        try:
+            if binary == "claude":
+                res = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=1.5)
+                ready = res.returncode == 0
+            elif binary == "codex":
+                res = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=1.5)
+                ready = res.returncode == 0
+            elif binary in {"gemini", "antigravity", "agy"}:
+                ready = (os.path.exists(os.path.expanduser("~/.gemini/oauth_creds.json")) or 
+                         os.path.exists(os.path.expanduser("~/.gemini/google_accounts.json")))
+            elif binary == "opencode":
+                res = subprocess.run(["opencode", "auth", "status"], capture_output=True, text=True, timeout=1.5)
+                if res.returncode == 0:
+                    ready = True
+                else:
+                    res2 = subprocess.run(["opencode", "models"], capture_output=True, text=True, timeout=1.5)
+                    ready = res2.returncode == 0 and bool(res2.stdout.strip())
+            elif binary == "ollama":
+                res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=1.5)
+                ready = res.returncode == 0
+            elif binary == "gh":
+                res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=1.5)
+                ready = res.returncode == 0
+            else:
+                ready = True
+        except Exception:
+            ready = False
+
+        cli_auth_cache[cli] = ready
+        return ready
+
     options = []
     value_map = {}
     details_map = {}
@@ -77,13 +161,45 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         alias_info = f" (Standard)" if m.aliases else ""
         effort_info = f" ({m.reasoning_effort})" if m.reasoning_effort else ""
         
+        # Check if the model family has credentials configured
+        has_api_key = False
+        if m.family == "gemini":
+            has_api_key = bool(settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY"))
+        elif m.family == "claude":
+            has_api_key = bool(settings.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY"))
+        elif m.family in {"openai", "codex"}:
+            has_api_key = bool(settings.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or settings.get("codex_api_key") or os.environ.get("CODEX_API_KEY"))
+
         # Check if the required CLI is installed
-        missing_clis = [cli for cli in m.required_clis if not shutil.which(cli)]
-        install_warning = ""
-        if missing_clis:
-            install_warning = f" \033[1;91m[Requires '{missing_clis[0]}' CLI]\033[0m"
-            
-        label = m.id
+        cli_installed = True
+        cli_authed = True
+        missing_cli = None
+        
+        for cli in m.required_clis:
+            binary = cli
+            if cli == "gemini":
+                if shutil.which("agy") is not None:
+                    binary = "agy"
+                elif shutil.which("antigravity") is not None:
+                    binary = "antigravity"
+            if shutil.which(binary) is None:
+                cli_installed = False
+                missing_cli = cli
+                break
+            elif not is_cli_authed(cli):
+                cli_authed = False
+
+        # Overall readiness
+        is_ready = (cli_installed and cli_authed) or has_api_key
+
+        # Format label with suffix status
+        status_suffix = ""
+        if not cli_installed:
+            status_suffix = " \033[1;90m[Not Installed]\033[0m"
+        elif not is_ready:
+            status_suffix = " \033[1;91m[Not Enabled]\033[0m"
+
+        label = f"{m.id}{status_suffix}"
         
         options.append(label)
         value_map[label] = m.id
@@ -94,8 +210,12 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
             f"\033[1;97mCost:\033[0m          \033[90m{m.cost_factor:.1f}x\033[0m",
             f"\033[1;97mCapabilities:\033[0m  \033[90m{', '.join([c.value.capitalize() for c in m.capabilities])}\033[0m"
         ]
-        if missing_clis:
-            details.append(f"\033[1;91mWarning: Missing required CLI '{missing_clis[0]}'\033[0m")
+        
+        if not cli_installed:
+            details.append(f"\033[1;91mWarning: Missing required CLI '{missing_cli}'\033[0m")
+        elif not is_ready:
+            details.append(f"\033[1;91mWarning: CLI '{m.required_clis[0]}' is not logged in / authenticated\033[0m")
+            
         if m.reasoning_effort:
             details.append(f"\033[1;97mEffort:\033[0m        \033[90m{m.reasoning_effort}\033[0m")
         if m.aliases:
@@ -104,6 +224,16 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         details_map[label] = details
         
     return options, value_map, details_map
+
+def print_model_selection_loading(title: str, status_bar: StatusBar | None = None):
+    """Show the model selection screen before running slower availability checks."""
+    clear_screen()
+    print_header(title)
+    print("\n\033[90mChecking model availability from local CLIs and configured API keys...\033[0m")
+    print("\033[90mThis can take a few seconds when provider CLIs are slow to respond.\033[0m")
+    if status_bar:
+        status_bar.render(at_bottom=True, force=True)
+    sys.stdout.flush()
 
 def get_online_machines(allowed: list[str]) -> list[str]:
     return [m for m in allowed if FLEET_AVAILABILITY.get(m, False)]
@@ -976,12 +1106,12 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
             print("\n  \033[1;90m--- SCRIPT LOGIC (Python Unit) ---\033[0m")
             print("  [\033[1;96m4\033[0m] Full Python Test Suite  (All isolated unit tests)")
             print("  [\033[1;96m5\033[0m] Console UI Smoke Tests  (Menu navigation & UI logic)")
-            print("  [\033[1;96m6\033[0m] Routing & Fallbacks     (LLM model selection logic)")
+            print("  [\033[1;96m6\033[0m] Model Registry & Discovery (routing aliases, sync, fallbacks)")
 
             print("\n  \033[1;90m--- FLEET OPERATIONS (Live) ---\033[0m")
             print("  [\033[1;96m7\033[0m] Fleet Health Report     (all machines report)")
             print("  [\033[1;96m8\033[0m] GitHub Metadata Sync    (status & PR cleanup)")
-            print("  [\033[1;96m9\033[0m] Live Model Pings        (connectivity & logs)")
+            print("  [\033[1;96m9\033[0m] Local Model Pings       (connectivity & logs)")
             print("  [\033[1;96m10\033[0m] Build & Delivery       (Live Firebase upload)")
 
             print("\n  \033[1;90m--- ENVIRONMENT & SETUP ---\033[0m")
@@ -1016,33 +1146,10 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
                 print_header("Running Machine Probing Tests")
                 build_cmd, test_cmd = extract_commands()
                 run_script("manual_run.py", ["test", "--test-only", f"{test_cmd} -only-testing:{PROJECT_CONFIG.test_target}/ProbingTests"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "3":
-                print_header("Running Resume Logic Smoke Test")
-                run_script("smoke_test_cli_workflow.py", ["--scenario", "resume"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "4":
-                print_header("Running ALL Tooling Tests")
-                run_script("-m unittest discover", ["tests"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "5":
-                print_header("Running Console UI Smoke Tests")
-                run_script("-m unittest", ["tests/test_console_smoke.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "6":
-                print_header("Running LLM Model Selection & Fallbacks Tests")
-                run_script("-m unittest", ["tests/test_model_selection.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "7":
-                print_header("Running Fleet-Wide LLM Connectivity Check")
-                run_script("fleet_llm_check.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "8":
-                print_header("Running Fleet Github Synchronization")
-                run_script("sync_fleet.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "9":
-                print_header("Running Model Connectivity Ping Tests")
-                run_script("-m unittest", ["tests/test_model_connectivity.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "10":
-                print_header("Running Build & Delivery Smoke Test")
-                run_script("smoke_test_delivery.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
-            elif choice == "p":
-                print_header("Plug & Play Self-Tests")
-                run_script("-m unittest", ["tests/test_check_setup.py"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+            elif choice in SELF_TEST_STATIC_COMMANDS:
+                header, script_name, args = SELF_TEST_STATIC_COMMANDS[choice]
+                print_header(header)
+                run_script(script_name, args, sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             else:
                 error_msg = f"'{choice}'"
 
@@ -2095,8 +2202,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             if choice == "b":
                 break
             elif choice == "o":
-                print_header("Override LLM Models for Job")
                 while True:
+                    print_model_selection_loading("Override LLM Models for Job", status_bar=status_bar)
                     options, value_map, details_map = get_model_selection_data()
                     
                     # Map current IDs back to labels for defaults
@@ -2735,7 +2842,11 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             status_bar.set_scroll_region()
 
             print_header("AI Provider Access")
-            print("\033[90mAccess is checked through provider CLIs first; saved credentials are fallback only.\033[0m\n")
+            print("\033[90mAccess is checked through provider CLIs first; saved credentials are fallback only.\033[0m")
+            print("\033[90mColumns:\033[0m")
+            print("  • \033[97mCLI Readiness\033[0m : Status of the local CLI executable (Signed in, CLI ready, Not installed, etc.)")
+            print("  • \033[97mCredentials\033[0m   : API Key status (Saved in settings, set via Env Var, or using active CLI Login)")
+            print("  • \033[97mAccess\033[0m        : Overall usability status (READY if CLI is authenticated OR an API key is available)\n")
 
             # Gather Status Data using cached CLI statuses
             providers = [
@@ -2820,17 +2931,19 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 
                 print(f"{p['label']:15} | {cli_display} | {key_display} | {ready_display}")
 
-            print("\n\033[90mCLI readiness shows whether the local tool can run now. Credential source only matters when CLI auth is unavailable.\033[0m")
+            print()
 
             print_header("ACTIONS")
             
             # Single-column Layout for Actions
             print(f"  \033[1;96mFallback Credentials\033[0m")
+            print(f"    \033[90m(API keys stored locally; used when CLI logins are expired or in headless/CI environments)\033[0m")
             print(f"    [\033[1;92mG\033[0m] Update Antigravity credential")
             print(f"    [\033[1;92mA\033[0m] Update Anthropic credential")
             print(f"    [\033[1;92mO\033[0m] Update OpenAI credential")
 
             print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
+            print(f"    \033[90m(Authenticates provider CLIs directly using browser OAuth for local development)\033[0m")
             print(f"    [\033[1;92m1\033[0m] Login Antigravity")
             print(f"    [\033[1;92m2\033[0m] Login Claude")
             print(f"    [\033[1;92m3\033[0m] Login Codex")
@@ -2838,6 +2951,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             print(f"    [\033[1;92m5\033[0m] Login OpenCode")
 
             print_header("MANAGEMENT")
+            print(f"    \033[90m(Clear configured API keys or exit the provider setup submenu)\033[0m")
             print(f"    [\033[1;91mC\033[0m] Clear saved credentials")
             print(f"    [\033[1;91mB\033[0m] Back")
 
@@ -3279,8 +3393,8 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             if choice == "b":
                 break
             elif choice == "m":
-                print_header("Select LLM Models for Session")
                 while True:
+                    print_model_selection_loading("Select LLM Models for Session", status_bar=status_bar)
                     options, value_map, details_map = get_model_selection_data()
 
                     # Resolve current session defaults
@@ -3811,25 +3925,23 @@ Read these files first and treat them as authoritative:
 
 
 def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_models: list[str]):
+    needs_check = True
+    
+    cli_status = ""
+    auth_status = ""
+    project_status = ""
+    app_id_status = ""
+    has_gs_info = False
+    has_export_opts = False
+    
     while True:
-        clear_screen()
-        with StatusBar({
-            "allowed_machines": session_allowed_machines,
-            "online_machines": get_online_machines(session_allowed_machines),
-            "allowed_models": session_allowed_models
-        }, sub_menu=True) as status_bar:
-            status_bar.set_scroll_region()
-
-            print_header("Firebase App Distro Health & Settings")
-            
+        if needs_check:
             # 1. Check Firebase CLI
-            print("\n  \033[1;90m--- SYSTEM CHECKS ---\033[0m")
             try:
                 subprocess.check_output(["firebase", "--version"])
                 cli_status = "\033[92mINSTALLED\033[0m"
             except FileNotFoundError:
                 cli_status = "\033[1;91mMISSING\033[0m (Run: npm install -g firebase-tools)"
-            print(f"  Firebase CLI: {cli_status}")
             
             # 2. Check Auth Status
             try:
@@ -3841,7 +3953,6 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                     auth_status = "\033[1;91mNOT LOGGED IN\033[0m (Run: firebase login)"
             except Exception:
                 auth_status = "\033[1;91mERROR\033[0m"
-            print(f"  Account:      {auth_status}")
             
             # 3. Check Active Project
             project = "NONE"
@@ -3876,66 +3987,90 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                             project_status = "\033[1;91mNONE\033[0m"
             except Exception:
                 project_status = "\033[1;91mERROR\033[0m"
-            print(f"  Project:      {project_status}")
+            
+            # Required files checks
+            gs_info = ROOT / PROJECT_CONFIG.project_name / "GoogleService-Info.plist"
+            has_gs_info = gs_info.exists()
+            if has_gs_info:
+                try:
+                    app_id = subprocess.check_output(["/usr/libexec/PlistBuddy", "-c", "Print :GOOGLE_APP_ID", str(gs_info)], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+                    app_id_status = f"\033[92m{app_id}\033[0m"
+                except Exception:
+                    app_id_status = "\033[1;91mCOULD NOT EXTRACT\033[0m"
+            else:
+                app_id_status = "\033[1;91mN/A\033[0m"
+            
+            export_opts = ROOT / "ExportOptions.plist"
+            has_export_opts = export_opts.exists()
+            
+            needs_check = False
+            
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
 
-            # 3.1 Check for CI Token (if applicable)
+            print_header("Firebase App Distro Health & Settings")
+            
+            print("\n  \033[1;90m--- SYSTEM CHECKS ---\033[0m")
+            print(f"  Firebase CLI: {cli_status}")
+            print(f"  Account:      {auth_status}")
+            print(f"  Project:      {project_status}")
+            
             has_ci_token = "FIREBASE_TOKEN" in os.environ
             if has_ci_token:
                 print(f"  Auth Method:  \033[92mCI TOKEN (Environment)\033[0m")
             else:
                 print(f"  Auth Method:  \033[1;96mLocal CLI Session\033[0m")
-            
-            # 4. Check Required Files
+                
             print("\n  \033[1;90m--- REQUIRED FILES ---\033[0m")
-            
-            gs_info = ROOT / PROJECT_CONFIG.project_name / "GoogleService-Info.plist"
-            if gs_info.exists():
+            if has_gs_info:
                 print(f"  GoogleService-Info.plist: \033[92mEXISTS\033[0m")
-                # Try to extract App ID
-                try:
-                    app_id = subprocess.check_output(["/usr/libexec/PlistBuddy", "-c", "Print :GOOGLE_APP_ID", str(gs_info)], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-                    print(f"  App ID (iOS):             \033[92m{app_id}\033[0m")
-                except Exception:
-                    print(f"  App ID (iOS):             \033[1;91mCOULD NOT EXTRACT\033[0m")
+                print(f"  App ID (iOS):             {app_id_status}")
             else:
                 print(f"  GoogleService-Info.plist: \033[1;91mMISSING\033[0m")
                 
-            export_opts = ROOT / "ExportOptions.plist"
-            if export_opts.exists():
+            if has_export_opts:
                 print(f"  ExportOptions.plist:      \033[92mEXISTS\033[0m")
             else:
                 print(f"  ExportOptions.plist:      \033[1;91mMISSING\033[0m")
-
-            # 5. Check Keychain Status
+                
             print("\n  \033[1;90m--- KEYCHAIN & SIGNING ---\033[0m")
             has_password = "KEYCHAIN_PASSWORD" in os.environ
             pwd_status = "\033[92mAUTOMATED (No UI popups)\033[0m" if has_password else "\033[93mMANUAL (Requires UI prompt)\033[0m"
             print(f"  Headless Signing: {pwd_status}")
-
-            # Actions
+            
             print("\n  \033[1;90m--- ACTIONS ---\033[0m")
             print("    [\033[1;96mL\033[0m] Login to Firebase (Browser)")
             print("    [\033[1;96mK\033[0m] Configure Headless Signing (Keychain Auto-Unlock)")
             print("    [\033[1;96mT\033[0m] Test Distribution Script (Dry Run via build delivery)")
+            print("    [\033[1;96mR\033[0m] Refresh Status (Re-run checks)")
             print("    [\033[1;91mB\033[0m] Back")
             
-            # Render status bar without prompt (hides cursor and removes Choice text)
             status_bar.render(at_bottom=True, force=True, prompt=None)
             choice = get_key().strip().lower()
             
             if choice == "b":
                 break
+            elif choice == "r":
+                needs_check = True
             elif choice == "l":
                 print_header("Launching firebase login")
                 print("The CLI will open your browser for authentication.")
                 print("Follow the prompts and return here when finished.\n")
                 subprocess.run(["firebase", "login"])
+                needs_check = True
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "k":
                 handle_keychain_setup(status_bar)
+                needs_check = True
             elif choice == "t":
                 print("\n    Launching smoke test delivery...")
                 run_script("smoke_test_delivery.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                needs_check = True
 
 def handle_keychain_setup(status_bar: StatusBar):
     options = [

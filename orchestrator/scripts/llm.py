@@ -170,7 +170,7 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None, sessi
         cmd_base = f"codex exec --model {cli_model_id}"
         if m_meta and m_meta.reasoning_effort:
             cmd_base += f" -c model_reasoning_effort={m_meta.reasoning_effort}"
-    elif model_id.startswith("gemini-"):
+    elif model_id.startswith("gemini-") or (m_meta and m_meta.family == "gemini"):
         provider_cli = preferred_cli("gemini")
         # Safe Agentic Planning: Allow read/search/docs servers for intelligence, 
         # but hide mutating/heavy servers (maestro, XcodeBuildMCP, ssh-manager, github) 
@@ -201,6 +201,8 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None, sessi
             cmd_base += f" --session-id {session_id}"
     elif model_id == "deepseek":
         cmd_base = "ollama run deepseek-coder"
+    elif m_meta and ("ollama" in m_meta.required_clis or m_meta.family == "ollama" or m_meta.family == "qwen"):
+        cmd_base = f"ollama run {model_id}"
     elif model_id == "copilot":
         cmd_base = "gh copilot"
     elif model_id.startswith("opencode/"):
@@ -303,7 +305,7 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
     thinking_label = "Thinking"
     if prompt_chars > 100000:
         thinking_label = f"Deep Reasoning: Large Context ({prompt_chars} chars)... Please wait."
-    elif model.startswith("gemini-3.1") or model.startswith("gpt-5.5") or model.startswith("claude-opus"):
+    elif model.startswith("gemini-3.1") or model.startswith("gpt-5.5") or model.startswith("claude-opus") or "qwen" in model.lower():
         thinking_label = "Thinking: Deep Reasoning model active"
     indicator = ProgressIndicator(label=thinking_label, hint="Ctrl-C to cancel")
 

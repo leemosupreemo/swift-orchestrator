@@ -335,6 +335,16 @@ def prompt_yes_no(label: str, default: bool = False, skip_available: bool = True
     return res
 
 
+def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
+    from orchestrator.scripts.common import prompt_password as _prompt_password
+    return _prompt_password(label, placeholder)
+
+
+def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: Any | None = None) -> str:
+    from orchestrator.scripts.common import prompt_radio as _prompt_radio
+    return _prompt_radio(label, options, default, clear_screen, status_bar)
+
+
 class SkipSectionException(Exception): pass
 
 
@@ -685,7 +695,13 @@ def run_wizard(args: argparse.Namespace) -> int:
                 if candidates:
                     print(f"\n✨ Discovered {len(candidates)} potential machine(s):")
                     for i, c in enumerate(candidates, 1):
-                        print(f"  {i}. \033[97m{c['hostname']}\033[0m ({c['host']})")
+                        status = c.get("status")
+                        if status == "suitable":
+                            print(f"  {i}. \033[97m{c['hostname']}\033[0m ({c['host']})")
+                        elif status == "needs_ssh_keys":
+                            print(f"  {i}. \033[90m{c['host']} (🔑 SSH key/authorization required)\033[0m")
+                        else:
+                            print(f"  {i}. \033[90m{c['host']} (⚠️ Connection error/unsuitable: {c.get('error', 'unknown')})\033[0m")
 
                     print(f"\n\033[90m(Enter numbers to add, e.g. '1,2'. Leave empty to skip.)\033[0m")
                     print_wizard_bar(skip_available=True, status_bar=status_bar)
@@ -722,15 +738,35 @@ def run_wizard(args: argparse.Namespace) -> int:
                                 idx = int(choice.strip()) - 1
                                 if 0 <= idx < len(candidates):
                                     c = candidates[idx]
-                                    repo_path = prompt_text(f"Remote repo path for {c['hostname']}", status_bar=status_bar)
+                                    status = c.get("status")
+                                    host = c['host']
+
+                                    remote_user = None
+                                    if status != "suitable":
+                                        import getpass
+                                        default_user = getpass.getuser()
+                                        print(f"\n🔑 Machine '{host}' requires SSH configuration.")
+                                        remote_user = prompt_text(f"Remote SSH username for {host} (default: {default_user})", default_user, status_bar=status_bar)
+
+                                    ssh_target = f"{remote_user}@{host}" if remote_user else host
+                                    hostname = c.get("hostname") or host
+
+                                    repo_path = prompt_text(f"Remote repo path for {hostname}", status_bar=status_bar)
                                     try:
                                         machine = create_ssh_machine(
-                                            name=c['hostname'].split('.')[0],
-                                            ssh_target=c['host'],
+                                            name=hostname.split('.')[0],
+                                            ssh_target=ssh_target,
                                             repo_path=repo_path
                                         )
-                                        if test_ssh_connection(machine["ssh_target"]) or prompt_yes_no("Connection failed. Add this machine anyway?", False, status_bar=status_bar):
+                                        if test_ssh_connection(machine["ssh_target"]):
                                             ssh_machines.append(machine)
+                                        else:
+                                            print(f"\n❌ Connection test to {machine['ssh_target']} failed.")
+                                            if status == "needs_ssh_keys":
+                                                print("  How to fix: Run the following command in a new terminal to copy your SSH key:")
+                                                print(f"\033[1;96m    ssh-copy-id {machine['ssh_target']}\033[0m")
+                                            if prompt_yes_no("Add this machine anyway?", False, status_bar=status_bar):
+                                                ssh_machines.append(machine)
                                     except ValueError as exc:
                                         print(f"  ❌ {exc}")
                             except ValueError:
@@ -772,6 +808,42 @@ def run_wizard(args: argparse.Namespace) -> int:
                     team_id = team_id or prompt_text("Apple Development Team ID", getattr(load_project_config(), "development_team", detected_team), status_bar=status_bar)
                     method = method or prompt_text("Distribution method (ad-hoc, debugging)", detected_method or "debugging", status_bar=status_bar)
 
+                    # Interactive Provisioning Profile Selection
+                    current_profile = getattr(load_project_config(), "provisioning_profile_specifier", None)
+                    if not provisioning_profile:
+                        provisioning_profile = current_profile
+
+                    if not provisioning_profile:
+                        installed_profiles = sorted(list(sd.installed_provisioning_profile_names()))
+                        if installed_profiles:
+                            options = installed_profiles + ["[Enter profile name manually]", "[Skip]"]
+                            print("\n🔍 Detected installed provisioning profiles:")
+                            choice = prompt_radio("Select Provisioning Profile:", options, default=options[0], clear_screen=False, status_bar=status_bar)
+                            if choice == "[Enter profile name manually]":
+                                provisioning_profile = prompt_text("Enter Provisioning Profile Specifier/Name", status_bar=status_bar)
+                            elif choice == "[Skip]":
+                                provisioning_profile = None
+                            else:
+                                provisioning_profile = choice
+                        else:
+                            if prompt_yes_no("No installed provisioning profiles detected. Enter one manually?", False, status_bar=status_bar):
+                                provisioning_profile = prompt_text("Enter Provisioning Profile Specifier/Name", status_bar=status_bar)
+                    else:
+                        if prompt_yes_no(f"Use currently configured Provisioning Profile ({provisioning_profile})?", True, status_bar=status_bar):
+                            pass
+                        else:
+                            installed_profiles = sorted(list(sd.installed_provisioning_profile_names()))
+                            default_option = provisioning_profile if provisioning_profile in installed_profiles else None
+                            options = installed_profiles + ["[Enter profile name manually]", "[Skip]"]
+                            print("\n🔍 Detected installed provisioning profiles:")
+                            choice = prompt_radio("Select Provisioning Profile:", options, default=default_option or options[0], clear_screen=False, status_bar=status_bar)
+                            if choice == "[Enter profile name manually]":
+                                provisioning_profile = prompt_text("Enter Provisioning Profile Specifier/Name", status_bar=status_bar)
+                            elif choice == "[Skip]":
+                                provisioning_profile = None
+                            else:
+                                provisioning_profile = choice
+
                     if prompt_yes_no("Configure App Store Connect API keys for automated signing?", False, status_bar=status_bar):
                         asc_key_id = asc_key_id or prompt_password("ASC Key ID", placeholder="(enter to skip)")
                         asc_issuer_id = asc_issuer_id or prompt_password("ASC Issuer ID", placeholder="(enter to skip)")
@@ -805,7 +877,6 @@ def run_wizard(args: argparse.Namespace) -> int:
                 return 1
             
             # Xcode Smoke Test
-            from orchestrator.project_config import load_project_config
             cfg = load_project_config()
             if (cfg.xcode_project or cfg.xcode_workspace) and prompt_yes_no("Run a quick Xcode build validation (Smoke Test)?", True, status_bar=status_bar):
                 print("\n🔍 Verifying Xcode build settings...")

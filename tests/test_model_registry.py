@@ -194,10 +194,11 @@ Available models:
   gemini-3.1-pro-preview
 * models/gemini-3-flash-preview
   claude-sonnet-4-6
+  Gemini 3.5 Flash (Medium)
 """
         self.assertEqual(
             model_registry.parse_agy_models_output(output),
-            ["gemini-3-flash-preview", "gemini-3.1-pro-preview"],
+            ["claude-sonnet-4-6", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.5-flash-medium"],
         )
 
     def test_summarize_cli_error_prefers_actionable_error_line(self):
@@ -257,6 +258,22 @@ Error: Please sign in to view available models.
         self.assertIn("Gemini API: skipped", msg)
         self.assertIn("Antigravity CLI (agy): unavailable", msg)
         self.assertIn("Ollama: unavailable", msg)
+
+    def test_llm_command_routing_for_qwen_and_ollama(self) -> None:
+        from orchestrator.scripts.llm import get_llm_command
+        
+        # 1. Test qwen2.5-coder routing (should route to: ollama run qwen2.5-coder)
+        cmd_qwen = get_llm_command("qwen2.5-coder", "prompt.txt")
+        self.assertIn("ollama run qwen2.5-coder", cmd_qwen)
+        
+        # 2. Test qwen-3.7-max routing (should route to: ollama run qwen-3.7-max)
+        cmd_qwen_max = get_llm_command("qwen-3.7-max", "prompt.txt")
+        self.assertIn("ollama run qwen-3.7-max", cmd_qwen_max)
+        
+        # 3. Test opencode/qwen-3.7-max routing (should route to opencode)
+        cmd_opencode_qwen = get_llm_command("opencode/qwen-3.7-max", "prompt.txt")
+        self.assertIn("opencode run --model opencode/qwen-3.7-max", cmd_opencode_qwen)
+
 
 if __name__ == "__main__":
     unittest.main()

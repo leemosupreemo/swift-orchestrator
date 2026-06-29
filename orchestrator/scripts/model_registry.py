@@ -216,6 +216,31 @@ MODELS = [
         capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
         cost_factor=0.0,
         required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="qwen2.5-coder",
+        family="qwen",
+        tier=ModelTier.HIGH,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["qwen", "qwen-coder"],
+        required_clis=["ollama"]
+    ),
+    ModelMetadata(
+        id="qwen-3.7-max",
+        family="qwen",
+        tier=ModelTier.HIGH,
+        capabilities=[ModelCapability.CODING, ModelCapability.REASONING],
+        cost_factor=0.0,
+        required_clis=["ollama"]
+    ),
+    ModelMetadata(
+        id="opencode/qwen-3.7-max",
+        family="opencode",
+        tier=ModelTier.HIGH,
+        capabilities=[ModelCapability.CODING, ModelCapability.REASONING],
+        cost_factor=0.0,
+        required_clis=["opencode"]
     )
 ]
 
@@ -231,10 +256,13 @@ LEGACY_IDS = {
     "claude": "claude-sonnet-4-6",
     "codex": "gpt-5.4",
     "opencode": "opencode/big-pickle",
+    "qwen": "qwen2.5-coder",
+    "qwen-coder": "qwen2.5-coder",
 }
 
 CLI_ALIASES = {
     "gemini": ("agy", "antigravity", "gemini"),
+    "qwen": ("ollama", "opencode", "qwen"),
 }
 
 def model_from_dict(item: dict[str, Any]) -> ModelMetadata:
@@ -382,19 +410,32 @@ def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
     )
 
 def parse_agy_models_output(output: str) -> list[str]:
-    """Extracts Gemini-family model IDs from `agy models` text output."""
+    """Extracts model IDs from `agy models` text output."""
     models = []
+    import re
     for line in output.splitlines():
         line = line.strip()
         if not line or line.lower().startswith(("available", "model ", "models")):
             continue
 
         line = line.lstrip("-*• \t")
-        token = line.split()[0].strip("`'\",")
-        if token.startswith("models/"):
-            token = token.split("/", 1)[1]
-        if token.lower().startswith("gemini-"):
-            models.append(token)
+        lower_line = line.lower()
+        if not lower_line.startswith(("gemini", "claude", "gpt", "models/gemini", "models/claude", "models/gpt")):
+            continue
+
+        # If it has spaces, e.g., "Gemini 3.5 Flash (Medium)", slugify it
+        if " " in line:
+            slug = line.lower()
+            slug = re.sub(r'[^a-z0-9\.]+', '-', slug)
+            slug = re.sub(r'-+', '-', slug).strip('-')
+            if slug:
+                models.append(slug)
+        else:
+            token = line.split()[0].strip("`'\",")
+            if token.startswith("models/"):
+                token = token.split("/", 1)[1]
+            if token:
+                models.append(token.lower())
 
     return sorted(set(models))
 

@@ -178,6 +178,31 @@
       "capabilities": ["coding", "speed"],
       "cost_factor": 0.0,
       "required_clis": ["opencode"]
+    },
+    {
+      "id": "qwen2.5-coder",
+      "family": "qwen",
+      "tier": "HIGH",
+      "capabilities": ["coding", "speed"],
+      "cost_factor": 0.0,
+      "aliases": ["qwen", "qwen-coder"],
+      "required_clis": ["ollama"]
+    },
+    {
+      "id": "qwen-3.7-max",
+      "family": "qwen",
+      "tier": "HIGH",
+      "capabilities": ["coding", "reasoning"],
+      "cost_factor": 0.0,
+      "required_clis": ["ollama"]
+    },
+    {
+      "id": "opencode/qwen-3.7-max",
+      "family": "opencode",
+      "tier": "HIGH",
+      "capabilities": ["coding", "reasoning"],
+      "cost_factor": 0.0,
+      "required_clis": ["opencode"]
     }
   ]
 }

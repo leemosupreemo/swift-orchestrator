@@ -1029,6 +1029,15 @@ class StatusBar:
         self._cursor_hidden = False
         # Silent mode ONLY if we are being called by a worker/orchestrator
         self.is_silent = os.environ.get("AI_REQUEST_SOURCE") == "orchestrator" or os.environ.get("AI_PROGRESS_SILENT") == "1"
+        self._last_rendered_lines = 0
+        self.anchor_to_bottom = True
+        try:
+            settings_path = CONFIG_DIR / "settings.json"
+            if settings_path.exists():
+                settings = read_json(settings_path)
+                self.anchor_to_bottom = settings.get("anchor_prompt_to_bottom", True)
+        except:
+            pass
         
         allowed = self.job.get("allowed_machines") or self.job.get("session_machines", [])
         online = self.job.get("online_machines")
@@ -1067,6 +1076,7 @@ class StatusBar:
             _ACTIVE_STATUS_BAR = None
 
     def set_scroll_region(self):
+        if not self.anchor_to_bottom: return
         if not sys.stdin.isatty(): return
         cols, lines = self._get_size()
         self._last_size = (cols, lines)
@@ -1080,18 +1090,20 @@ class StatusBar:
         self._scroll_region_set = True
 
     def reset_scroll_region(self, force: bool = False):
-        if self._scroll_region_set or force:
-            _, lines = self._get_size()
-            # \033[r: reset scroll region
-            # \033[?25h: show cursor
-            # \033[{lines};1H\n: move cursor to bottom line and print newline to avoid overwriting content
-            sys.stdout.write(f"\033[r\033[?25h\033[{lines};1H\n")
-            sys.stdout.flush()
-            self._scroll_region_set = False
-            self._cursor_hidden = False
+        if self.anchor_to_bottom or force:
+            if self._scroll_region_set or force:
+                _, lines = self._get_size()
+                # \033[r: reset scroll region
+                # \033[?25h: show cursor
+                # \033[{lines};1H\n: move cursor to bottom line and print newline to avoid overwriting content
+                sys.stdout.write(f"\033[r\033[?25h\033[{lines};1H\n")
+                sys.stdout.flush()
+                self._scroll_region_set = False
+                self._cursor_hidden = False
 
     def clear_footer(self):
         """Fully wipes the bottom 4 lines where the footer lives."""
+        if not self.anchor_to_bottom: return
         _, lines = self._get_size()
         cmd = "\0337" # Save cursor
         for i in range(lines - 3, lines + 1):
@@ -1102,6 +1114,8 @@ class StatusBar:
 
     def render(self, at_bottom: bool = True, force: bool = False, prompt: str | None = None, activity: ProgressIndicator | None = None, q_msg: str | None = None):
         if self.is_silent: return
+        if not self.anchor_to_bottom:
+            at_bottom = False
         now = time.monotonic()
         # Rate limit frequent renders unless forced
         if not force and at_bottom and now - self._last_render_time < 0.05:
@@ -1172,8 +1186,59 @@ class StatusBar:
             sys.stdout.write(cmd)
             sys.stdout.flush()
         else:
-            print(divider)
-            print(bar)
+            # We want the layout to be:
+            # 1. Activity line (if any)
+            # 2. Spacer line (if prompt)
+            # 3. Prompt (if any)
+            # 4. Divider
+            # 5. Bar (footer)
+            
+            act_line = ""
+            if activity:
+                act_line = self.activity_indicator.get_line() if self.activity_indicator else ""
+
+            # Determine cursor movement to overwrite previous render
+            last_lines = getattr(self, "_last_rendered_lines", 0)
+            last_had_prompt = getattr(self, "_last_had_prompt", False)
+            
+            cmd = ""
+            if last_lines > 0:
+                # If the last render had a prompt, the cursor was left on the prompt line.
+                # Since the prompt line is the 3rd line from the bottom of the printed block,
+                # the distance to the top of the render block is (last_lines - 3).
+                # Otherwise, the cursor was left on the bottom line, so distance to top is (last_lines - 1).
+                lines_to_move = (last_lines - 3) if last_had_prompt else (last_lines - 1)
+                if lines_to_move > 0:
+                    cmd += f"\033[{lines_to_move}A\r"
+            
+            total_lines = 0
+            
+            # 1. Write activity
+            if act_line:
+                cmd += f"{act_line}\033[K\n"
+                total_lines += 1
+            
+            # 2. Write spacer and prompt placeholder
+            if prompt:
+                cmd += "\033[K\n"     # Spacer line
+                cmd += "\033[K\n"     # Prompt line placeholder
+                total_lines += 2
+            
+            # 3. Write divider and bar
+            cmd += f"{divider}\033[K\n"
+            cmd += f"{bar}\033[K"
+            total_lines += 2          # Note: bar doesn't end with a newline in cmd
+            
+            # 4. Draw the prompt last and leave the cursor there
+            if prompt:
+                cmd += "\033[2A\r"    # Move up 2 lines (over bar and divider)
+                cmd += f"{prompt}\033[K"
+            
+            self._last_rendered_lines = total_lines
+            self._last_had_prompt = bool(prompt)
+            
+            sys.stdout.write(cmd)
+            sys.stdout.flush()
 
 def cleanup_terminal():
     try:

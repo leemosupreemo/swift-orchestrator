@@ -172,6 +172,7 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self, mock_write, _mock_flush, _mock_stdout_isatty, _mock_stdin_isatty
     ) -> None:
         status_bar = common.StatusBar(is_processing=True)
+        status_bar.anchor_to_bottom = True
 
         status_bar.set_scroll_region()
         status_bar.reset_scroll_region()

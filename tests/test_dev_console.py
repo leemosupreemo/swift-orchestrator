@@ -237,6 +237,20 @@ Option A: Headless Auto-Signing (Recommended)
         self.assertIn("Option A: Headless Auto-Signing", summary)
         self.assertNotIn("Smoke delivery failed", summary)
 
+    def test_self_test_static_commands_reference_existing_targets(self):
+        for choice, (_header, script_name, args) in dev_console.SELF_TEST_STATIC_COMMANDS.items():
+            with self.subTest(choice=choice):
+                if script_name.startswith("-m unittest"):
+                    for arg in args:
+                        if arg.endswith(".py"):
+                            self.assertTrue((PACKAGE_ROOT / arg).exists(), f"{choice} references missing test file: {arg}")
+                    continue
+
+                self.assertTrue(
+                    (SCRIPTS_DIR / script_name).exists(),
+                    f"{choice} references missing script: {script_name}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

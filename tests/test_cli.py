@@ -294,6 +294,40 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cli.main(["worker-install"]), 0)
         mock_run_script.assert_called_with("worker_tools.py", ["install"])
 
+    @patch("orchestrator.scripts.discover_machines.get_local_ssh_hosts", return_value=[])
+    @patch("orchestrator.cli.prompt_text")
+    @patch("orchestrator.cli.prompt_yes_no")
+    @patch("orchestrator.cli.prompt_radio")
+    @patch("orchestrator.cli.run_script", return_value=0)
+    @patch("orchestrator.scripts.setup_distribution.installed_provisioning_profile_names", return_value={"Profile A", "Profile B"})
+    @patch("orchestrator.cli.prompt_password")
+    def test_wizard_interactive_profile_selection(self, mock_prompt_password, mock_installed_profiles, mock_run_script, mock_prompt_radio, mock_prompt_yes_no, mock_prompt_text, mock_get_local_ssh_hosts) -> None:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+
+            mock_prompt_yes_no.side_effect = [False, False, True, False, False, False, False]
+            mock_prompt_text.side_effect = ["SampleApp/GoogleService-Info.plist", "ABC123DEFG", "ad-hoc"]
+            mock_prompt_radio.return_value = "Profile B"
+
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--project-name",
+                "SampleApp",
+                "--models",
+                "codex",
+            ])
+
+            self.assertEqual(result, 0)
+            mock_prompt_radio.assert_called_once()
+            # Ensure the selected profile was passed to setup_distribution.py
+            calls = [call.args for call in mock_run_script.call_args_list]
+            setup_args = next(args for script, args in calls if script == "setup_distribution.py")
+            self.assertIn("--provisioning-profile", setup_args)
+            self.assertIn("Profile B", setup_args)
+
 
 if __name__ == "__main__":
     unittest.main()
