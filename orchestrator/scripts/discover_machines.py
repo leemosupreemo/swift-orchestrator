@@ -142,11 +142,28 @@ def check_machine_suitability(host: str) -> dict[str, Any] | None:
             "error": str(e)
         }
 
-def main():
+def machine_entry_from_candidate(candidate: dict[str, Any], repo_path: str = "/Users/CHANGEME/Documents/YourSwiftProject") -> dict[str, Any]:
+    hostname = candidate.get("hostname") or candidate["host"]
+    return {
+        "name": hostname.split(".")[0],
+        "enabled": True,
+        "execution_mode": "ssh",
+        "ssh_target": candidate["host"],
+        "repo_path": repo_path,
+        "roles": ["worker", "build", "test"],
+        "models": ["gemini", "codex", "claude-opus"],
+        "priority": 80,
+        "max_concurrent_jobs": 2,
+        "max_heavy_jobs": 1,
+        "supports_xcode": True,
+        "supports_simulator": True,
+        "tags": ["remote", "discovered"]
+    }
+
+def discover_machine_candidates() -> dict[str, list[dict[str, Any]]]:
     hosts = get_local_ssh_hosts()
     if not hosts:
-        print("No SSH hosts discovered via mDNS.")
-        return
+        return {"suitable": [], "needs_keys": [], "unsuitable": []}
 
     local_names = get_local_hostnames()
     suitable = []
@@ -170,6 +187,18 @@ def main():
         else:
             unsuitable.append(info)
 
+    return {"suitable": suitable, "needs_keys": needs_keys, "unsuitable": unsuitable}
+
+def main():
+    candidates = discover_machine_candidates()
+    suitable = candidates["suitable"]
+    needs_keys = candidates["needs_keys"]
+    unsuitable = candidates["unsuitable"]
+
+    if not suitable and not needs_keys and not unsuitable:
+        print("\nNo remote candidates found (excluding local machine).")
+        return
+
     # Print suitable candidates
     if suitable:
         print(f"\n✨ Found {len(suitable)} suitable machine(s) for your fleet:")
@@ -179,21 +208,7 @@ def main():
             print(f"  Python:     {c['python']}")
             print(f"  Xcode:      {c['xcode']}")
             
-            entry = {
-                "name": c['hostname'].split('.')[0],
-                "enabled": True,
-                "execution_mode": "ssh",
-                "ssh_target": c['host'],
-                "repo_path": "/Users/CHANGEME/Documents/YourSwiftProject",
-                "roles": ["worker", "build", "test"],
-                "models": ["gemini", "codex", "claude-opus"],
-                "priority": 80,
-                "max_concurrent_jobs": 2,
-                "max_heavy_jobs": 1,
-                "supports_xcode": True,
-                "supports_simulator": True,
-                "tags": ["remote", "discovered"]
-            }
+            entry = machine_entry_from_candidate(c)
             print("\nCopy this into .orchestrator/config/machines.json:")
             print(json.dumps(entry, indent=2))
     
@@ -215,9 +230,6 @@ def main():
         for c in unsuitable:
             print(f"\n--- Machine: {c['host']} ---")
             print(f"  Error:      {c['error']}")
-
-    if not suitable and not needs_keys and not unsuitable:
-        print("\nNo remote candidates found (excluding local machine).")
 
 if __name__ == "__main__":
     main()

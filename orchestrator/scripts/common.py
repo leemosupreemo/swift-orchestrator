@@ -488,7 +488,8 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
     sys.stdout.flush()
 
     if _ACTIVE_STATUS_BAR:
-        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Enter to cancel")
+        q_msg = "Enter to confirm" if default else "Enter to cancel"
+        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg=q_msg)
 
     input_text = default
     bg_style = "\033[48;5;236m"
@@ -1472,4 +1473,3 @@ def format_markdown_for_terminal(text: str) -> str:
             formatted_lines.append(f"  {formatted_wl}")
             
     return "\n".join(formatted_lines)
-

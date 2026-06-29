@@ -246,7 +246,7 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
         "Playwright MCP": detect_codex_integration(["playwright"]),
     }
 
-    return {
+    payload = {
         "machine": machine_name,
         "reachable": True,
         "hw": hw,
@@ -259,6 +259,7 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
         "active_xcodebuild_count": count_matching_processes("xcodebuild"),
         "active_simulator_count": count_matching_processes("Simulator.app/Contents/MacOS/Simulator"),
         "active_ai_jobs": len(active_jobs),
+        "repo_path": repo_path,
         "repo_exists": repo.exists(),
         "repo_path_ok": repo.exists(),
         "git_branch": git_branch,
@@ -269,6 +270,9 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
         "stale_processes": check_stale_processes(),
         "timestamp": now_iso(),
     }
+    if not repo.exists():
+        payload["repo_warning"] = f"Configured repo path does not exist: {repo_path}"
+    return payload
 
 
 def probe_machine(machine: dict[str, Any]) -> dict[str, Any]:
@@ -295,7 +299,10 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
     machine_name = machine["name"]
     
     local_script_path = Path(__file__).resolve()
-    remote_tmp_script_path = f"/tmp/probe_{local_script_path.name}"
+    local_common_path = local_script_path.parent / "common.py"
+    remote_tmp_dir = f"/tmp/orchestrator_probe_{machine_name}"
+    remote_tmp_script_path = f"{remote_tmp_dir}/probe_machine.py"
+    remote_tmp_common_path = f"{remote_tmp_dir}/common.py"
 
     print(f"      - \033[1;96mProbing remote machine {machine_name}...\033[0m")
     
@@ -303,16 +310,17 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
     successful_target = None
     
     for target in ssh_targets:
-        # 1. Sync the probe script itself to a temp location
+        # 1. Sync the probe script and its local common.py dependency to a temp location.
         try:
+            subprocess.run(["ssh", "-o", "ConnectTimeout=5", target, f"mkdir -p {shlex.quote(remote_tmp_dir)}"], check=True, capture_output=True)
             subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", str(local_script_path), f"{target}:{remote_tmp_script_path}"], check=True)
+            subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", str(local_common_path), f"{target}:{remote_tmp_common_path}"], check=True)
         except Exception as e:
             last_result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=str(e))
             continue
 
         # 2. Execute the synced script
         remote_script_cmd = (
-            f"cd {shlex.quote(repo_path)} && "
             f"python3 {remote_tmp_script_path} --probe-local "
             f"--machine-name {shlex.quote(machine_name)} "
             f"--repo-path {shlex.quote(repo_path)}"
@@ -326,7 +334,7 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
         
         # 3. Cleanup the temp script
         try:
-            subprocess.run(["ssh", "-o", "ConnectTimeout=2", target, f"rm {remote_tmp_script_path}"], capture_output=True, check=False)
+            subprocess.run(["ssh", "-o", "ConnectTimeout=2", target, f"rm -rf {shlex.quote(remote_tmp_dir)}"], capture_output=True, check=False)
         except:
             pass # Ignore cleanup failures
 
@@ -346,6 +354,7 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
             "active_xcodebuild_count": 0,
             "active_simulator_count": 0,
             "active_ai_jobs": 0,
+            "repo_path": repo_path,
             "repo_exists": False,
             "repo_path_ok": False,
             "probe_error": error_msg,
@@ -365,6 +374,7 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
             "active_xcodebuild_count": 0,
             "active_simulator_count": 0,
             "active_ai_jobs": 0,
+            "repo_path": repo_path,
             "repo_exists": False,
             "repo_path_ok": False,
             "probe_error": f"invalid probe output: {exc}",

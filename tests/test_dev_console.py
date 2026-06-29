@@ -18,6 +18,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import importlib
 import dev_console  # noqa: E402
 importlib.reload(dev_console)
+from model_registry import ModelCapability, ModelMetadata, ModelTier
 
 class DevConsoleTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -80,6 +81,85 @@ class DevConsoleTests(unittest.TestCase):
         
         self.assertEqual(new_machines, ["mac2"])
         mock_avail.assert_called() # Should have pinged the fleet
+
+    @patch("dev_console.input")
+    @patch("dev_console.prompt_input")
+    @patch("dev_console.prompt_confirm")
+    @patch("dev_console.write_json")
+    @patch("dev_console.load_machines")
+    @patch("discover_machines.discover_machine_candidates")
+    def test_discover_and_add_machines_saves_suitable_candidate(
+        self,
+        mock_discover,
+        mock_load,
+        mock_write,
+        mock_confirm,
+        mock_prompt_input,
+        _mock_input,
+    ):
+        mock_load.return_value = [{"name": "macair", "ssh_target": "macair.local"}]
+        mock_discover.return_value = {
+            "suitable": [
+                {
+                    "status": "suitable",
+                    "host": "Leemos-MacBook-Pro.local",
+                    "hostname": "Leemos-MacBook-Pro.local",
+                    "python": "Python 3.9.6",
+                    "xcode": "Xcode 26.6",
+                }
+            ],
+            "needs_keys": [],
+            "unsuitable": [],
+        }
+        mock_confirm.return_value = True
+        mock_prompt_input.return_value = "/Users/leemo/Projects/App"
+
+        machines, selected = dev_console.discover_and_add_machines(["macair"])
+
+        self.assertIn("Leemos-MacBook-Pro", selected)
+        self.assertEqual(machines[-1]["name"], "Leemos-MacBook-Pro")
+        self.assertEqual(machines[-1]["ssh_target"], "Leemos-MacBook-Pro.local")
+        self.assertEqual(machines[-1]["repo_path"], "/Users/leemo/Projects/App")
+        saved_payload = mock_write.call_args.args[1]
+        self.assertEqual(saved_payload["machines"][-1]["name"], "Leemos-MacBook-Pro")
+
+    @patch("dev_console.input")
+    @patch("dev_console.prompt_confirm")
+    @patch("dev_console.write_json")
+    @patch("dev_console.load_machines")
+    def test_remove_machine_from_fleet_updates_config_and_session(
+        self,
+        mock_load,
+        mock_write,
+        mock_confirm,
+        _mock_input,
+    ):
+        mock_load.return_value = [
+            {"name": "macair", "ssh_target": "macair.local"},
+            {"name": "macpro", "ssh_target": "macpro.local"},
+        ]
+        mock_confirm.return_value = True
+
+        machines, selected, removed = dev_console.remove_machine_from_fleet("macpro", ["macair", "macpro"])
+
+        self.assertTrue(removed)
+        self.assertEqual([m["name"] for m in machines], ["macair"])
+        self.assertEqual(selected, ["macair"])
+        saved_payload = mock_write.call_args.args[1]
+        self.assertEqual([m["name"] for m in saved_payload["machines"]], ["macair"])
+
+    @patch("dev_console.input")
+    @patch("dev_console.write_json")
+    @patch("dev_console.load_machines")
+    def test_remove_machine_from_fleet_keeps_last_machine(self, mock_load, mock_write, _mock_input):
+        mock_load.return_value = [{"name": "macair", "ssh_target": "macair.local"}]
+
+        machines, selected, removed = dev_console.remove_machine_from_fleet("macair", ["macair"])
+
+        self.assertFalse(removed)
+        self.assertEqual([m["name"] for m in machines], ["macair"])
+        self.assertEqual(selected, ["macair"])
+        mock_write.assert_not_called()
 
     @patch("dev_console.get_key")
     @patch("dev_console.clear_screen")
@@ -250,6 +330,75 @@ Option A: Headless Auto-Signing (Recommended)
                     (SCRIPTS_DIR / script_name).exists(),
                     f"{choice} references missing script: {script_name}",
                 )
+
+    @patch("dev_console.subprocess.run")
+    @patch("dev_console.shutil.which")
+    @patch("dev_console.get_all_models")
+    def test_model_selection_marks_missing_ollama_model_not_enabled(self, mock_get_models, mock_which, mock_run):
+        mock_get_models.return_value = [
+            ModelMetadata(
+                id="qwen-3.7-max",
+                family="qwen",
+                tier=ModelTier.HIGH,
+                capabilities=[ModelCapability.CODING],
+                required_clis=["ollama"],
+            )
+        ]
+        mock_which.side_effect = lambda name: f"/usr/bin/{name}" if name == "ollama" else None
+        mock_run.return_value = MagicMock(returncode=0, stdout="NAME ID SIZE MODIFIED\n", stderr="")
+
+        options, _value_map, details_map = dev_console.get_model_selection_data()
+
+        qwen_label = next(option for option in options if option.startswith("qwen-3.7-max"))
+        self.assertIn("[Not Enabled]", qwen_label)
+        details = "\n".join(details_map[qwen_label])
+        self.assertIn("Access:", details)
+        self.assertIn("Not enabled", details)
+        self.assertIn("Backend:", details)
+        self.assertIn("ollama", details)
+        self.assertIn("Local model:", details)
+        self.assertIn("missing", details)
+        self.assertIn("ollama pull qwen-3.7-max", details)
+
+    @patch("dev_console.subprocess.run")
+    @patch("dev_console.shutil.which")
+    @patch("dev_console.get_all_models")
+    def test_model_selection_enables_installed_ollama_model(self, mock_get_models, mock_which, mock_run):
+        mock_get_models.return_value = [
+            ModelMetadata(
+                id="qwen-3.7-max",
+                family="qwen",
+                tier=ModelTier.HIGH,
+                capabilities=[ModelCapability.CODING],
+                required_clis=["ollama"],
+            )
+        ]
+        mock_which.side_effect = lambda name: f"/usr/bin/{name}" if name == "ollama" else None
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="NAME ID SIZE MODIFIED\nqwen-3.7-max:latest abc 7 GB now\n",
+            stderr="",
+        )
+
+        options, _value_map, details_map = dev_console.get_model_selection_data()
+
+        qwen_label = next(option for option in options if option.startswith("qwen-3.7-max"))
+        self.assertNotIn("[Not Enabled]", qwen_label)
+        details = "\n".join(details_map[qwen_label])
+        self.assertIn("Access:", details)
+        self.assertIn("Ready", details)
+        self.assertIn("Local model:", details)
+        self.assertIn("installed", details)
+
+    def test_model_selection_defaults_skip_unavailable_labels(self):
+        value_map = {
+            "gpt-5.3-codex": "gpt-5.3-codex",
+            "qwen-3.7-max \033[1;91m[Not Enabled]\033[0m": "qwen-3.7-max",
+        }
+
+        defaults = dev_console.resolve_model_selection_defaults(["gpt-5.3-codex", "qwen-3.7-max"], value_map)
+
+        self.assertEqual(defaults, ["gpt-5.3-codex"])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PACKAGE_ROOT / "orchestrator" / "scripts"
@@ -277,6 +277,17 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         mock_get_key.side_effect = ["b"]
         with self.assertRaises(common.BackException):
             common.prompt_input("Path:", allow_back=True)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("sys.stdout.write")
+    def test_prompt_input_default_hint_confirms_enter(self, _mock_write, _mock_get_key, _mock_isatty) -> None:
+        status_bar = SimpleNamespace(render=Mock())
+        with patch.object(common, "_ACTIVE_STATUS_BAR", status_bar):
+            res = common.prompt_input("Remote repo path:", default="/repo/path")
+
+        self.assertEqual(res, "/repo/path")
+        status_bar.render.assert_called_with(at_bottom=True, force=True, q_msg="Enter to confirm")
 
 
 class MarkdownFormatterTests(unittest.TestCase):

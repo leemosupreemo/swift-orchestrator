@@ -69,6 +69,8 @@ SELF_TEST_STATIC_COMMANDS: dict[str, tuple[str, str, list[str]]] = {
     "p": ("Plug & Play Self-Tests", "-m unittest", ["tests/test_check_setup.py"]),
 }
 
+UNAVAILABLE_MODEL_MARKERS = ("[Not Installed]", "[Not Enabled]")
+
 import shutil
 
 def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, list[str]]]:
@@ -98,6 +100,7 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
 
     # Cache for CLI auth check: {cli_name: is_authed}
     cli_auth_cache = {}
+    ollama_models_cache: set[str] | None = None
 
     def is_cli_authed(cli: str) -> bool:
         if cli in cli_auth_cache:
@@ -146,6 +149,33 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         cli_auth_cache[cli] = ready
         return ready
 
+    def get_installed_ollama_models() -> set[str]:
+        nonlocal ollama_models_cache
+        if ollama_models_cache is not None:
+            return ollama_models_cache
+
+        installed: set[str] = set()
+        try:
+            res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=1.5)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    parts = line.split()
+                    if not parts or parts[0].lower() == "name":
+                        continue
+                    name = parts[0].strip()
+                    installed.add(name)
+                    installed.add(name.split(":", 1)[0])
+        except Exception:
+            pass
+
+        ollama_models_cache = installed
+        return installed
+
+    def required_ollama_model_id(model_id: str) -> str:
+        if model_id == "deepseek":
+            return "deepseek-coder"
+        return model_id
+
     options = []
     value_map = {}
     details_map = {}
@@ -174,6 +204,8 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         cli_installed = True
         cli_authed = True
         missing_cli = None
+        missing_ollama_model = None
+        resolved_clis = []
         
         for cli in m.required_clis:
             binary = cli
@@ -182,12 +214,18 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
                     binary = "agy"
                 elif shutil.which("antigravity") is not None:
                     binary = "antigravity"
+            resolved_clis.append(binary)
             if shutil.which(binary) is None:
                 cli_installed = False
                 missing_cli = cli
                 break
             elif not is_cli_authed(cli):
                 cli_authed = False
+            elif binary == "ollama":
+                ollama_model = required_ollama_model_id(m.id)
+                if ollama_model not in get_installed_ollama_models():
+                    cli_authed = False
+                    missing_ollama_model = ollama_model
 
         # Overall readiness
         is_ready = (cli_installed and cli_authed) or has_api_key
@@ -203,16 +241,47 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         
         options.append(label)
         value_map[label] = m.id
+
+        if not cli_installed:
+            access_str = "\033[1;90mNot installed\033[0m"
+        elif is_ready:
+            access_str = "\033[92mReady\033[0m"
+        else:
+            access_str = "\033[1;91mNot enabled\033[0m"
+
+        if not m.required_clis:
+            cli_str = "none"
+        else:
+            cli_str = ", ".join(resolved_clis)
+
+        credential_sources = []
+        if has_api_key:
+            credential_sources.append("API key")
+        if cli_installed and cli_authed and not missing_ollama_model:
+            credential_sources.append("CLI login/local model")
+        credential_str = ", ".join(credential_sources) if credential_sources else "none detected"
         
         details = [
-            f"\033[1;97mFamily:\033[0m        \033[90m{m.family.capitalize()}\033[0m",
-            f"\033[1;97mTier:\033[0m          \033[90m{tier_str}\033[0m",
-            f"\033[1;97mCost:\033[0m          \033[90m{m.cost_factor:.1f}x\033[0m",
-            f"\033[1;97mCapabilities:\033[0m  \033[90m{', '.join([c.value.capitalize() for c in m.capabilities])}\033[0m"
+            f"\033[1;97mModel:\033[0m        \033[90m{m.id}\033[0m",
+            f"\033[1;97mAccess:\033[0m       {access_str}",
+            f"\033[1;97mProvider:\033[0m     \033[90m{m.family.capitalize()}\033[0m",
+            f"\033[1;97mBackend:\033[0m      \033[90m{cli_str}\033[0m",
+            f"\033[1;97mCredentials:\033[0m  \033[90m{credential_str}\033[0m",
+            f"\033[1;97mTier:\033[0m         \033[90m{tier_str}\033[0m",
+            f"\033[1;97mCost:\033[0m         \033[90m{m.cost_factor:.1f}x\033[0m",
+            f"\033[1;97mCapabilities:\033[0m \033[90m{', '.join([c.value.capitalize() for c in m.capabilities])}\033[0m"
         ]
+
+        if "ollama" in m.required_clis:
+            ollama_model = required_ollama_model_id(m.id)
+            installed = ollama_model in get_installed_ollama_models()
+            state = "\033[92minstalled\033[0m" if installed else "\033[1;91mmissing\033[0m"
+            details.append(f"\033[1;97mLocal model:\033[0m  {state} \033[90m({ollama_model})\033[0m")
         
         if not cli_installed:
             details.append(f"\033[1;91mWarning: Missing required CLI '{missing_cli}'\033[0m")
+        elif missing_ollama_model:
+            details.append(f"\033[1;91mWarning: Ollama model '{missing_ollama_model}' is not installed. Run: ollama pull {missing_ollama_model}\033[0m")
         elif not is_ready:
             details.append(f"\033[1;91mWarning: CLI '{m.required_clis[0]}' is not logged in / authenticated\033[0m")
             
@@ -234,6 +303,22 @@ def print_model_selection_loading(title: str, status_bar: StatusBar | None = Non
     if status_bar:
         status_bar.render(at_bottom=True, force=True)
     sys.stdout.flush()
+
+def resolve_model_selection_defaults(allowed_models: list[str], value_map: dict[str, str]) -> list[str]:
+    from model_registry import get_model
+
+    resolved_ids = []
+    for mid in allowed_models:
+        if m := get_model(mid):
+            resolved_ids.append(m.id)
+        else:
+            resolved_ids.append(mid)
+
+    return [
+        label
+        for label, mid in value_map.items()
+        if mid in resolved_ids and not any(marker in label for marker in UNAVAILABLE_MODEL_MARKERS)
+    ]
 
 def get_online_machines(allowed: list[str]) -> list[str]:
     return [m for m in allowed if FLEET_AVAILABILITY.get(m, False)]
@@ -902,6 +987,115 @@ def refresh_fleet_status(machines_config: list[dict[str, Any]]) -> None:
     for t in threads:
         t.join()
 
+def discover_and_add_machines(session_allowed_machines: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    from discover_machines import discover_machine_candidates, machine_entry_from_candidate
+
+    print_header("Discovering Remote Machines")
+    candidates = discover_machine_candidates()
+    suitable = candidates.get("suitable", [])
+    needs_keys = candidates.get("needs_keys", [])
+    unsuitable = candidates.get("unsuitable", [])
+
+    if not suitable and not needs_keys and not unsuitable:
+        print("\nNo remote candidates found (excluding local machine).")
+        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+        return load_machines(), session_allowed_machines
+
+    machines_config = load_machines()
+    existing_names = {m.get("name") for m in machines_config}
+    existing_targets = set()
+    for m in machines_config:
+        target = m.get("ssh_target")
+        if isinstance(target, list):
+            existing_targets.update(target)
+        elif target:
+            existing_targets.add(target)
+
+    added_names: list[str] = []
+    if suitable:
+        print(f"\nFound {len(suitable)} suitable machine(s). Review each candidate below.")
+
+    for idx, candidate in enumerate(suitable, 1):
+        entry = machine_entry_from_candidate(candidate, repo_path=str(ROOT))
+        name = entry["name"]
+        target = entry["ssh_target"]
+
+        print(f"\n--- Candidate {idx} of {len(suitable)}: \033[97m{candidate.get('hostname', target)}\033[0m ---")
+        print(f"  SSH Target: \033[90m{target}\033[0m")
+        print(f"  Python:     \033[90m{candidate.get('python', 'unknown')}\033[0m")
+        print(f"  Xcode:      \033[90m{candidate.get('xcode', 'unknown')}\033[0m")
+
+        if name in existing_names or target in existing_targets:
+            print("  \033[90mAlready configured; skipping.\033[0m")
+            continue
+
+        if not prompt_confirm(f"Add {name} to the fleet now?", default=True):
+            continue
+
+        repo_path = prompt_input("Remote repo path:", default=str(ROOT), placeholder=str(ROOT))
+        if not repo_path:
+            repo_path = str(ROOT)
+        entry["repo_path"] = repo_path
+
+        machines_config.append(entry)
+        existing_names.add(name)
+        existing_targets.add(target)
+        added_names.append(name)
+        if name not in session_allowed_machines:
+            session_allowed_machines.append(name)
+        print(f"  ✅ Added \033[97m{name}\033[0m")
+
+    if needs_keys:
+        print(f"\n\033[93mSSH setup needed for {len(needs_keys)} discovered machine(s):\033[0m")
+        for candidate in needs_keys:
+            print(f"  - {candidate.get('host')}: {candidate.get('error', 'SSH authentication failed')}")
+
+    if unsuitable:
+        print(f"\n\033[90mSkipped {len(unsuitable)} unsuitable machine(s).\033[0m")
+
+    if added_names:
+        write_json(CONFIG_DIR / "machines.json", {"version": 1, "machines": machines_config})
+        print(f"\n✅ Saved {len(added_names)} machine(s) to \033[97m{CONFIG_DIR / 'machines.json'}\033[0m")
+    else:
+        print("\nNo new machines added.")
+
+    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+    return machines_config, session_allowed_machines
+
+def remove_machine_from_fleet(machine_name: str, session_allowed_machines: list[str]) -> tuple[list[dict[str, Any]], list[str], bool]:
+    machines_config = load_machines()
+    target = next((m for m in machines_config if m.get("name") == machine_name), None)
+    if not target:
+        print(f"\n\033[1;91mMachine not found: {machine_name}\033[0m")
+        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+        return machines_config, session_allowed_machines, False
+
+    if len(machines_config) <= 1:
+        print("\n\033[1;91mCannot remove the only configured machine.\033[0m")
+        print("Add another machine before removing this one.")
+        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+        return machines_config, session_allowed_machines, False
+
+    print(f"\n  Removing machine: \033[97m{machine_name}\033[0m")
+    ssh_target = target.get("ssh_target")
+    if ssh_target:
+        print(f"  SSH Target: \033[90m{ssh_target}\033[0m")
+
+    if not prompt_confirm("Remove this machine from the fleet?", default=False):
+        print("⚠️  No changes made.")
+        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+        return machines_config, session_allowed_machines, False
+
+    machines_config = [m for m in machines_config if m.get("name") != machine_name]
+    session_allowed_machines = [m for m in session_allowed_machines if m != machine_name]
+    write_json(CONFIG_DIR / "machines.json", {"version": 1, "machines": machines_config})
+    FLEET_AVAILABILITY.pop(machine_name, None)
+    FLEET_DETAILS.pop(machine_name, None)
+
+    print(f"✅ Removed \033[97m{machine_name}\033[0m")
+    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+    return machines_config, session_allowed_machines, True
+
 def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
     global FLEET_AVAILABILITY
     
@@ -986,14 +1180,15 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                 footer_actions = [
                     "[\033[1;92mD\033[0m] Discover remote machines",
                     "[\033[1;92mN\033[0m] Rename selected machine",
-                    "[\033[1;92mZ\033[0m] Zombie purge & cache cleanup",
+                    "[\033[1;91mR\033[0m] Remove selected machine",
+                    "[\033[1;91mZ\033[0m] Zombie purge & cache cleanup",
                     "[\033[1;91mB\033[0m] Back",
                 ]
                 new_allowed = prompt_checkbox(
                     "Active Machines for This Session",
                     machine_names,
                     session_allowed_machines,
-                    extra_keys=["d", "n", "z", "b"],
+                    extra_keys=["d", "n", "r", "z", "b"],
                     footer_actions=footer_actions,
                     details_map=details_map,
                     details_title="Selected Machine",
@@ -1024,10 +1219,7 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                         continue
                     return session_allowed_machines
                 if exc.key == "d":
-                    print_header("Discovering Remote Machines")
-                    run_script("discover_machines.py", [])
-                    # Re-check availability after discovery
-                    machines_config = load_machines()
+                    machines_config, session_allowed_machines = discover_and_add_machines(session_allowed_machines)
                     print("\n\033[93mRe-pinging fleet...\033[0m")
                     refresh_fleet_status(machines_config)
                     continue
@@ -1074,6 +1266,12 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                         sys.stdout.write("\033[?25l")
                         sys.stdout.flush()
                         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                    continue
+                elif exc.key == "r" and exc.value:
+                    machines_config, session_allowed_machines, removed = remove_machine_from_fleet(exc.value, session_allowed_machines)
+                    if removed:
+                        print("\n\033[93mRe-pinging fleet...\033[0m")
+                        refresh_fleet_status(machines_config)
                     continue
                 elif exc.key == "z":
                     handle_fleet_hygiene(session_allowed_machines)
@@ -2206,18 +2404,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print_model_selection_loading("Override LLM Models for Job", status_bar=status_bar)
                     options, value_map, details_map = get_model_selection_data()
                     
-                    # Map current IDs back to labels for defaults
+                    # Map current IDs back to enabled labels for defaults.
                     curr_allowed_ids = job.get("allowed_models", list(DEFAULT_FALLBACKS))
-                    # Handle aliases in current settings by resolving them
-                    from model_registry import get_model
-                    resolved_ids = []
-                    for mid in curr_allowed_ids:
-                        if m := get_model(mid):
-                            resolved_ids.append(m.id)
-                        else:
-                            resolved_ids.append(mid)
-                            
-                    curr_defaults = [label for label, mid in value_map.items() if mid in resolved_ids]
+                    curr_defaults = resolve_model_selection_defaults(curr_allowed_ids, value_map)
 
                     try:
                         footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
@@ -3071,6 +3260,12 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
         print(f"\n  \033[90m┌─\033[0m \033[1;97m{name}\033[0m")
         print(f"  \033[90m│\033[0m  Status:    {status}")
         print(f"  \033[90m│\033[0m  Coverage:  {readiness_color}{installed_count}/{total_count} tools, {readiness}\033[0m")
+        if probe.get("repo_path") and not probe.get("repo_path_ok", True):
+            print(f"  \033[90m│\033[0m  Repo Path: \033[1;91mMISSING\033[0m \033[90m{probe.get('repo_path')}\033[0m")
+        elif probe.get("repo_path"):
+            print(f"  \033[90m│\033[0m  Repo Path: \033[92mOK\033[0m \033[90m{probe.get('repo_path')}\033[0m")
+        if probe.get("repo_warning"):
+            print(f"  \033[90m│\033[0m  Repo Note: \033[93m{probe.get('repo_warning')}\033[0m")
         if probe.get("probe_error"):
             print(f"  \033[90m│\033[0m  Error:     \033[1;91m{probe.get('probe_error')}\033[0m")
         print(f"  \033[90m│\033[0m  Available: \033[92m{', '.join(installed) if installed else 'none'}\033[0m")
@@ -3397,16 +3592,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     print_model_selection_loading("Select LLM Models for Session", status_bar=status_bar)
                     options, value_map, details_map = get_model_selection_data()
 
-                    # Resolve current session defaults
-                    from model_registry import get_model
-                    resolved_session_ids = []
-                    for mid in session_allowed_models:
-                        if m := get_model(mid):
-                            resolved_session_ids.append(m.id)
-                        else:
-                            resolved_session_ids.append(mid)
-
-                    curr_defaults = [label for label, mid in value_map.items() if mid in resolved_session_ids]
+                    curr_defaults = resolve_model_selection_defaults(session_allowed_models, value_map)
 
                     try:
                         footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
