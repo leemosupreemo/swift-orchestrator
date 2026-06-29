@@ -44,10 +44,11 @@ class TestCheckSetup(unittest.TestCase):
         
         self.assertIn("❌ GitHub CLI (gh)", output)
         self.assertIn("❌ CRITICAL ERROR: No AI providers found", output)
-        self.assertIn("OPTIONAL MCP / CODEX EXTENSIONS", output)
+        self.assertIn("OPTIONAL INTEGRATIONS & NETWORKS", output)
         self.assertIn("○ GitHub MCP/plugin", output)
         self.assertIn("recommended, not required", output)
         
+        self.assertIn("○ Tailscale VPN", output)
         self.assertIn("💡 NEXT STEP: Create", output)
 
     @patch("shutil.which")
@@ -132,6 +133,75 @@ enabled = true
         self.assertIn("✅ Ollama (Local AI)", output)
         self.assertIn("✅ READY: At least one AI provider is configured.", output)
         self.assertIn("❌ Manual API Keys", output) # Should be red but overall state is ready
+
+    def test_check_signing_warning(self) -> None:
+        mock_config = MagicMock()
+        mock_config.firebase_distribution = True
+        mock_config.development_team = ""
+        mock_config.asc_key_id = ""
+        mock_config.asc_issuer_id = ""
+        mock_config.asc_key_path = ""
+        mock_config.provisioning_profile_specifier = ""
+        mock_config.xcode_project = None
+        mock_config.xcode_workspace = None
+        
+        with patch.object(check_setup, "PROJECT_CONFIG", mock_config), \
+             patch("sys.stdout", new_callable=io.StringIO) as mock_stdout, \
+             patch("shutil.which", return_value=None), \
+             patch("pathlib.Path.exists", return_value=False):
+            check_setup.check()
+            
+        output = mock_stdout.getvalue()
+        self.assertIn("IOS CODE SIGNING & DISTRIBUTION", output)
+        self.assertIn("Development Team ID", output)
+        self.assertIn("Signing Credentials", output)
+        self.assertIn("Option A: Headless Auto-Signing", output)
+        self.assertIn("Option B: Manual Signing", output)
+
+    @patch("setup_distribution.installed_provisioning_profile_names", return_value={"My Test Profile"})
+    def test_check_signing_manual_profile_found(self, mock_installed) -> None:
+        mock_config = MagicMock()
+        mock_config.firebase_distribution = True
+        mock_config.development_team = "TEAM123"
+        mock_config.asc_key_id = ""
+        mock_config.asc_issuer_id = ""
+        mock_config.asc_key_path = ""
+        mock_config.provisioning_profile_specifier = "My Test Profile"
+        mock_config.xcode_project = None
+        mock_config.xcode_workspace = None
+        
+        with patch.object(check_setup, "PROJECT_CONFIG", mock_config), \
+             patch("sys.stdout", new_callable=io.StringIO) as mock_stdout, \
+             patch("shutil.which", return_value=None), \
+             patch("pathlib.Path.exists", return_value=False):
+            check_setup.check()
+            
+        output = mock_stdout.getvalue()
+        self.assertIn("Provisioning Profile (My Test Profile)", output)
+        self.assertIn("FOUND (INSTALLED)", output)
+
+    @patch("setup_distribution.installed_provisioning_profile_names", return_value={"Other Profile"})
+    def test_check_signing_manual_profile_missing(self, mock_installed) -> None:
+        mock_config = MagicMock()
+        mock_config.firebase_distribution = True
+        mock_config.development_team = "TEAM123"
+        mock_config.asc_key_id = ""
+        mock_config.asc_issuer_id = ""
+        mock_config.asc_key_path = ""
+        mock_config.provisioning_profile_specifier = "My Test Profile"
+        mock_config.xcode_project = None
+        mock_config.xcode_workspace = None
+        
+        with patch.object(check_setup, "PROJECT_CONFIG", mock_config), \
+             patch("sys.stdout", new_callable=io.StringIO) as mock_stdout, \
+             patch("shutil.which", return_value=None), \
+             patch("pathlib.Path.exists", return_value=False):
+            check_setup.check()
+            
+        output = mock_stdout.getvalue()
+        self.assertIn("Provisioning Profile (My Test Profile)", output)
+        self.assertIn("NOT FOUND", output)
+
 
 if __name__ == "__main__":
     unittest.main()

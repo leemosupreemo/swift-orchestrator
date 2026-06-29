@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import subprocess
 from pathlib import Path
@@ -13,7 +14,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import ROOT, read_json
+from common import ROOT, read_json, format_markdown_for_terminal
 from orchestrator.project_config import PROJECT_CONFIG
 
 def send_final_notification(job: dict[str, Any], title: str, branch: str, success: bool):
@@ -182,13 +183,60 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
                     print("  1. Open Xcode > Settings > Accounts.")
                     print("  2. Re-authenticate your Apple ID, including 2FA if prompted.")
                     print("  3. Re-run the delivery smoke test.")
-                elif "No profiles for" in log_content or "No signing certificate" in log_content:
-                    print("\n\033[1;91mSigning setup needs attention\033[0m")
-                    print("Xcode could not find a certificate or provisioning profile for this app.")
+                elif "User interaction is not allowed" in log_content or "errSecInternalComponent" in log_content:
+                    print("\n\033[1;91mKeychain is locked / User interaction not allowed\033[0m")
+                    print("Xcode could not access your signing certificate because the login keychain is locked.")
                     print("\nNext steps:")
-                    print("  1. Run the Dev Console signing validation checks.")
-                    print("  2. Confirm project.json has the correct Team ID and Bundle Identifier.")
-                    print("  3. Run orchestrator wizard if signing settings need to be regenerated.")
+                    print("  1. Run 'orchestrator console'.")
+                    print("  2. Go to Configuration & Tools -> [K] Configure Headless Signing.")
+                    print("  3. Provide your keychain password to authorize automatic unlocking during builds.")
+                elif "No profiles for" in log_content or "No signing certificate" in log_content:
+                    missing_bundle_id = None
+                    bundle_match = re.search(r"No profiles for '([^']+)' were found", log_content)
+                    if not bundle_match:
+                        bundle_match = re.search(r"\"([^\"\s]+)\" requires a provisioning profile", log_content)
+                    if bundle_match:
+                        missing_bundle_id = bundle_match.group(1)
+                    
+                    bundle_info = f"\n**Xcode was looking for a profile matching Bundle ID:** `{missing_bundle_id}`\n" if missing_bundle_id else ""
+                    
+                    msg = f"""# Signing setup needs attention
+
+Xcode could not find a certificate or provisioning profile for this app.
+{bundle_info}
+Please configure code signing using one of the two options below:
+
+## Option A: Headless Auto-Signing (Recommended)
+
+This is recommended for remote workers, CI, or automated builds to prevent Xcode login prompts:
+
+1. Go to **App Store Connect** -> **Users and Access** -> **Integrations** -> **Keys**.
+2. Generate an API Key (with the **Developer** or **App Manager** role) and download the `.p8` key file.
+3. Update your `.orchestrator/project.json` with the key details:
+
+```json
+{{
+  "asc_key_id": "{PROJECT_CONFIG.asc_key_id or '<Key ID>'}",
+  "asc_issuer_id": "{PROJECT_CONFIG.asc_issuer_id or '<Issuer ID>'}",
+  "asc_key_path": "{PROJECT_CONFIG.asc_key_path or '<Path to your .p8 file>'}"
+}}
+```
+
+## Option B: Manual Signing
+
+If you prefer to sign builds manually:
+
+1. Create and download an **Ad-Hoc / Distribution Provisioning Profile** from the Apple Developer Portal.
+2. Install the profile locally on the build machine by double-clicking it.
+3. Add the profile name to `.orchestrator/project.json`:
+
+```json
+{{
+  "provisioning_profile_specifier": "{PROJECT_CONFIG.provisioning_profile_specifier or '<Profile Name>'}"
+}}
+```
+"""
+                    print(format_markdown_for_terminal(msg))
 
             send_final_notification(job, title, branch, False)
             sys.exit(res)

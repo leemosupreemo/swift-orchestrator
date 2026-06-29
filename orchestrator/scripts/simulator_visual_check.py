@@ -64,7 +64,17 @@ def run_simctl(args: list[str], log_file: Path) -> bool:
 
 
 def markdown_link(label: str, path: Path) -> str:
-    return f"[{label}]({path.relative_to(ROOT)})"
+    rel_path = path.relative_to(ROOT)
+    abs_path = path.resolve()
+    abs_uri = f"file://{abs_path}"
+    link_text = f"[{label}]({rel_path})"
+    
+    if sys.stdout.isatty():
+        interactive_link = f"\033]8;;{abs_uri}\033\\{link_text}\033]8;;\033\\"
+    else:
+        interactive_link = link_text
+        
+    return f"{interactive_link} ({abs_uri})"
 
 
 def screenshot_report_block(idx: int, path: Path) -> str:

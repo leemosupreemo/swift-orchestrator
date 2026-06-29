@@ -169,6 +169,32 @@ def check_stale_processes() -> list[dict[str, Any]]:
     except:
         return []
 
+def codex_home() -> Path:
+    try:
+        return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    except Exception:
+        return Path("/tmp/.codex")
+
+def read_codex_config_text() -> str:
+    try:
+        config_path = codex_home() / "config.toml"
+        return config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    except Exception:
+        return ""
+
+def detect_codex_integration(names: list[str]) -> bool:
+    try:
+        haystacks = [read_codex_config_text().lower()]
+        plugin_cache = codex_home() / "plugins" / "cache"
+        if plugin_cache.exists():
+            try:
+                haystacks.extend(str(path).lower() for path in plugin_cache.rglob("*"))
+            except Exception:
+                pass
+        return any(name.lower() in haystack for name in names for haystack in haystacks)
+    except Exception:
+        return False
+
 def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
     try:
         load_1m, load_5m, _load_15m = os.getloadavg()
@@ -213,6 +239,13 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
         except:
             pass
 
+    mcp_plugins = {
+        "GitHub MCP/plugin": detect_codex_integration(["github"]),
+        "XcodeBuildMCP / iOS plugin": detect_codex_integration(["xcodebuildmcp", "build-ios-apps"]),
+        "Sentry MCP/plugin": detect_codex_integration(["sentry"]),
+        "Playwright MCP": detect_codex_integration(["playwright"]),
+    }
+
     return {
         "machine": machine_name,
         "reachable": True,
@@ -232,6 +265,7 @@ def probe_local(machine_name: str, repo_path: str) -> dict[str, Any]:
         "git_head_hash": git_head_hash,
         "git_dirty": git_dirty,
         "binaries": installed_bins,
+        "mcp_plugins": mcp_plugins,
         "stale_processes": check_stale_processes(),
         "timestamp": now_iso(),
     }

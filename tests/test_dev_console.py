@@ -224,10 +224,9 @@ class DevConsoleTests(unittest.TestCase):
 \033[1;91mSigning setup needs attention\033[0m
 Xcode could not find a certificate or provisioning profile for this app.
 
-Next steps:
-  1. Run the Dev Console signing validation checks.
-  2. Confirm project.json has the correct Team ID and Bundle Identifier.
-  3. Run orchestrator wizard if signing settings need to be regenerated.
+Detailed Manual Steps / Options to Fix This:
+Option A: Headless Auto-Signing (Recommended)
+...
 
 ❌ Smoke delivery failed during build/distribution.
 """
@@ -235,7 +234,7 @@ Next steps:
         summary = dev_console.script_failure_summary(output)
 
         self.assertIn("Signing setup needs attention", summary)
-        self.assertIn("Run the Dev Console signing validation checks", summary)
+        self.assertIn("Option A: Headless Auto-Signing", summary)
         self.assertNotIn("Smoke delivery failed", summary)
 
 

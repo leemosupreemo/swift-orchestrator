@@ -1,55 +1,57 @@
-# Getting Started
+# Getting Started 🚀
 
-Orchestrator is a terminal dev console for running structured AI coding workflows on Swift and Xcode projects. It helps you turn a request into a tracked job, route that job through planning/build/review steps, run project checks, and optionally coordinate remote Macs for heavier build and test work.
+Orchestrator is a terminal dev console for running structured AI coding workflows on Swift and Xcode projects. It helps you turn a request into a tracked job, route that job through planning/build/review steps, run project checks, and coordinate optional remote Macs for heavier build/test work.
 
 Use this guide if you are new and want to understand what to run first.
 
-## What Orchestrator Does
+## What Orchestrator Does 🛠️
 
-Orchestrator gives your project a repeatable AI workflow:
+Orchestrator gives your project a repeatable, high-fidelity AI workflow:
 
-- Create jobs for bug fixes, features, refactors, design prototypes, or test coverage.
-- Give agents the project context they need through `AGENTS.md`, docs, logs, and prompts.
-- Run builds, tests, visual checks, and delivery scripts from one console.
-- Keep job state, logs, output, and review artifacts under `.orchestrator/`.
-- Optionally use remote Mac workers for fleet builds and tests.
+- **Create Jobs**: For bug fixes, features, refactors, design prototypes, or test coverage.
+- **Provide Context**: Feed agents context via `AGENTS.md`, docs, logs, and prompt guidelines.
+- **Run Tasks**: Build, test, perform visual checks, and run delivery scripts from one console.
+- **Track History**: Keep job state, logs, outputs, and review artifacts clean under `.orchestrator/`.
+- **Coordinate Workers**: Use remote Mac worker machines for fleet builds and tests.
 
-It is not a replacement for your repository. It is a project-local workflow layer around your repo, your build commands, your AI providers, and your optional worker machines.
+It is not a replacement for your repository. It acts as a project-local workflow layer around your repository, build commands, AI providers, and optional worker machines.
 
-## First Project Setup
+## First Project Setup ⚙️
 
-From your Swift or Xcode project root:
+From your Swift or Xcode project root, run the setup wizard:
 
 ```bash
 orchestrator wizard
 ```
 
-The wizard detects your project, creates `.orchestrator/project.json`, asks which AI providers/models to use, and can create starter docs.
+The wizard detects your project, creates `.orchestrator/project.json`, configures AI providers and models, and sets up starter docs.
 
-Then run:
+Then, verify your setup and start the console:
 
 ```bash
 orchestrator check
 orchestrator console
 ```
 
-Use `orchestrator check` to verify local prerequisites. Use `orchestrator console` for the interactive workflow.
+- Use `orchestrator check` to verify local prerequisites and environment keys.
+- Use `orchestrator console` to launch the interactive dev console interface.
 
-## First Job
+## First Job 🧠
 
 In the Dev Console:
 
-1. Choose `New AI Job`.
-2. Pick the job type that matches your goal.
-3. Describe the change, bug, or feature in plain language.
-4. Choose whether to plan only or dispatch implementation.
-5. Review the generated plan and progress from the job history.
+1. Select **New AI Job** from the main menu.
+2. Choose the job type that best matches your target goal.
+3. Describe the change, bug, or feature request in plain language.
+4. Choose whether to plan only or dispatch full implementation immediately.
+5. Review the generated plan and track progress in real-time from the job history.
 
-For small fixes, use the quick/iteration paths. For larger features, use the design-first or planning paths so the agent has a clearer target before editing code.
+> [!TIP]
+> Use quick/iteration paths for small fixes. Use design-first or planning paths for larger features to give agents a clear direction before editing code.
 
-## Where Things Live
+## Where Things Live 📂
 
-Important project files:
+Important project files and directories:
 
 ```text
 .orchestrator/project.json        Project configuration
@@ -62,23 +64,25 @@ docs/build-test-commands.md        Canonical build and test commands
 docs/ai-workflow.md                Project AI workflow notes
 ```
 
-Runtime job logs and outputs are intentionally kept separate from the source files the agents edit.
+Note: Runtime logs and job outputs are kept separate from source code to avoid cluttering your repository.
 
-## Common Commands
+## Common Commands 💻
+
+Quick reference for essential CLI commands:
 
 ```bash
-orchestrator wizard
-orchestrator check
-orchestrator check-config
-orchestrator console
-orchestrator projects
-orchestrator use /path/to/project
-orchestrator update
+orchestrator wizard        # Launch setup wizard
+orchestrator check         # Verify system prerequisites
+orchestrator check-config  # Check project config for errors
+orchestrator console       # Open the interactive console
+orchestrator projects      # List all managed projects
+orchestrator use <path>    # Set active project directory
+orchestrator update        # Update Orchestrator CLI tool
 ```
 
-## What To Read Next
+## What To Read Next 📖
 
-- `docs/user-guide.md` for full setup, commands, and troubleshooting.
-- `docs/ai-workflow.md` for how jobs move through planning, building, review, and verification.
-- `docs/build-test-commands.md` for the validation commands agents should use.
-- `docs/recommended-mcp-plugins.md` for optional integrations that improve Codex and MCP-based workflows.
+- [User Guide](docs/user-guide.md): Full setup, command options, and troubleshooting details.
+- [AI Workflow](docs/ai-workflow.md): Detailed look at planning, building, review, and verification.
+- [Build/Test Commands](docs/build-test-commands.md): Canonical verification commands for agents.
+- [Recommended MCP Plugins](docs/recommended-mcp-plugins.md): Optional MCP integrations that improve workflows.

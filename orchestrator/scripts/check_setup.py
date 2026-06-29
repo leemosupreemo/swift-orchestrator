@@ -138,24 +138,30 @@ def should_render_progress_ui() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 def codex_home() -> Path:
-    return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    try:
+        return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    except Exception:
+        return Path("/tmp/.codex")
 
 def read_codex_config_text() -> str:
-    config_path = codex_home() / "config.toml"
     try:
+        config_path = codex_home() / "config.toml"
         return config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     except Exception:
         return ""
 
 def detect_codex_integration(names: list[str]) -> bool:
-    haystacks = [read_codex_config_text().lower()]
-    plugin_cache = codex_home() / "plugins" / "cache"
-    if plugin_cache.exists():
-        try:
-            haystacks.extend(str(path).lower() for path in plugin_cache.rglob("*"))
-        except Exception:
-            pass
-    return any(name.lower() in haystack for name in names for haystack in haystacks)
+    try:
+        haystacks = [read_codex_config_text().lower()]
+        plugin_cache = codex_home() / "plugins" / "cache"
+        if plugin_cache.exists():
+            try:
+                haystacks.extend(str(path).lower() for path in plugin_cache.rglob("*"))
+            except Exception:
+                pass
+        return any(name.lower() in haystack for name in names for haystack in haystacks)
+    except Exception:
+        return False
 
 def run_with_activity(label: str, operation, status_bar: StatusBar | None = None):
     """Run a blocking check while keeping the terminal footer and spinner alive."""
@@ -298,6 +304,54 @@ def _check(status_bar: StatusBar | None = None):
         except Exception as e:
             print(f"     \033[1;91m⚠️  Error checking Xcode: {e}\033[0m")
 
+    # iOS Code Signing & Distribution check
+    if PROJECT_CONFIG.firebase_distribution:
+        print_header("2b. iOS Code Signing & Distribution")
+        
+        has_team = bool(PROJECT_CONFIG.development_team)
+        print_result(has_team, "Development Team ID", "CONFIGURED" if has_team else "MISSING", 
+                     "Set 'development_team' in .orchestrator/project.json")
+        
+        has_asc = all([PROJECT_CONFIG.asc_key_id, PROJECT_CONFIG.asc_issuer_id, PROJECT_CONFIG.asc_key_path])
+        has_manual = bool(PROJECT_CONFIG.provisioning_profile_specifier)
+        
+        if has_asc:
+            print_result(True, "Signing Credentials", "ASC API KEYS (HEADLESS)")
+        elif has_manual:
+            print_result(True, "Signing Credentials", "MANUAL PROFILE SPECIFIED")
+            try:
+                from setup_distribution import installed_provisioning_profile_names
+                installed_profiles = installed_provisioning_profile_names()
+                profile_name = PROJECT_CONFIG.provisioning_profile_specifier
+                if profile_name in installed_profiles:
+                    print_result(True, f"Provisioning Profile ({profile_name})", "FOUND (INSTALLED)")
+                else:
+                    print_result(False, f"Provisioning Profile ({profile_name})", "NOT FOUND", 
+                                 f"Ensure the profile is downloaded and installed in ~/Library/MobileDevice/Provisioning Profiles/")
+                    if installed_profiles:
+                        print("        Installed profiles found on this machine:")
+                        for name in sorted(installed_profiles):
+                            print(f"          - {name}")
+            except Exception as e:
+                print_result(True, "Provisioning Profile check", f"SKIPPED (Check error: {e})")
+        else:
+            print_result(False, "Signing Credentials", "NOT CONFIGURED", "Neither ASC API keys nor Manual Provisioning Profile Specifier were found.")
+            print("\n     \033[1;93m⚠️  iOS Distribution requires code signing setup.\033[0m")
+            print("        For headless, CI, or remote Mac builds, choose one of the following:")
+            print("\n        \033[1;96mOption A: Headless Auto-Signing (Recommended)\033[0m")
+            print("          1. Go to App Store Connect -> Users and Access -> Integrations -> Keys.")
+            print("          2. Generate an API Key (Developer or App Manager role) and download the .p8 file.")
+            print("          3. Update your .orchestrator/project.json with:")
+            print("             - \"asc_key_id\": \"<Key ID>\"")
+            print("             - \"asc_issuer_id\": \"<Issuer ID>\"")
+            print("             - \"asc_key_path\": \"<Path to your download .p8 file>\"")
+            print("\n        \033[1;96mOption B: Manual Signing\033[0m")
+            print("          1. Create and download an Ad-Hoc/Distribution Provisioning Profile from Apple Developer Portal.")
+            print("          2. Install the profile locally on the build machine.")
+            print("          3. Set the profile name in your .orchestrator/project.json:")
+            print("             - \"provisioning_profile_specifier\": \"<Profile Name>\"")
+            print("")
+
     # Grounding Docs
     print_header("3. Grounding Docs (Critical for AI)")
     docs = [
@@ -379,23 +433,59 @@ def _check(status_bar: StatusBar | None = None):
     else:
         print("\n\033[1;92m✅ READY: At least one AI provider is configured.\033[0m")
 
-    # Optional Codex-side MCP/plugin enhancements
-    print_header("5a. Optional MCP / Codex Extensions")
-    optional_integrations = [
-        ("GitHub MCP/plugin", ["github"]),
-        ("XcodeBuildMCP / iOS plugin", ["xcodebuildmcp", "build-ios-apps"]),
-        ("Sentry MCP/plugin", ["sentry"]),
-        ("Playwright MCP", ["playwright"]),
-    ]
-    for label, names in optional_integrations:
-        detected = detect_codex_integration(names)
-        print_optional_result(detected, label, "DETECTED" if detected else "recommended, not required")
-    print("     \033[90mSee docs/recommended-mcp-plugins.md for setup guidance.\033[0m")
-
     # 5. Check SSH Config
     print_header("6. SSH & Network")
     ssh_config_path = Path.home() / ".ssh" / "config"
     print_result(ssh_config_path.exists(), "SSH Config File", "OK" if ssh_config_path.exists() else "MISSING", f"Required for remote SSH workers; create config file at '{ssh_config_path}'")
+    
+    # 6. Optional Integrations & Networks
+    print_header("7. Optional Integrations & Networks")
+    optional_integrations = [
+        ("GitHub MCP/plugin", ["github"], "Inspect issues, PRs, review comments, and check runs with rich context."),
+        ("XcodeBuildMCP / iOS plugin", ["xcodebuildmcp", "build-ios-apps"], "Build, run, inspect, and screenshot iOS Simulator apps directly."),
+        ("Sentry MCP/plugin", ["sentry"], "Inspect production issues, events, stack traces, and release health."),
+        ("Playwright MCP", ["playwright"], "Inspect and automate web UIs, dashboards, and browser-based tools."),
+    ]
+    for label, names, value_desc in optional_integrations:
+        detected = detect_codex_integration(names)
+        print_optional_result(detected, label, "DETECTED" if detected else "recommended, not required")
+        print(f"        \033[90m└─ Value: {value_desc}\033[0m")
+        
+    # Tailscale Check (Optional but recommended for secure fleet networking)
+    ts_paths = ["tailscale", "/Applications/Tailscale.app/Contents/Resources/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/tailscale", "/opt/tailscale/bin/tailscale", "/usr/local/bin/tailscale"]
+    ts_bin = None
+    for path in ts_paths:
+        resolved = shutil.which(path)
+        if resolved:
+            ts_bin = resolved
+            break
+        if os.path.exists(path):
+            ts_bin = path
+            break
+
+    ts_ok = False
+    ts_info = "recommended, not required"
+    if ts_bin:
+        try:
+            res = subprocess.run([ts_bin, "status", "--json"], capture_output=True, text=True, timeout=1.5)
+            if res.returncode == 0:
+                data = json.loads(res.stdout)
+                if data.get("BackendState") == "Running":
+                    ts_ok = True
+                    ips = data.get("TailscaleIPs")
+                    ts_ip = ips[0] if (ips and isinstance(ips, list)) else ""
+                    ts_info = f"RUNNING ({ts_ip})" if ts_ip else "RUNNING"
+                else:
+                    ts_info = f"INSTALLED (State: {data.get('BackendState', 'Not Running')})"
+            else:
+                ts_info = "INSTALLED (Stopped)"
+        except Exception:
+            ts_info = "INSTALLED (Check Error)"
+            
+    print_optional_result(ts_ok, "Tailscale VPN", ts_info)
+    print("        \033[90m└─ Value: Secure, zero-config network tunnels between local and fleet machines.\033[0m")
+    
+    print("     \033[90mSee docs/recommended-mcp-plugins.md for setup guidance.\033[0m")
     
     if m_path.exists():
         print("\n\033[1;92m" + "="*20 + " VERIFICATION COMPLETE " + "="*20 + "\033[0m\n")

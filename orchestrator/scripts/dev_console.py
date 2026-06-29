@@ -27,7 +27,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -36,6 +36,7 @@ from orchestrator.project_config import PACKAGE_ROOT, PROJECT_CONFIG
 from orchestrator import __version__
 
 FLEET_AVAILABILITY: dict[str, bool] = {}
+FLEET_DETAILS: dict[str, dict[str, Any]] = {}
 
 import shutil
 
@@ -209,21 +210,23 @@ def script_failure_summary(output_log: str) -> str | None:
     lines = [line for line in lines if line]
 
     diagnostic_titles = {
-        "Signing setup needs attention",
-        "Xcode Apple ID session needs attention",
+        "signing setup needs attention",
+        "xcode apple id session needs attention",
     }
     for idx, line in enumerate(lines):
-        if line not in diagnostic_titles:
+        if line.lower() not in diagnostic_titles:
             continue
         summary_lines = [line]
-        for follow in lines[idx + 1:idx + 9]:
+        for follow in lines[idx + 1:idx + 35]:
             if follow == "Next steps:":
                 continue
-            if follow.startswith("Triggering final") or follow.startswith("- Sending notifications"):
+            if (follow.startswith("Triggering final") or 
+                follow.startswith("- Sending notifications") or 
+                follow.startswith("Cleaning up") or 
+                "smoke-test job" in follow or
+                follow.startswith("❌")):
                 break
             summary_lines.append(follow)
-            if len(summary_lines) >= 5:
-                break
         return "\n".join(summary_lines)
 
     generic_failure_patterns = (
@@ -648,14 +651,134 @@ def check_machine_availability(machine: dict[str, Any]) -> bool:
     except:
         return False
 
+def get_machine_ip_and_tailscale(machine: dict[str, Any]) -> dict[str, Any]:
+    """Retrieves the IP address and tailscale enabled status for a machine."""
+    import socket
+    import subprocess
+    import json
+    import shutil
+    import os
+
+    mode = machine.get("execution_mode", "local")
+    if mode == "local":
+        ts_paths = ["tailscale", "/Applications/Tailscale.app/Contents/Resources/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/tailscale", "/opt/tailscale/bin/tailscale", "/usr/local/bin/tailscale"]
+        ts_bin = None
+        for path in ts_paths:
+            resolved = shutil.which(path)
+            if resolved:
+                ts_bin = resolved
+                break
+            if os.path.exists(path):
+                ts_bin = path
+                break
+        
+        ts_enabled = False
+        ts_ip = None
+        if ts_bin:
+            try:
+                res = subprocess.run([ts_bin, "status", "--json"], capture_output=True, text=True, timeout=1.5)
+                if res.returncode == 0:
+                    data = json.loads(res.stdout)
+                    if data.get("BackendState") == "Running":
+                        ts_enabled = True
+                        ips = data.get("TailscaleIPs")
+                        if ips and isinstance(ips, list):
+                            ts_ip = ips[0]
+            except Exception:
+                pass
+                
+        # Primary IP
+        primary_ip = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('10.254.254.254', 1))
+            primary_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            primary_ip = "127.0.0.1"
+            
+        if ts_enabled and ts_ip:
+            return {"ip": ts_ip, "tailscale": True}
+        return {"ip": primary_ip or "127.0.0.1", "tailscale": ts_enabled}
+        
+    else:
+        # SSH machine
+        ssh_targets = machine.get("ssh_target")
+        if not ssh_targets:
+            return {"ip": "unknown", "tailscale": False}
+        if isinstance(ssh_targets, str):
+            targets = [ssh_targets]
+        else:
+            targets = list(ssh_targets)
+            
+        if not targets:
+            return {"ip": "unknown", "tailscale": False}
+            
+        target = targets[0]
+        host = target.split("@")[-1] if "@" in target else target
+        
+        is_ts_ip = host.startswith("100.")
+        ts_enabled = is_ts_ip
+        
+        is_online = FLEET_AVAILABILITY.get(machine.get("name"), False)
+        if is_online:
+            try:
+                res = subprocess.run(
+                    ["ssh", "-o", "ConnectTimeout=1.5", "-o", "BatchMode=yes", target, "tailscale status --json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0
+                )
+                if res.returncode == 0:
+                    data = json.loads(res.stdout)
+                    if data.get("BackendState") == "Running":
+                        ts_enabled = True
+                        ips = data.get("TailscaleIPs")
+                        if ips and isinstance(ips, list):
+                            host = ips[0]
+                else:
+                    res2 = subprocess.run(
+                        ["ssh", "-o", "ConnectTimeout=1.5", "-o", "BatchMode=yes", target, "which tailscale && tailscale status"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2.0
+                    )
+                    if res2.returncode == 0 and "Logged out" not in res2.stdout and "stopped" not in res2.stdout.lower():
+                        ts_enabled = True
+            except Exception:
+                pass
+                
+        return {"ip": host, "tailscale": ts_enabled}
+
+def refresh_fleet_status(machines_config: list[dict[str, Any]]) -> None:
+    """Checks reachability and gets IP/Tailscale info for all machines in parallel."""
+    import threading
+    global FLEET_AVAILABILITY, FLEET_DETAILS
+    
+    def worker(m):
+        name = m["name"]
+        is_online = check_machine_availability(m)
+        FLEET_AVAILABILITY[name] = is_online
+        if is_online or m.get("execution_mode", "local") == "local":
+            FLEET_DETAILS[name] = get_machine_ip_and_tailscale(m)
+        else:
+            FLEET_DETAILS[name] = {"ip": "unknown", "tailscale": False}
+
+    threads = []
+    for m in machines_config:
+        t = threading.Thread(target=worker, args=(m,))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+
 def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
     global FLEET_AVAILABILITY
     
-    # Pre-check availability for all machines (in parallel if we had many, but 2 is fine)
+    # Pre-check availability for all machines (in parallel)
     machines_config = load_machines()
     print("\n\033[93mPinging fleet for availability...\033[0m")
-    for m in machines_config:
-        FLEET_AVAILABILITY[m["name"]] = check_machine_availability(m)
+    refresh_fleet_status(machines_config)
         
     # Automatically de-select offline machines from the session
     session_allowed_machines = [m for m in session_allowed_machines if FLEET_AVAILABILITY.get(m, False)]
@@ -697,12 +820,30 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                 if m.get("supports_backend_tests"):
                     capabilities.append("Backend tests")
                 
+                models_list = m.get("models", [])
+                models_str = ", ".join(models_list) or "none"
+                if len(models_str) > 60:
+                    models_str = f"{len(models_list)} models ({models_str[:50]}...)"
+
+                details_info = FLEET_DETAILS.get(name, {})
+                ip_val = details_info.get("ip")
+                if not ip_val:
+                    # Fallback extraction
+                    ssh_targets = m.get("ssh_target")
+                    if ssh_targets:
+                        target = ssh_targets[0] if isinstance(ssh_targets, list) else ssh_targets
+                        ip_val = target.split("@")[-1] if "@" in target else target
+                    else:
+                        ip_val = "127.0.0.1" if m.get("execution_mode") == "local" else "unknown"
+                        
+                ts_val = details_info.get("tailscale", False)
+                ts_str = "\033[92menabled\033[0m" if ts_val else "\033[90mdisabled\033[0m"
+
                 details = [
-                    f"\033[1;97mStatus\033[0m       {status_str}",
-                    f"\033[1;97mMode\033[0m         \033[90m{m.get('execution_mode', 'unknown')}\033[0m",
-                    f"\033[1;97mRoles\033[0m        \033[90m{', '.join(m.get('roles', [])) or 'none'}\033[0m",
-                    f"\033[1;97mModels\033[0m       \033[90m{', '.join(m.get('models', [])) or 'none'}\033[0m",
-                    f"\033[1;97mPriority\033[0m     \033[90m{m.get('priority', 'N/A')}\033[0m",
+                    f"\033[1;97mStatus\033[0m       {status_str} (Tailscale: {ts_str})",
+                    f"\033[1;97mIP/Mode\033[0m      \033[90m{ip_val}\033[0m ({m.get('execution_mode', 'unknown')})",
+                    f"\033[1;97mRoles/Pri\033[0m    \033[90m{', '.join(m.get('roles', [])) or 'none'}\033[0m (Priority: \033[90m{m.get('priority', 'N/A')}\033[0m)",
+                    f"\033[1;97mModels\033[0m       \033[90m{models_str}\033[0m",
                     f"\033[1;97mCapabilities\033[0m \033[90m{', '.join(capabilities) or 'none'}\033[0m"
                 ]
                 details_map[name] = details
@@ -715,7 +856,7 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                 footer_actions = [
                     "[\033[1;92mD\033[0m] Discover remote machines",
                     "[\033[1;92mN\033[0m] Rename selected machine",
-                    "[\033[1;92mZ\033[0m] Fleet hygiene",
+                    "[\033[1;92mZ\033[0m] Zombie purge & cache cleanup",
                     "[\033[1;91mB\033[0m] Back",
                 ]
                 new_allowed = prompt_checkbox(
@@ -758,8 +899,7 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
                     # Re-check availability after discovery
                     machines_config = load_machines()
                     print("\n\033[93mRe-pinging fleet...\033[0m")
-                    for m in machines_config:
-                        FLEET_AVAILABILITY[m["name"]] = check_machine_availability(m)
+                    refresh_fleet_status(machines_config)
                     continue
                 elif exc.key == "n" and exc.value:
                     old_name = exc.value
@@ -1081,25 +1221,25 @@ def handle_app_tests(session_allowed_machines: list[str], session_allowed_models
             test_plans = sorted(test_plans_root.glob("*.xctestplan"))
             
             plan_map = {}
+            print("\n  \033[1;90m--- XCODE TEST PLANS ---\033[0m")
             if test_plans:
-                print("  Xcode Test Plans:")
                 for i, tp in enumerate(test_plans):
                     key = str(i + 1)
                     rel_path = tp.relative_to(ROOT)
                     plan_map[key] = tp
-                    print(f"    [\033[1;96m{key}\033[0m] {tp.stem} ({rel_path})")
+                    print(f"  [\033[1;96m{key}\033[0m] {tp.stem} ({rel_path})")
             else:
-                print("\033[90m  No Xcode Test Plans found.\033[0m")
+                print("  \033[90mNo Xcode Test Plans found.\033[0m")
                 print("\n  \033[1;97mHow to add tests:\033[0m")
-                print("  1. In Xcode: File > New > File...")
-                print("  2. Select 'Test Plan' and save to: " + PROJECT_CONFIG.test_target + "/TestPlans/")
-                print("  3. Add your Unit/UI test targets to the plan.")
-                print("  4. They will automatically appear here for the AI to use.")
+                print("    1. In Xcode: File > New > File...")
+                print("    2. Select 'Test Plan' and save to: " + PROJECT_CONFIG.test_target + "/TestPlans/")
+                print("    3. Add your Unit/UI test targets to the plan.")
+                print("    4. They will automatically appear here for the AI to use.")
 
-            print("\n  Visual Checks:")
-            print("    [\033[1;96mV\033[0m] Simulator Visual Check (build, launch, screenshots)")
+            print("\n  \033[1;90m--- VISUAL CHECKS ---\033[0m")
+            print("  [\033[1;96mV\033[0m] Simulator Visual Check (build, launch, screenshots)")
 
-            print("\n[\033[1;91mB\033[0m] Back")
+            print("\n  [\033[1;91mB\033[0m] Back")
             
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
@@ -1153,12 +1293,12 @@ def archive_job(job: dict[str, Any], status: str = "completed"):
     shutil.move(str(path_to_save), str(archive_path))
     return archive_path
 
-def handle_cleanup_closed(silent: bool = False):
+def handle_cleanup_closed(silent: bool = False, confirm: bool = True):
     if not silent: print_phase("cleanup", subtext="syncing with github")
     jobs = list_jobs()
     if not jobs:
         print("No active jobs to check.")
-        if not silent:
+        if not silent and confirm:
             input("\n\033[1;96mTap Enter to return to menu...\033[0m")
         return
 
@@ -1173,7 +1313,7 @@ def handle_cleanup_closed(silent: bool = False):
         closed_numbers = {issue["number"] for issue in json.loads(closed_issues_raw)}
     except Exception as e:
         print(f"!!! Error fetching closed issues: {e}")
-        if not silent:
+        if not silent and confirm:
             input("\n\033[1;96mTap Enter to return to menu...\033[0m")
         return
 
@@ -1190,8 +1330,8 @@ def handle_cleanup_closed(silent: bool = False):
     else:
         print(f"\n✅ Sync complete: Verified {len(jobs)} active jobs are still open on GitHub.")
     
-    if not silent:
-        pass # The caller handles the confirmation if needed
+    if not silent and confirm:
+        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 
 def auto_link_latest_logs(job: dict[str, Any]):
     """Intelligently links the 3 absolute newest logs across manual and job-specific sources."""
@@ -1515,11 +1655,8 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
             print("    [\033[1;96mU\033[0m] Un-archive (Restore to main menu)")
             print("    [\033[1;91mB\033[0m] Back")
 
-            # Anchor prompt to bottom
-            prompt = get_choice_prompt("Choice:", "(letter)")
-            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            status_bar.render(at_bottom=True, force=True)
             choice = get_key().strip().lower()
-            clear_choice_placeholder()
 
             if choice == "b":
                 break
@@ -2285,10 +2422,10 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 summary_file = OUTPUT_DIR / job["job_id"] / "builder_summary.md"
                 if brief_file.exists():
                     print_header("Brief")
-                    print(brief_file.read_text())
+                    print(format_markdown_for_terminal(brief_file.read_text(encoding="utf-8")))
                 if summary_file.exists():
                     print_header("Summary")
-                    print(summary_file.read_text())
+                    print(format_markdown_for_terminal(summary_file.read_text(encoding="utf-8")))
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "s" and "s" in actions:
                 if not session_allowed_machines:
@@ -2611,7 +2748,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             ]
 
             # Table Header - Narrower for better responsiveness
-            header = f"{'Provider / Tool':18} | {'CLI Readiness':18} | {'Credential Source':18} | {'Access'}"
+            header = f"{'Provider/Tool':15} | {'CLI Readiness':13} | {'Credentials':11} | {'Access'}"
             print(f"\033[1;97m{header}\033[0m")
             print_divider("-")
 
@@ -2621,57 +2758,57 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 # 1. CLI Column
                 if status == "Checking...":
                     raw_cli_status = "Checking..."
-                    cli_display = f"\033[93m{raw_cli_status:18}\033[0m"
+                    cli_display = f"\033[93m{raw_cli_status:13}\033[0m"
                     cli_ready = False
                 elif status in ["Logged In", "Ready", "Running"]:
                     raw_cli_status = {
                         "Logged In": "Signed in",
                         "Ready": "CLI ready",
-                        "Running": "Local service up",
+                        "Running": "Running",
                     }[status]
-                    cli_display = f"\033[92m{raw_cli_status:18}\033[0m"
+                    cli_display = f"\033[92m{raw_cli_status:13}\033[0m"
                     cli_ready = True
                 elif status == "Not Installed":
                     raw_cli_status = "Not installed"
-                    cli_display = f"\033[90m{raw_cli_status:18}\033[0m"
+                    cli_display = f"\033[90m{raw_cli_status:13}\033[0m"
                     cli_ready = False
                 elif status == "Not Logged In":
-                    raw_cli_status = "Sign in needed"
-                    cli_display = f"\033[1;91m{raw_cli_status:18}\033[0m"
+                    raw_cli_status = "Need sign-in"
+                    cli_display = f"\033[1;91m{raw_cli_status:13}\033[0m"
                     cli_ready = False
                 elif status == "Offline":
-                    raw_cli_status = "Service offline"
-                    cli_display = f"\033[1;91m{raw_cli_status:18}\033[0m"
+                    raw_cli_status = "Offline"
+                    cli_display = f"\033[1;91m{raw_cli_status:13}\033[0m"
                     cli_ready = False
                 else:
-                    raw_cli_status = "Check failed"
-                    cli_display = f"\033[1;91m{raw_cli_status:18}\033[0m"
+                    raw_cli_status = "Failed"
+                    cli_display = f"\033[1;91m{raw_cli_status:13}\033[0m"
                     cli_ready = False
 
                 # 2. Credential Column
                 key_ready = False
-                raw_key_status = "No fallback"
+                raw_key_status = "None"
                 key_color = "\033[90m" # Default grey
 
                 if p["key_id"]:
                     current_key = settings.get(p["key_id"], "")
                     if current_key:
-                        raw_key_status = "Saved fallback"
+                        raw_key_status = "Saved"
                         key_color = "\033[92m" # Green
                         key_ready = True
                     elif p["key_id"].upper() in os.environ:
-                        raw_key_status = "Env fallback"
+                        raw_key_status = "Env Var"
                         key_color = "\033[1;96m" # Blue
                         key_ready = True
                     elif cli_ready:
-                        raw_key_status = "Using CLI login"
+                        raw_key_status = "CLI Login"
                         key_color = "\033[1;96m" # Cyan
                         key_ready = False
                 else:
-                    raw_key_status = "CLI only"
+                    raw_key_status = "CLI Only"
                     key_color = "\033[90m"
 
-                key_display = f"{key_color}{raw_key_status:18}\033[0m"
+                key_display = f"{key_color}{raw_key_status:11}\033[0m"
 
                 # 3. Overall Ready Column
                 if cli_ready or key_ready:
@@ -2681,7 +2818,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 else:
                     ready_display = "\033[1;91m✗ LOCKED\033[0m"
 
-                print(f"{p['label']:18} | {cli_display} | {key_display} | {ready_display}")
+                print(f"{p['label']:15} | {cli_display} | {key_display} | {ready_display}")
 
             print("\n\033[90mCLI readiness shows whether the local tool can run now. Credential source only matters when CLI auth is unavailable.\033[0m")
 
@@ -2702,6 +2839,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 
             print_header("MANAGEMENT")
             print(f"    [\033[1;91mC\033[0m] Clear saved credentials")
+            print(f"    [\033[1;91mB\033[0m] Back")
 
             # If we are loading statuses for the first time, render the loading indicator,
             # wait for threads, and redraw immediately.
@@ -2823,6 +2961,9 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
             print(f"  \033[90m│\033[0m  Error:     \033[1;91m{probe.get('probe_error')}\033[0m")
         print(f"  \033[90m│\033[0m  Available: \033[92m{', '.join(installed) if installed else 'none'}\033[0m")
         print(f"  \033[90m│\033[0m  Missing:   \033[1;91m{', '.join(missing) if missing else 'none'}\033[0m")
+        mcp_plugins = probe.get("mcp_plugins", {})
+        optional = [label for label, active in mcp_plugins.items() if active]
+        print(f"  \033[90m│\033[0m  Optional:  \033[96m{', '.join(optional) if optional else 'none'}\033[0m")
         print(f"  \033[90m└─\033[0m")
         
     print(f"\n\033[90mTotal Machines in session: {len(machines)}\033[0m")
@@ -2830,7 +2971,7 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
 
 def handle_fleet_hygiene(session_allowed_machines):
     from probe_machine import load_machines, probe_machine
-    print_header("Fleet Hygiene & Zombie Purge")
+    print_header("Zombie Purge & Cache Cleanup")
 
     print("\033[1;97mWhat does this do?\033[0m")
     print(" This tool scans your fleet for 'Zombie' processes—builds or simulators that")
@@ -2868,9 +3009,9 @@ def handle_fleet_hygiene(session_allowed_machines):
         return
 
     print(f"\nFound {len(all_stale)} potential zombie processes.")
-    if prompt_confirm("\033[1;91mPurge all listed processes and clear DerivedData caches?\033[0m", default=False):
+    if prompt_confirm("\033[1;91mPurge listed processes and clear DerivedData?\033[0m", default=False):
         purged = purge_zombie_processes(session_allowed_machines, silent=False)
-        print(f"\n✅ Fleet hygiene complete. Purged {purged} processes.")
+        print(f"\n✅ Zombie purge & cache cleanup complete. Purged {purged} processes.")
         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
     else:
         print("\nNo processes were harmed.")
@@ -2981,12 +3122,11 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
 
             print("\n\033[1;97mActions\033[0m")
             print("  [\033[1;92mA\033[0m] Add Project")
-            print("  [\033[1;92mO\033[0m] Other ways to add projects")
+            print("  [\033[1;92mH\033[0m] Add project help")
+            print("  [\033[1;91mB\033[0m] Back")
 
-            prompt = get_choice_prompt("Choice:", "(action)")
-            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            status_bar.render(at_bottom=True, force=True)
             key = get_key().strip().lower()
-            clear_choice_placeholder()
 
             if key == "b":
                 return
@@ -2996,10 +3136,10 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             if key in {"down", "j"}:
                 selected_idx = (selected_idx + 1) % len(projects)
                 continue
-            if key == "o":
+            if key == "h":
                 clear_screen()
                 status_bar.set_scroll_region()
-                print_header("Add Target Project")
+                print_header("Add Project Help")
                 print("\033[1;97mRecommended\033[0m")
                 print("  Press \033[1;92mA\033[0m from the project menu, then paste or drag the project folder path.")
                 print("  The console will add it to Recent Projects and switch to it after you confirm.\n")
@@ -3007,7 +3147,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
                 print("  Run one of these from any terminal, then return to this menu:\n")
                 print("    \033[1;96morchestrator use /path/to/project\033[0m")
                 print("    \033[1;96morchestrator init --project /path/to/project\033[0m")
-                prompt = get_choice_prompt("Continue:", "(Enter)")
+                prompt = get_choice_prompt("Back:", "(Enter)")
                 status_bar.render(at_bottom=True, force=True, prompt=prompt)
                 get_key()
                 clear_choice_placeholder()
@@ -3271,7 +3411,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                                 print_header(f"READING: {target_doc.name}")
                                 # Print content with basic wrapping/indenting
                                 try:
-                                    print(target_doc.read_text(encoding="utf-8"))
+                                    print(format_markdown_for_terminal(target_doc.read_text(encoding="utf-8")))
                                 except Exception as e:
                                     print(f"❌ Error reading file: {e}")
                                 
@@ -3285,11 +3425,10 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 handle_app_tests(session_allowed_machines, session_allowed_models)
             elif choice == "r":
                 print_header("Refreshing & Syncing with GitHub")
-                handle_cleanup_closed(silent=False)
+                handle_cleanup_closed(silent=False, confirm=False)
                 print("\n\033[93mRefreshing machine availability...\033[0m")
                 machines_config = load_machines()
-                for m in machines_config:
-                    FLEET_AVAILABILITY[m["name"]] = check_machine_availability(m)
+                refresh_fleet_status(machines_config)
                 session_allowed_machines = [m for m in session_allowed_machines if FLEET_AVAILABILITY.get(m, False)]
                 print("\n✅ Refresh and sync successful.")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -3339,8 +3478,7 @@ def main_loop():
     try:
         machines_config = load_machines()
         print("\n\033[93mPinging fleet for availability...\033[0m")
-        for m in machines_config:
-            FLEET_AVAILABILITY[m["name"]] = check_machine_availability(m)
+        refresh_fleet_status(machines_config)
         
         session_allowed_machines = [m["name"] for m in machines_config if m.get("enabled", True) and FLEET_AVAILABILITY.get(m["name"], False)]
     except:
@@ -3508,12 +3646,11 @@ def main_loop():
                         handle_app_tests(session_allowed_machines, session_allowed_models)
                     elif choice == "r":
                         print_header("Refreshing & Syncing with GitHub")
-                        handle_cleanup_closed(silent=False)
+                        handle_cleanup_closed(silent=False, confirm=False)
                         
                         print("\n\033[93mRefreshing machine availability...\033[0m")
                         machines_config = load_machines()
-                        for m in machines_config:
-                            FLEET_AVAILABILITY[m["name"]] = check_machine_availability(m)
+                        refresh_fleet_status(machines_config)
                         
                         # Filter session_allowed_machines to only include those that are still online
                         session_allowed_machines = [m for m in session_allowed_machines if FLEET_AVAILABILITY.get(m, False)]
@@ -3782,11 +3919,9 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
             print("    [\033[1;96mT\033[0m] Test Distribution Script (Dry Run via build delivery)")
             print("    [\033[1;91mB\033[0m] Back")
             
-            # Anchor prompt to bottom
-            prompt = get_choice_prompt("Choice:", "(action)")
-            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            # Render status bar without prompt (hides cursor and removes Choice text)
+            status_bar.render(at_bottom=True, force=True, prompt=None)
             choice = get_key().strip().lower()
-            clear_choice_placeholder()
             
             if choice == "b":
                 break
@@ -3936,6 +4071,8 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
             status_bar.set_scroll_region()
 
             print_header("Email Notification Settings")
+            print("  \033[90mConfigures email alerts for job completions, build delivery updates, failures,\033[0m")
+            print("  \033[90mor when a running task is paused and requires human review.\033[0m\n")
             if provider == "resend":
                 sender_display = f"{settings.get('resend_from_email', 'NOT SET')} (via Resend)"
             else:
@@ -3957,11 +4094,8 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
             print("    [\033[1;96mC\033[0m] Configure Email Sender")
             print("    [\033[1;91mB\033[0m] Back")
             
-            # Anchor prompt to bottom
-            prompt = get_choice_prompt("Choice:", "(action)")
-            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            status_bar.render(at_bottom=True, force=True)
             choice = get_key().strip().lower()
-            clear_choice_placeholder()
             
             if choice == "b":
                 break
@@ -3970,6 +4104,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 # Use run_script to execute notify.py
                 run_script("notify.py", [f"Test Notification ({provider})", f"This is a test message from the AI Orchestrator console using {provider}.", "test-job-id"], session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "a":
+                status_bar.render(at_bottom=True, force=True)
                 try:
                     email = prompt_input("Enter recipient email address:", placeholder="(or Enter to cancel)")
                 except BackException:
@@ -4025,6 +4160,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 print("\n    ✅ Provider configured.")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "r" and emails:
+                status_bar.render(at_bottom=True, force=True)
                 try:
                     idx_str = prompt_input("Enter index to remove:", placeholder="(number)")
                 except BackException:

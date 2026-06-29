@@ -17,10 +17,24 @@ from common import ROOT, JOBS_DIR, write_json, timestamp, prompt_confirm
 from orchestrator.project_config import PROJECT_CONFIG
 
 def run_smoke_delivery():
+    global PROJECT_CONFIG
     print("🚀 Starting Smoke Test: Build & Delivery Pipeline...")
     
     # 0. Pre-flight check: Ensure signing configuration is present
     dist_errors = PROJECT_CONFIG.validate_distribution_config()
+    if dist_errors:
+        print("\n⚠️  Distribution configuration is incomplete. Attempting automatic detection and setup...")
+        try:
+            from setup_distribution import setup_distribution
+            setup_distribution(force=False, root=ROOT)
+            
+            # Reload project configuration
+            from orchestrator.project_config import load_project_config
+            PROJECT_CONFIG = load_project_config()
+            dist_errors = PROJECT_CONFIG.validate_distribution_config()
+        except Exception as e:
+            print(f"      - Could not auto-detect configuration: {e}")
+            
     if dist_errors:
         config_file = PROJECT_CONFIG.runtime_dir / "project.json"
         print("\n\033[1;91m!!! Error: Distribution configuration is incomplete:\033[0m")
@@ -28,6 +42,21 @@ def run_smoke_delivery():
             print(f"      - {err}")
         print(f"\n\033[93mYou must configure signing and accounts in the config file before distributing:\033[0m")
         print(f"      \033[1;97m{config_file}\033[0m")
+        
+        print("\n\033[1;93mManual configuration is required. Please choose one of the options below:\033[0m")
+        print("\n\033[1;96mOption A: Headless Auto-Signing (Recommended)\033[0m")
+        print("  1. Go to App Store Connect -> Users and Access -> Integrations -> Keys.")
+        print("  2. Generate an API Key (Developer or App Manager role) and download the .p8 file.")
+        print("  3. Update your .orchestrator/project.json with:")
+        print("     - \"asc_key_id\": \"<Key ID>\"")
+        print("     - \"asc_issuer_id\": \"<Issuer ID>\"")
+        print("     - \"asc_key_path\": \"<Path to your download .p8 file>\"")
+        print("\n\033[1;96mOption B: Manual Signing\033[0m")
+        print("  1. Create and download an Ad-Hoc/Distribution Provisioning Profile from Apple Developer Portal.")
+        print("  2. Install the profile locally on the build machine.")
+        print("  3. Set the profile name in your .orchestrator/project.json:")
+        print("     - \"provisioning_profile_specifier\": \"<Profile Name>\"")
+        print("")
         
         if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
             print("\n\033[1;96mStarting Orchestrator Wizard...\033[0m")
@@ -39,6 +68,8 @@ def run_smoke_delivery():
                 print(f"\n❌ Setup Wizard failed/exited with code {res.returncode}. Please check the error above.")
         
         sys.exit(1)
+    else:
+        print("✅ Distribution configuration is valid.")
 
     # 1. Setup metadata
     test_id = f"smoke-delivery-{timestamp()}"

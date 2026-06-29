@@ -236,7 +236,7 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
     @patch("common.get_key", return_value="enter")
     @patch("common.sys.stdout.flush")
     @patch("common.sys.stdout.write")
-    def test_checkbox_footer_actions_are_visible_above_options(
+    def test_checkbox_footer_actions_are_visible_below_options(
         self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
     ) -> None:
         footer = "[R] Sync Registry  [D] Live Discovery  [B] Back"
@@ -244,9 +244,9 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         common.prompt_checkbox("select models", ["model-a"], ["model-a"], footer=footer)
 
         written = "".join(call.args[0] for call in mock_write.call_args_list)
-        self.assertLess(written.index(footer), written.index("model-a"))
+        self.assertGreater(written.index(footer), written.index("model-a"))
         self.assertIn("(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m\n\n", written)
-        self.assertIn(f"{footer}\n\n", written)
+        self.assertIn(f"\n{footer}", written)
 
     @patch("common.sys.stdin.isatty", return_value=True)
     @patch("common.get_key", return_value="enter")
@@ -276,6 +276,55 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         mock_get_key.side_effect = ["b"]
         with self.assertRaises(common.BackException):
             common.prompt_input("Path:", allow_back=True)
+
+
+class MarkdownFormatterTests(unittest.TestCase):
+    def test_format_inline_markdown_bold(self) -> None:
+        text = "This is **bold** text."
+        formatted = common.format_inline_markdown(text)
+        self.assertEqual(formatted, "This is \033[1;97mbold\033[0m text.")
+
+    def test_format_inline_markdown_italic(self) -> None:
+        text = "This is *italic* text."
+        formatted = common.format_inline_markdown(text)
+        self.assertEqual(formatted, "This is \033[3mitalic\033[0m text.")
+
+    def test_format_inline_markdown_code(self) -> None:
+        text = "Run `orchestrator check` to verify."
+        formatted = common.format_inline_markdown(text)
+        self.assertEqual(formatted, "Run \033[1;93morchestrator check\033[0m to verify.")
+
+    def test_format_inline_markdown_link(self) -> None:
+        text = "Go to [User Guide](docs/user-guide.md) now."
+        formatted = common.format_inline_markdown(text)
+        self.assertEqual(formatted, "Go to \033[4;94mUser Guide\033[0m \033[90m(docs/user-guide.md)\033[0m now.")
+
+    def test_format_inline_markdown_no_overlap(self) -> None:
+        text = "Run `orchestrator_check_env` with [Guide](doc_link.md)."
+        formatted = common.format_inline_markdown(text)
+        self.assertIn("\033[1;93morchestrator_check_env\033[0m", formatted)
+        self.assertIn("\033[4;94mGuide\033[0m \033[90m(doc_link.md)\033[0m", formatted)
+
+    def test_format_markdown_for_terminal_headers(self) -> None:
+        text = "# H1 Title\n## H2 Subtitle\n### H3 Section"
+        formatted = common.format_markdown_for_terminal(text)
+        self.assertIn("\033[1;95mH1 TITLE\033[0m", formatted)
+        self.assertIn("\033[1;96mH2 Subtitle\033[0m", formatted)
+        self.assertIn("\033[1;93mH3 Section\033[0m", formatted)
+
+    def test_format_markdown_for_terminal_lists(self) -> None:
+        text = "- Item 1\n- Item 2\n1. Numbered Item"
+        formatted = common.format_markdown_for_terminal(text)
+        self.assertIn("•", formatted)
+        self.assertIn("1.", formatted)
+
+    def test_format_markdown_for_terminal_code_blocks(self) -> None:
+        text = "```bash\nswift build\n```"
+        formatted = common.format_markdown_for_terminal(text)
+        self.assertIn("┌", formatted)
+        self.assertIn("│", formatted)
+        self.assertIn("└", formatted)
+        self.assertIn("swift build", formatted)
 
 
 if __name__ == "__main__":

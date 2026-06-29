@@ -418,6 +418,8 @@ def prompt_multiline(prompt: str) -> str:
     flush_stdin()
     print(f"\n\033[1;97m{prompt}\033[0m", flush=True)
     print("\033[90m(Type your input. To finish, press Enter then \033[1;97mCtrl-D\033[0m\033[90m on a new line)\033[0m", flush=True)
+    if _ACTIVE_STATUS_BAR:
+        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Ctrl-D to finish")
     try:
         content = sys.stdin.read()
         return content.strip()
@@ -432,6 +434,9 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     # Hide cursor
     sys.stdout.write("\033[?25l")
     sys.stdout.flush()
+
+    if _ACTIVE_STATUS_BAR:
+        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Enter to skip")
 
     input_text = ""
     bg_style = "\033[48;5;236m"
@@ -481,6 +486,9 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
     # Hide cursor
     sys.stdout.write("\033[?25l")
     sys.stdout.flush()
+
+    if _ACTIVE_STATUS_BAR:
+        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Enter to cancel")
 
     input_text = default
     bg_style = "\033[48;5;236m"
@@ -641,9 +649,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             output.append(get_header_string(label))
             output.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
             output.append("")
-            if footer:
-                output.append(footer)
-                output.append("")
+
             
             if error_msg:
                 output.append(f"\033[1;91m      ⚠️  {error_msg}\033[0m")
@@ -674,15 +680,17 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             # Max selections disclaimer
             if max_selections:
                 output.append(f"\033[1;97mSelected machines:\033[0m \033[1;96m{len(selected_indices)} of {max_selections}\033[0m \033[90mmachine limit\033[0m")
+            
+            if footer:
+                output.append("")
+                output.append(footer)
             # 3. Print details for current selection
             if details_map:
                 current_option = options[idx]
                 details = details_map.get(current_option, [])
                 if details:
-                    output.append("")
-                    output.append(f"\033[90m{'-'*20}\033[0m")
                     if details_title:
-                        output.append(f"\033[1;97m{details_title}\033[0m")
+                        output.append(f"\n  \033[1;96m{details_title}\033[0m")
                     for line in details:
                         if line.startswith("\033"):
                             output.append(line)
@@ -1004,6 +1012,7 @@ class ProgressIndicator:
         self.restore_cursor()
 
 _STATUS_BAR_NESTING = 0
+_ACTIVE_STATUS_BAR = None
 
 class StatusBar:
     def __init__(self, job: dict[str, Any] | None = None, is_processing: bool = False, sub_menu: bool = False):
@@ -1044,16 +1053,18 @@ class StatusBar:
             return 80, 24
 
     def __enter__(self):
-        global _STATUS_BAR_NESTING
+        global _STATUS_BAR_NESTING, _ACTIVE_STATUS_BAR
         _STATUS_BAR_NESTING += 1
+        _ACTIVE_STATUS_BAR = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        global _STATUS_BAR_NESTING
+        global _STATUS_BAR_NESTING, _ACTIVE_STATUS_BAR
         _STATUS_BAR_NESTING -= 1
         if _STATUS_BAR_NESTING <= 0:
             self.reset_scroll_region(force=True)
             _STATUS_BAR_NESTING = 0
+            _ACTIVE_STATUS_BAR = None
 
     def set_scroll_region(self):
         if not sys.stdin.isatty(): return
@@ -1152,8 +1163,11 @@ class StatusBar:
             cmd += f"\033[{lines-2};1H\r\033[K{prompt_str}"
             
             if not prompt:
-                # Restore cursor and flush only if NOT showing a prompt
-                cmd += "\0338"
+                # Restore cursor position and hide cursor if NOT showing a prompt
+                cmd += "\033[?25l\0338"
+            else:
+                # Ensure cursor is visible if prompt is shown
+                cmd += "\033[?25h"
             
             sys.stdout.write(cmd)
             sys.stdout.flush()
@@ -1255,3 +1269,142 @@ def print_phase(phase: str, subtext: str | None = None):
 
 def get_phase_name(phase: str) -> str:
     return phase.replace("-", " ").capitalize()
+
+
+def format_inline_markdown(text: str) -> str:
+    # 1. Protect inline code blocks first (substitute with placeholder)
+    code_placeholders = []
+    def code_sub(match):
+        code_placeholders.append(match.group(1))
+        return f"\x00CODE{len(code_placeholders)-1}\x00"
+    
+    text = re.sub(r'`([^`]+)`', code_sub, text)
+    
+    # 2. Protect links
+    link_placeholders = []
+    def link_sub(match):
+        label = match.group(1)
+        url = match.group(2)
+        link_placeholders.append((label, url))
+        return f"\x00LINK{len(link_placeholders)-1}\x00"
+    
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', link_sub, text)
+    
+    # 3. Replace bold
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\033[1;97m\1\033[0m', text)
+    text = re.sub(r'__([^_]+)__', r'\033[1;97m\1\033[0m', text)
+    
+    # 4. Replace italics
+    text = re.sub(r'\*([^*]+)\*', r'\033[3m\1\033[0m', text)
+    text = re.sub(r'_([^_]+)_', r'\033[3m\1\033[0m', text)
+    
+    # 5. Restore links (and apply formatting to link label, but keep URL protected)
+    for i, (label, url) in enumerate(link_placeholders):
+        formatted_label = format_inline_markdown(label)
+        link_str = f"\033[4;94m{formatted_label}\033[0m \033[90m({url})\033[0m"
+        text = text.replace(f"\x00LINK{i}\x00", link_str)
+        
+    # 6. Restore inline code blocks
+    for i, code_val in enumerate(code_placeholders):
+        code_str = f"\033[1;93m{code_val}\033[0m"
+        text = text.replace(f"\x00CODE{i}\x00", code_str)
+        
+    return text
+
+
+def format_markdown_for_terminal(text: str) -> str:
+    lines = text.splitlines()
+    formatted_lines = []
+    
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+        
+    max_width = min(80, cols - 4)
+    if max_width < 40:
+        max_width = 40
+        
+    in_code_block = False
+    code_block_lines = []
+    
+    import textwrap
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Handle code blocks
+        if stripped.startswith("```"):
+            if in_code_block:
+                # End of code block: draw box
+                formatted_lines.append("  \033[90m┌" + "─" * (max_width - 4) + "\033[0m")
+                for c_line in code_block_lines:
+                    formatted_lines.append(f"  \033[90m│\033[0m \033[92m{c_line}\033[0m")
+                formatted_lines.append("  \033[90m└" + "─" * (max_width - 4) + "\033[0m")
+                code_block_lines = []
+                in_code_block = False
+            else:
+                in_code_block = True
+            continue
+            
+        if in_code_block:
+            code_block_lines.append(line)
+            continue
+            
+        # Headers
+        if stripped.startswith("# "):
+            title = stripped[2:]
+            formatted_lines.append("")
+            formatted_lines.append(f" \033[1;95m{title.upper()}\033[0m")
+            formatted_lines.append(f" \033[1;95m" + "━" * len(title) + "\033[0m")
+            formatted_lines.append("")
+            continue
+        elif stripped.startswith("## "):
+            title = stripped[3:]
+            formatted_lines.append("")
+            formatted_lines.append(f" \033[1;96m{title}\033[0m")
+            formatted_lines.append(f" \033[96m" + "─" * len(title) + "\033[0m")
+            formatted_lines.append("")
+            continue
+        elif stripped.startswith("### "):
+            title = stripped[4:]
+            formatted_lines.append("")
+            formatted_lines.append(f" \033[1;93m{title}\033[0m")
+            formatted_lines.append("")
+            continue
+            
+        # Bullet list item
+        if stripped.startswith("- ") or stripped.startswith("* "):
+            content = stripped[2:]
+            wrapped = textwrap.wrap(content, width=max_width - 6, break_long_words=False, break_on_hyphens=False) or [""]
+            for i, wl in enumerate(wrapped):
+                formatted_wl = format_inline_markdown(wl)
+                prefix = "  \033[1;96m•\033[0m " if i == 0 else "    "
+                formatted_lines.append(f"{prefix}{formatted_wl}")
+            continue
+            
+        # Numbered list item
+        match = re.match(r"^(\d+)\.\s+(.*)", stripped)
+        if match:
+            num = match.group(1)
+            content = match.group(2)
+            wrapped = textwrap.wrap(content, width=max_width - 6, break_long_words=False, break_on_hyphens=False) or [""]
+            for i, wl in enumerate(wrapped):
+                formatted_wl = format_inline_markdown(wl)
+                prefix = f"  \033[1;96m{num}.\033[0m " if i == 0 else "     "
+                formatted_lines.append(f"{prefix}{formatted_wl}")
+            continue
+            
+        # Empty lines
+        if not stripped:
+            formatted_lines.append("")
+            continue
+            
+        # Standard paragraph line: wrap and format inline
+        wrapped = textwrap.wrap(line, width=max_width - 2, break_long_words=False, break_on_hyphens=False) or [""]
+        for wl in wrapped:
+            formatted_wl = format_inline_markdown(wl)
+            formatted_lines.append(f"  {formatted_wl}")
+            
+    return "\n".join(formatted_lines)
+
