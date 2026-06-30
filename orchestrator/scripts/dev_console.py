@@ -8,6 +8,7 @@ import json
 import re
 import selectors
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -303,6 +304,44 @@ def print_model_selection_loading(title: str, status_bar: StatusBar | None = Non
     if status_bar:
         status_bar.render(at_bottom=True, force=True)
     sys.stdout.flush()
+
+def run_with_loading_screen(title: str, lines: list[str], label: str, status_bar: StatusBar | None, work):
+    """Render a loading screen while a blocking menu data loader runs."""
+    clear_screen()
+    print_header(title)
+    for line in lines:
+        print(line)
+    sys.stdout.flush()
+
+    if not sys.stdout.isatty() or not status_bar:
+        return work()
+
+    result: dict[str, Any] = {}
+    error: dict[str, BaseException] = {}
+    indicator = ProgressIndicator(label=label, hint="Ctrl-C to abort")
+
+    def target() -> None:
+        try:
+            result["value"] = work()
+        except BaseException as exc:
+            error["value"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    try:
+        while thread.is_alive():
+            status_bar.render(at_bottom=True, force=True, activity=indicator)
+            time.sleep(0.1)
+        thread.join()
+    except KeyboardInterrupt:
+        raise
+    finally:
+        status_bar.activity_indicator = None
+        status_bar.render(at_bottom=True, force=True)
+
+    if "value" in error:
+        raise error["value"]
+    return result.get("value")
 
 def resolve_model_selection_defaults(allowed_models: list[str], value_map: dict[str, str]) -> list[str]:
     from model_registry import get_model
@@ -1177,19 +1216,19 @@ def handle_fleet_management(session_allowed_machines: list[str]) -> list[str]:
             try:
                 # We use prompt_checkbox with 'd' as an extra key for discovery and 'n' for rename
                 # Enforce 10 machine limit via max_selections
-                footer_actions = [
-                    "[\033[1;92mD\033[0m] Discover remote machines",
-                    "[\033[1;92mN\033[0m] Rename selected machine",
-                    "[\033[1;91mR\033[0m] Remove selected machine",
-                    "[\033[1;91mZ\033[0m] Zombie purge & cache cleanup",
-                    "[\033[1;91mB\033[0m] Back",
-                ]
+                footer = (
+                    "[\033[1;92mD\033[0m] Discover remote machines\n"
+                    "[\033[1;92mN\033[0m] Rename selected machine\n"
+                    "[\033[1;91mR\033[0m] Remove selected machine\n"
+                    "[\033[1;91mZ\033[0m] Zombie purge & cache cleanup\n"
+                    "[\033[1;91mB\033[0m] Back"
+                )
                 new_allowed = prompt_checkbox(
                     "Active Machines for This Session",
                     machine_names,
                     session_allowed_machines,
                     extra_keys=["d", "n", "r", "z", "b"],
-                    footer_actions=footer_actions,
+                    footer=footer,
                     details_map=details_map,
                     details_title="Selected Machine",
                     status_bar=status_bar,
@@ -1433,17 +1472,25 @@ def doc_menu_sort_key(path: Path) -> tuple[int, str]:
         idx = len(DOC_MENU_ORDER)
     return idx, path.name.lower()
 
-def doc_menu_display_name(path: Path) -> str:
-    name = path.stem.replace("-", " ").title()
+def doc_path_key(path: Path) -> str:
     try:
-        parent = path.parent.resolve()
+        return str(path.resolve())
     except Exception:
-        parent = path.parent
-    if parent == ORCHESTRATOR_HELP_DOCS_DIR.resolve():
-        return f"[HELP] {name}"
-    if path.parent.name == "docs":
-        return f"[DOCS] {name}"
-    return name
+        return str(path)
+
+def unique_doc_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        key = doc_path_key(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+def doc_menu_plain_name(path: Path) -> str:
+    return path.stem.replace("-", " ").title()
 
 def handle_update_orchestrator(session_allowed_machines: list[str]):
     clear_screen()
@@ -2401,8 +2448,16 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 break
             elif choice == "o":
                 while True:
-                    print_model_selection_loading("Override LLM Models for Job", status_bar=status_bar)
-                    options, value_map, details_map = get_model_selection_data()
+                    options, value_map, details_map = run_with_loading_screen(
+                        "Override LLM Models for Job",
+                        [
+                            "\n\033[90mChecking model availability from local CLIs and configured API keys...\033[0m",
+                            "\033[90mThis can take a few seconds when provider CLIs are slow to respond.\033[0m",
+                        ],
+                        "Checking model availability",
+                        status_bar,
+                        get_model_selection_data,
+                    )
                     
                     # Map current IDs back to enabled labels for defaults.
                     curr_allowed_ids = job.get("allowed_models", list(DEFAULT_FALLBACKS))
@@ -3210,26 +3265,34 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 threads = refresh_cli_statuses()
                 first_render = True
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str]):
+def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str], status_bar: StatusBar | None = None):
     # 1. Local Prerequisites & Environment (formerly check_setup.py)
     run_script("check_setup.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt="")
     sys.stdout.write("\033[r\033[2J\033[H\033[?25h")
     sys.stdout.flush()
     
-    # 2. Fleet-Wide Dependency Matrix
-    print_header("Fleet Dependency Matrix")
-    print("\033[90mProbing current fleet to verify cross-machine capability matching...\033[0m\n")
     from probe_machine import load_machines, probe_machine
-    machines_config = load_machines()
-    machines = [m for m in machines_config if m["name"] in session_allowed_machines]
     
     binaries = ["antigravity", "gemini", "claude", "codex", "gh", "ollama", "opencode", "xcodebuild", "firebase"]
-    results = []
-    for m in machines:
-        if m["name"] != "local":
-            print(f"  - Probing remote machine \033[1;96m{m['name']}...\033[0m")
-        probe = probe_machine(m)
-        results.append((m["name"], probe))
+
+    def collect_fleet_dependency_results():
+        machines_config = load_machines()
+        machines = [m for m in machines_config if m["name"] in session_allowed_machines]
+        results = []
+        for m in machines:
+            if m["name"] != "local":
+                print(f"  - Probing remote machine \033[1;96m{m['name']}...\033[0m")
+            probe = probe_machine(m)
+            results.append((m["name"], probe))
+        return machines, results
+
+    machines, results = run_with_loading_screen(
+        "Fleet Dependency Matrix",
+        ["\033[90mProbing current fleet to verify cross-machine capability matching...\033[0m\n"],
+        "Auditing fleet prerequisites",
+        status_bar,
+        collect_fleet_dependency_results,
+    )
 
     labels = {
         "antigravity": "Antigravity",
@@ -3589,8 +3652,16 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 break
             elif choice == "m":
                 while True:
-                    print_model_selection_loading("Select LLM Models for Session", status_bar=status_bar)
-                    options, value_map, details_map = get_model_selection_data()
+                    options, value_map, details_map = run_with_loading_screen(
+                        "Select LLM Models for Session",
+                        [
+                            "\n\033[90mChecking model availability from local CLIs and configured API keys...\033[0m",
+                            "\033[90mThis can take a few seconds when provider CLIs are slow to respond.\033[0m",
+                        ],
+                        "Checking model availability",
+                        status_bar,
+                        get_model_selection_data,
+                    )
 
                     curr_defaults = resolve_model_selection_defaults(session_allowed_models, value_map)
 
@@ -3626,7 +3697,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             elif choice == "f":
                 session_allowed_machines = handle_fleet_management(session_allowed_machines)
             elif choice == "p":
-                handle_system_health(session_allowed_machines, session_allowed_models)
+                handle_system_health(session_allowed_machines, session_allowed_models, status_bar=status_bar)
             elif choice == "z":
                 handle_fleet_hygiene(session_allowed_machines)
             elif choice == "e":
@@ -3674,26 +3745,46 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     }, sub_menu=True) as status_bar:
                         status_bar.set_scroll_region()
                         print_header("Documentation & Architecture Guides")
-                        print("  New here? Start with Getting Started, then User Guide.\n")
+                        print("  New here? Start with Getting Started. Use User Guide as the full reference.\n")
                         
-                        docs = list(DOCS_DIR.glob("*.md"))
                         help_docs = [
                             ORCHESTRATOR_HELP_DOCS_DIR / name
                             for name in ORCHESTRATOR_HELP_DOC_NAMES
                             if (ORCHESTRATOR_HELP_DOCS_DIR / name).exists()
                         ]
-                        # Add some common root files too
+                        orchestrator_docs = sorted(unique_doc_paths(help_docs), key=doc_menu_sort_key)
+                        orchestrator_doc_keys = {doc_path_key(doc) for doc in orchestrator_docs}
+
+                        docs = list(DOCS_DIR.glob("*.md"))
                         root_docs = [ROOT / "README.md", ROOT / "AGENTS.md", ROOT / "AI_AGENT_SETUP.md"]
-                        all_docs = sorted(help_docs + docs + [d for d in root_docs if d.exists()], key=doc_menu_sort_key)
+                        project_docs = sorted(
+                            [
+                                doc
+                                for doc in unique_doc_paths(docs + [d for d in root_docs if d.exists()])
+                                if doc_path_key(doc) not in orchestrator_doc_keys
+                            ],
+                            key=doc_menu_sort_key,
+                        )
+                        all_docs = orchestrator_docs + project_docs
                         
-                        for i, doc in enumerate(all_docs):
-                            name = doc_menu_display_name(doc)
-                            description = DOC_MENU_DESCRIPTIONS.get(doc.name)
-                            print(f"    [\033[1;96m{i:2}\033[0m] {name}")
-                            if description:
-                                print(f"         \033[90m{description}\033[0m")
+                        next_index = 0
+                        for section_title, section_docs in [
+                            ("Orchestrator Docs", orchestrator_docs),
+                            ("Project Docs", project_docs),
+                        ]:
+                            if not section_docs:
+                                continue
+                            print(f"  \033[1;97m{section_title}\033[0m")
+                            for doc in section_docs:
+                                name = doc_menu_plain_name(doc)
+                                description = DOC_MENU_DESCRIPTIONS.get(doc.name)
+                                print(f"    [\033[1;96m{next_index:2}\033[0m] {name}")
+                                if description:
+                                    print(f"         \033[90m{description}\033[0m")
+                                next_index += 1
+                            print()
                         
-                        print("\n    [\033[1;91mB\033[0m] Back")
+                        print("    [\033[1;91mB\033[0m] Back")
                         
                         prompt = get_choice_prompt("Choice:", "(index or B)")
                         status_bar.render(at_bottom=True, force=True, prompt=prompt)
@@ -4407,8 +4498,8 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print(f"    [{i}] {email}")
             
             print("\n  Actions:")
-            print("    [\033[1;96mA\033[0m] Add recipient address")
-            print("    [\033[1;96mI\033[0m] Import recipients from CSV")
+            print("    [\033[1;92mA\033[0m] Add recipient address")
+            print("    [\033[1;92mI\033[0m] Import recipients from CSV")
             if emails:
                 print("    [\033[1;96mR\033[0m] Remove recipient address")
                 print("    [\033[1;96mT\033[0m] Send Test Email")

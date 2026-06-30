@@ -400,6 +400,18 @@ Option A: Headless Auto-Signing (Recommended)
 
         self.assertEqual(defaults, ["gpt-5.3-codex"])
 
+    def test_unique_doc_paths_dedupes_resolved_paths(self):
+        first = self.temp_root / "docs" / "getting-started.md"
+        duplicate = self.temp_root / "docs" / ".." / "docs" / "getting-started.md"
+        second = self.temp_root / "docs" / "user-guide.md"
+        first.parent.mkdir(parents=True, exist_ok=True)
+        first.touch()
+        second.touch()
+
+        docs = dev_console.unique_doc_paths([first, duplicate, second])
+
+        self.assertEqual(docs, [first, second])
+
 
 if __name__ == "__main__":
     unittest.main()

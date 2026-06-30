@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -77,6 +79,32 @@ class ProbeMachineTests(unittest.TestCase):
         )
         self.assertNotIn("cd /missing/repo", ssh_probe_cmd)
         self.assertIn("--repo-path /missing/repo", ssh_probe_cmd)
+
+    def test_probe_local_script_runs_without_common_dependency(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_script = Path(temp_dir) / "probe_machine.py"
+            shutil.copy2(SCRIPTS_DIR / "probe_machine.py", temp_script)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(temp_script),
+                    "--probe-local",
+                    "--machine-name",
+                    "mac2",
+                    "--repo-path",
+                    "/path/that/does/not/exist",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["reachable"])
+        self.assertFalse(payload["repo_path_ok"])
+        self.assertEqual(payload["repo_path"], "/path/that/does/not/exist")
 
 
 if __name__ == "__main__":

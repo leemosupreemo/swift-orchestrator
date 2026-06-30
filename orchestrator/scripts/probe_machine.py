@@ -8,9 +8,22 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
+from datetime import datetime
 from typing import Any
 
-from common import CONFIG_DIR, MACHINE_STATE_DIR, now_iso, read_json, run
+try:
+    from common import CONFIG_DIR, MACHINE_STATE_DIR, now_iso, read_json
+except Exception:
+    CONFIG_DIR = Path.home() / ".orchestrator" / "config"
+    MACHINE_STATE_DIR = Path.home() / ".orchestrator" / "state" / "machines"
+
+    def now_iso() -> str:
+        return datetime.now().isoformat()
+
+    def read_json(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_machines() -> list[dict[str, Any]]:
@@ -299,10 +312,8 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
     machine_name = machine["name"]
     
     local_script_path = Path(__file__).resolve()
-    local_common_path = local_script_path.parent / "common.py"
     remote_tmp_dir = f"/tmp/orchestrator_probe_{machine_name}"
     remote_tmp_script_path = f"{remote_tmp_dir}/probe_machine.py"
-    remote_tmp_common_path = f"{remote_tmp_dir}/common.py"
 
     print(f"      - \033[1;96mProbing remote machine {machine_name}...\033[0m")
     
@@ -310,11 +321,10 @@ def probe_remote(machine: dict[str, Any]) -> dict[str, Any]:
     successful_target = None
     
     for target in ssh_targets:
-        # 1. Sync the probe script and its local common.py dependency to a temp location.
+        # 1. Sync the self-contained probe script to a temp location.
         try:
             subprocess.run(["ssh", "-o", "ConnectTimeout=5", target, f"mkdir -p {shlex.quote(remote_tmp_dir)}"], check=True, capture_output=True)
             subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", str(local_script_path), f"{target}:{remote_tmp_script_path}"], check=True)
-            subprocess.run(["scp", "-o", "ConnectTimeout=5", "-q", str(local_common_path), f"{target}:{remote_tmp_common_path}"], check=True)
         except Exception as e:
             last_result = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=str(e))
             continue
