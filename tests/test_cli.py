@@ -286,6 +286,20 @@ class CliTests(unittest.TestCase):
     def test_check_config_returns_failure_for_errors(self, _project, _machines) -> None:
         self.assertEqual(cli.main(["check-config"]), 1)
 
+    @patch("orchestrator.cli.validate_machine_config", return_value=[])
+    @patch("orchestrator.cli.validate_project_config", return_value=[])
+    def test_check_config_reports_distribution_errors(self, _project, _machines) -> None:
+        config = MagicMock()
+        config.config_dir = Path("/tmp/orchestrator-config")
+        config.firebase_distribution = True
+        config.validate_distribution_config.return_value = ["distribution script is outdated"]
+
+        output = io.StringIO()
+        with patch("orchestrator.cli.load_project_config", return_value=config), redirect_stdout(output):
+            self.assertEqual(cli.main(["check-config"]), 1)
+
+        self.assertIn("distribution script is outdated", output.getvalue())
+
     @patch("orchestrator.cli.run_script", return_value=0)
     def test_worker_commands_dispatch_to_worker_tools(self, mock_run_script) -> None:
         self.assertEqual(cli.main(["worker-check", "--machine", "mac2"]), 0)

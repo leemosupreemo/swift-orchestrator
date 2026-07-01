@@ -1013,6 +1013,8 @@ def init_project(args: argparse.Namespace) -> int:
 def validate_config_command() -> int:
     config = load_project_config()
     errors = validate_project_config(config)
+    if config.firebase_distribution:
+        errors.extend(config.validate_distribution_config())
     errors.extend(validate_machine_config(config.config_dir))
     if errors:
         print("Configuration errors:")

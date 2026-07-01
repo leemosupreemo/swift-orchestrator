@@ -191,6 +191,22 @@ class ProjectConfig:
                 )
             elif any([self.asc_key_id, self.asc_issuer_id, self.asc_key_path]) and not has_asc_keys:
                  errors.append("App Store Connect API keys are partially configured. Please provide all three (ID, Issuer, Path).")
+
+        if self.firebase_plist_path and self.distribution_script_path:
+            dist_script = self.root / self.distribution_script_path
+            if dist_script.exists():
+                try:
+                    script_text = dist_script.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    script_text = dist_script.read_text(errors="ignore")
+                if "--firebase-plist" not in script_text:
+                    errors.append(
+                        f"The configured distribution script is outdated: {self.distribution_script_path} "
+                        "does not accept --firebase-plist, but firebase_plist_path is set. "
+                        "Run 'orchestrator wizard' to regenerate Firebase distribution setup, or run "
+                        f"'python3 -m orchestrator.scripts.setup_distribution --root {self.root} "
+                        f"--force --firebase-plist {self.firebase_plist_path}'."
+                    )
         
         return errors
 

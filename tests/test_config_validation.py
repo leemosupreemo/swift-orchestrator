@@ -80,6 +80,35 @@ class ConfigValidationTests(unittest.TestCase):
             self.assertIn("distribution_script_path does not exist: scripts/distribute_ios.sh. Run 'orchestrator wizard' to generate it.", errors)
             self.assertIn("firebase_plist_path does not exist: SampleApp/GoogleService-Info.plist. Download this from Firebase Console.", errors)
 
+    def test_distribution_config_flags_stale_script_missing_firebase_plist_arg(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            (scripts_dir / "distribute_ios.sh").write_text(
+                "#!/bin/bash\n"
+                "while [[ \"$#\" -gt 0 ]]; do\n"
+                "  case $1 in\n"
+                "    --project) shift ;;\n"
+                "    *) echo \"Unknown parameter passed: $1\"; exit 1 ;;\n"
+                "  esac\n"
+                "  shift\n"
+                "done\n",
+                encoding="utf-8",
+            )
+
+            errors = make_config(
+                root,
+                distribution_script_path="scripts/distribute_ios.sh",
+                firebase_plist_path="SampleApp/GoogleService-Info.plist",
+                development_team="ABC123DEFG",
+                delivery_method="debugging",
+            ).validate_distribution_config()
+
+            self.assertEqual(len(errors), 1)
+            self.assertIn("does not accept --firebase-plist", errors[0])
+            self.assertIn("orchestrator wizard", errors[0])
+
     def test_project_config_validates_visual_check_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
