@@ -274,6 +274,20 @@ Error: Please sign in to view available models.
         cmd_opencode_qwen = get_llm_command("opencode/qwen-3.7-max", "prompt.txt")
         self.assertIn("opencode run --model opencode/qwen-3.7-max", cmd_opencode_qwen)
 
+    @patch("orchestrator.scripts.llm.preferred_cli")
+    def test_llm_command_routing_for_gemini(self, mock_preferred_cli) -> None:
+        from orchestrator.scripts.llm import get_llm_command
+        
+        # Test routing when preferred_cli is "agy"
+        mock_preferred_cli.return_value = "agy"
+        cmd_gemini_agy = get_llm_command("gemini-3.1-pro-preview", "prompt.txt", session_id="abc-123")
+        self.assertIn("agy --model gemini-3.1-pro-preview --dangerously-skip-permissions --prompt - --conversation abc-123", cmd_gemini_agy)
+        
+        # Test routing when preferred_cli is "gemini"
+        mock_preferred_cli.return_value = "gemini"
+        cmd_gemini_cli = get_llm_command("gemini-3.1-pro-preview", "prompt.txt", session_id="abc-123")
+        self.assertIn("gemini --model gemini-3.1-pro-preview --skip-trust --prompt - --yolo --allowed-mcp-server-names context7,exa,swiftlens --allowed-tools read_file,grep_search,glob --raw-output --accept-raw-output-risk --session-id abc-123", cmd_gemini_cli)
+
 
 if __name__ == "__main__":
     unittest.main()

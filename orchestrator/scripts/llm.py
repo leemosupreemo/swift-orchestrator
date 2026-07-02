@@ -179,18 +179,28 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None, sessi
         safe_tools = "read_file,grep_search,glob"
         if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
             safe_tools += ",replace,write_file"
-        cmd_base = f"{provider_cli} --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
-        if session_id:
-            cmd_base += f" --session-id {session_id}"
+        if provider_cli == "agy":
+            cmd_base = f"agy --model {model_id} --dangerously-skip-permissions --prompt -"
+            if session_id:
+                cmd_base += f" --conversation {session_id}"
+        else:
+            cmd_base = f"{provider_cli} --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+            if session_id:
+                cmd_base += f" --session-id {session_id}"
     elif model_id == "gemini":
         provider_cli = preferred_cli("gemini")
-        safe_servers = "context7,exa,swiftlens"
-        safe_tools = "read_file,grep_search,glob"
-        if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
-            safe_tools += ",replace,write_file"
-        cmd_base = f"{provider_cli} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
-        if session_id:
-            cmd_base += f" --session-id {session_id}"
+        if provider_cli == "agy":
+            cmd_base = "agy --dangerously-skip-permissions --prompt -"
+            if session_id:
+                cmd_base += f" --conversation {session_id}"
+        else:
+            safe_servers = "context7,exa,swiftlens"
+            safe_tools = "read_file,grep_search,glob"
+            if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
+                safe_tools += ",replace,write_file"
+            cmd_base = f"{provider_cli} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+            if session_id:
+                cmd_base += f" --session-id {session_id}"
     elif model_id.startswith("claude-"):
         cmd_base = f"claude -p --model {model_id}"
         if session_id:
