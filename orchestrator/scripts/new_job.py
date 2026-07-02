@@ -61,20 +61,35 @@ def normalize_branch_mode(branch_mode: str | None) -> str:
 
 
 def create_issue(title: str, body: str, labels: list[str]) -> int:
-    label_flags = []
-    for label in labels:
-        label_flags.extend(["--label", label])
-    out = gh_text(
-        "issue",
-        "create",
-        "--title",
-        title,
-        "--body",
-        body,
-        *label_flags,
-    )
-    issue_number = int(out.rstrip("/").split("/")[-1])
-    return issue_number
+    import subprocess
+    labels = list(labels)
+    while True:
+        try:
+            label_flags = []
+            for label in labels:
+                label_flags.extend(["--label", label])
+            out = gh_text(
+                "issue",
+                "create",
+                "--title",
+                title,
+                "--body",
+                body,
+                *label_flags,
+            )
+            issue_number = int(out.rstrip("/").split("/")[-1])
+            return issue_number
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr or ""
+            match = re.search(r"could not add label:\s*'([^']+)'\s*not found", stderr)
+            if match and labels:
+                missing_label = match.group(1)
+                print(f"⚠️  could not add label: '{missing_label}' not found on repository. Retrying without this label...")
+                if missing_label in labels:
+                    labels.remove(missing_label)
+                    continue
+            raise
+
 
 
 def normalize_verification(payload: dict, verifier_model: str) -> dict | None:

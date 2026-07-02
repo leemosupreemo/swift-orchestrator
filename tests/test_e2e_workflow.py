@@ -198,7 +198,6 @@ class E2EWorkflowTests(unittest.TestCase):
             "manual (no git actions)" # Branch choice
         ]
         mock_confirm.return_value = False # No Stitch, No Spec, No Advanced, No YOLO
-        
         dev_console.handle_new_job(session_allowed_models=["gpt-5.5"], session_allowed_machines=["local"])
         
         # Verify run_script was called with mapped branch mode
@@ -207,5 +206,32 @@ class E2EWorkflowTests(unittest.TestCase):
         idx = args_passed.index("--branch-mode")
         self.assertEqual(args_passed[idx+1], "manual")
 
+    @patch("orchestrator.scripts.new_job.gh_text")
+    def test_create_issue_retry_on_missing_labels(self, mock_gh_text):
+        from orchestrator.scripts import new_job
+        import subprocess
+        
+        # First call fails because 'source:manual' is not found
+        # Second call succeeds
+        mock_gh_text.side_effect = [
+            subprocess.CalledProcessError(
+                returncode=1,
+                cmd=["gh", "issue", "create"],
+                output="",
+                stderr="could not add label: 'source:manual' not found"
+            ),
+            "https://github.com/org/repo/issues/123"
+        ]
+        
+        issue_number = new_job.create_issue("Test issue", "Body text", ["job:bug", "source:manual"])
+        
+        self.assertEqual(issue_number, 123)
+        self.assertEqual(mock_gh_text.call_count, 2)
+        # Check second call didn't have '--label source:manual'
+        last_call_args = mock_gh_text.call_args_list[1][0]
+        self.assertNotIn("source:manual", last_call_args)
+
+
 if __name__ == "__main__":
     unittest.main()
+
