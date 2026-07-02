@@ -131,6 +131,145 @@ class VisualDeliveryConfigTests(unittest.TestCase):
             self.assertTrue(len(launch_call) > 0)
             self.assertEqual(launch_call[0][0][0][2], "com.test.resolved-bundle-id")
 
+    @patch("deliver_build.send_final_notification")
+    @patch("deliver_build.subprocess.Popen")
+    @patch("deliver_build.subprocess.check_output")
+    @patch("deliver_build.format_markdown_for_terminal")
+    def test_deliver_build_diagnoses_signing_team_mismatch(
+        self, mock_format_markdown, mock_check_output, mock_popen, _notify
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+            (root / "scripts").mkdir()
+            script = root / "scripts" / "distribute_ios.sh"
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            job_path = root / "job.json"
+            job_path.write_text(
+                json.dumps({
+                    "job_id": "job-1",
+                    "title": "Ship build",
+                    "branch": "feature/build",
+                    "issue_number": 1,
+                }),
+                encoding="utf-8",
+            )
+
+            mock_check_output.side_effect = [b"feature/build\n", b"2026-06-06 00:00:00\n"]
+            process = MagicMock()
+            process.stdout = [
+                "/Users/leemosupreemo/Documents/Themis/ThemisPlayground.xcodeproj: "
+                "error: No Account for Team \"REC974HW8X\". Add a new account...\n",
+                "/Users/leemosupreemo/Documents/Themis/ThemisPlayground.xcodeproj: "
+                "error: No profiles for 'nmeskin.Themis' were found: ...\n"
+            ]
+            process.wait.return_value = 65  # non-zero to trigger error handling
+            mock_popen.return_value = process
+
+            mock_format_markdown.side_effect = lambda x: x
+
+            from orchestrator.project_config import ProjectConfig
+            config = MagicMock(spec=ProjectConfig)
+            config.distribution_script_path = "scripts/distribute_ios.sh"
+            config.xcode_project = "SampleApp.xcodeproj"
+            config.validate_distribution_config.return_value = []
+            config.scheme = None
+            config.xcode_workspace = None
+            config.provisioning_profile_specifier = None
+            config.development_team = "3J93523B6Q"  # Mismatched team
+            config.delivery_method = "development"
+            config.asc_key_id = "MUD2T6SH8G"
+            config.asc_issuer_id = "6b2330c7-0203-4e58-9924-ba5c1f42e1a8"
+            config.asc_key_path = "/Users/leemosupreemo/.private_keys/AuthKey_MUD2T6SH8G.p8"
+
+            with (
+                patch("builtins.print") as mock_print,
+                patch.object(deliver_build, "ROOT", root),
+                patch.object(deliver_build, "PROJECT_CONFIG", config),
+                self.assertRaises(SystemExit) as exit_context,
+            ):
+                deliver_build.deliver_build(job_path)
+
+            self.assertEqual(exit_context.exception.code, 65)
+            
+            # Verify the printed diagnosis message includes details of mismatch
+            called_args = [call.args[0] for call in mock_print.call_args_list if call.args]
+            printed_output = "\n".join(called_args)
+            self.assertIn("Team ID Mismatch Detected!", printed_output)
+            self.assertIn("3J93523B6Q", printed_output)
+            self.assertIn("REC974HW8X", printed_output)
+            self.assertIn("nmeskin.Themis", printed_output)
+
+    @patch("deliver_build.send_final_notification")
+    @patch("deliver_build.subprocess.Popen")
+    @patch("deliver_build.subprocess.check_output")
+    @patch("deliver_build.format_markdown_for_terminal")
+    def test_deliver_build_diagnoses_firebase_distribution_404(
+        self, mock_format_markdown, mock_check_output, mock_popen, _notify
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+            (root / "scripts").mkdir()
+            script = root / "scripts" / "distribute_ios.sh"
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            job_path = root / "job.json"
+            job_path.write_text(
+                json.dumps({
+                    "job_id": "job-1",
+                    "title": "Ship build",
+                    "branch": "feature/build",
+                    "issue_number": 1,
+                    "testers": "invalid-tester@gmail.com",
+                    "groups": "invalid-testers"
+                }),
+                encoding="utf-8",
+            )
+
+            mock_check_output.side_effect = [b"feature/build\n", b"2026-06-06 00:00:00\n"]
+            process = MagicMock()
+            process.stdout = [
+                "Error: failed to distribute to testers/groups: Request to ... had HTTP Error: 404, Requested entity was not found.\n"
+            ]
+            process.wait.return_value = 1  # generic non-zero exit code
+            mock_popen.return_value = process
+
+            mock_format_markdown.side_effect = lambda x: x
+
+            from orchestrator.project_config import ProjectConfig
+            config = MagicMock(spec=ProjectConfig)
+            config.distribution_script_path = "scripts/distribute_ios.sh"
+            config.xcode_project = "SampleApp.xcodeproj"
+            config.validate_distribution_config.return_value = []
+            config.scheme = None
+            config.xcode_workspace = None
+            config.provisioning_profile_specifier = None
+            config.development_team = "3J93523B6Q"
+            config.delivery_method = "development"
+            config.asc_key_id = "MUD2T6SH8G"
+            config.asc_issuer_id = "6b2330c7-0203-4e58-9924-ba5c1f42e1a8"
+            config.asc_key_path = "/Users/leemosupreemo/.private_keys/AuthKey_MUD2T6SH8G.p8"
+            config.firebase_testers = None
+            config.firebase_groups = None
+
+            with (
+                patch("builtins.print") as mock_print,
+                patch.object(deliver_build, "ROOT", root),
+                patch.object(deliver_build, "PROJECT_CONFIG", config),
+                self.assertRaises(SystemExit) as exit_context,
+            ):
+                deliver_build.deliver_build(job_path)
+
+            self.assertEqual(exit_context.exception.code, 1)
+            
+            # Verify the printed diagnosis message includes details of the Firebase 404 error
+            called_args = [call.args[0] for call in mock_print.call_args_list if call.args]
+            printed_output = "\n".join(called_args)
+            self.assertIn("Firebase distribution failed (HTTP 404)", printed_output)
+            self.assertIn("invalid-tester@gmail.com", printed_output)
+            self.assertIn("invalid-testers", printed_output)
+            self.assertIn("firebase_testers", printed_output)
+
 
 if __name__ == "__main__":
     unittest.main()

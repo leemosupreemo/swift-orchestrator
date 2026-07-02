@@ -141,10 +141,12 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
             cmd.extend(["--asc-key-path", str(key_path)])
         if PROJECT_CONFIG.firebase_plist_path:
             cmd.extend(["--firebase-plist", PROJECT_CONFIG.firebase_plist_path])
-        if job.get("testers"):
-            cmd.extend(["--testers", job["testers"]])
-        if job.get("groups"):
-            cmd.extend(["--groups", job["groups"]])
+        testers = job.get("testers") or getattr(PROJECT_CONFIG, "firebase_testers", None)
+        if testers:
+            cmd.extend(["--testers", testers])
+        groups = job.get("groups") or getattr(PROJECT_CONFIG, "firebase_groups", None)
+        if groups:
+            cmd.extend(["--groups", groups])
         
         with open(dist_log, "w") as f:
             process = subprocess.Popen(
@@ -190,7 +192,34 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
                     print("  1. Run 'orchestrator console'.")
                     print("  2. Go to Configuration & Tools -> [K] Configure Headless Signing.")
                     print("  3. Provide your keychain password to authorize automatic unlocking during builds.")
-                elif "No profiles for" in log_content or "No signing certificate" in log_content:
+                elif "failed to distribute to testers" in log_content or "HTTP Error: 404" in log_content:
+                    msg = f"""# Firebase distribution failed (HTTP 404)
+
+The Firebase App Distribution release uploaded successfully, but the distribution to testers or groups failed. 
+This usually means a specified tester email or group does not exist in your Firebase project console.
+
+**Configured Recipients:**
+* **Testers:** `{testers or '<none>'}`
+* **Groups:** `{groups or '<none>'}`
+
+**Next steps:**
+1. Open your **Firebase Console** -> **App Distribution**.
+2. Verify that the testers are added or that the group exists (e.g. create the group or invite the testers).
+3. If you want to configure different default testers or groups for this project, you can add them to your `.orchestrator/project.json`:
+   ```json
+   {{
+     "firebase_testers": "tester1@example.com,tester2@example.com",
+     "firebase_groups": "internal-testers"
+   }}
+   ```
+"""
+                    print(format_markdown_for_terminal(msg))
+                elif "No Account for Team" in log_content or "No profiles for" in log_content or "No signing certificate" in log_content:
+                    failed_team = None
+                    team_match = re.search(r"No Account for Team \"([^\"]+)\"", log_content)
+                    if team_match:
+                        failed_team = team_match.group(1)
+                    
                     missing_bundle_id = None
                     bundle_match = re.search(r"No profiles for '([^']+)' were found", log_content)
                     if not bundle_match:
@@ -198,12 +227,39 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
                     if bundle_match:
                         missing_bundle_id = bundle_match.group(1)
                     
-                    bundle_info = f"\n**Xcode was looking for a profile matching Bundle ID:** `{missing_bundle_id}`\n" if missing_bundle_id else ""
+                    # Gather details about current configuration
+                    has_asc = all([PROJECT_CONFIG.asc_key_id, PROJECT_CONFIG.asc_issuer_id, PROJECT_CONFIG.asc_key_path])
                     
-                    msg = f"""# Signing setup needs attention
+                    bundle_info = f"\nXcode was looking for a profile matching Bundle ID: **{missing_bundle_id}**\n" if missing_bundle_id else ""
+                    team_info = f"\nXcode was looking for Team ID: **{failed_team}**\n" if failed_team else ""
+
+                    if has_asc:
+                        # Mismatch warning
+                        mismatch_warning = ""
+                        if failed_team and PROJECT_CONFIG.development_team and failed_team != PROJECT_CONFIG.development_team:
+                            mismatch_warning = f"""
+> [!WARNING]
+> **Team ID Mismatch Detected!**
+> Your `.orchestrator/project.json` is configured with `development_team`: `{PROJECT_CONFIG.development_team}`, 
+> but Xcode is trying to build for Team: `{failed_team}`. 
+> Please update the `development_team` in `.orchestrator/project.json` to `{failed_team}` (and verify your Xcode project target build settings).
+"""
+                        
+                        msg = f"""# Signing setup needs attention
+
+Xcode was unable to sign your app using the configured App Store Connect API Key.
+{team_info}{bundle_info}{mismatch_warning}
+Please check the following common issues:
+
+1. **Incorrect Team ID**: Ensure the Team ID in `.orchestrator/project.json` (`{PROJECT_CONFIG.development_team or '<missing>'}`) matches your App Store Connect team and your Xcode project settings.
+2. **Insecure Key Location**: xcodebuild ignores/rejects `.p8` files unless they are stored in `~/.private_keys/` or `~/.appstoreconnect/private_keys/`. Currently configured to: `{PROJECT_CONFIG.asc_key_path}`.
+3. **Invalid API Key**: Double check that the `asc_key_id` (`{PROJECT_CONFIG.asc_key_id}`) and `asc_issuer_id` (`{PROJECT_CONFIG.asc_issuer_id}`) are correct, and that the API key has the **Developer** or **App Manager** role on App Store Connect.
+"""
+                    else:
+                        msg = f"""# Signing setup needs attention
 
 Xcode could not find a certificate or provisioning profile for this app.
-{bundle_info}
+{team_info}{bundle_info}
 Please configure code signing using one of the two options below:
 
 ## Option A: Headless Auto-Signing (Recommended)

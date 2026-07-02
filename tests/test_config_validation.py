@@ -109,6 +109,52 @@ class ConfigValidationTests(unittest.TestCase):
             self.assertIn("does not accept --firebase-plist", errors[0])
             self.assertIn("orchestrator wizard", errors[0])
 
+    def test_distribution_config_validates_asc_key_path_and_permissions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            # 1. Test invalid asc_key_path (not in secure directory)
+            config = make_config(
+                root,
+                development_team="ABC123DEFG",
+                delivery_method="debugging",
+                asc_key_id="KEY123",
+                asc_issuer_id="ISSUER123",
+                asc_key_path=".secrets/AuthKey_KEY123.p8",
+            )
+            errors = config.validate_distribution_config()
+            self.assertTrue(any("is not in a designated secure Xcode directory" in e for e in errors))
+
+            # 2. Test valid secure path (e.g. ~/.private_keys/AuthKey_KEY123.p8)
+            secure_key_path = Path.home() / ".private_keys" / "AuthKey_KEY123_test.p8"
+            config_secure = make_config(
+                root,
+                development_team="ABC123DEFG",
+                delivery_method="debugging",
+                asc_key_id="KEY123",
+                asc_issuer_id="ISSUER123",
+                asc_key_path=str(secure_key_path),
+            )
+            
+            # Since the file doesn't exist, we shouldn't get a permissions error, only checks the parent dir.
+            errors_secure = config_secure.validate_distribution_config()
+            self.assertFalse(any("is not in a designated secure Xcode directory" in e for e in errors_secure))
+
+            # 3. Test insecure file permissions if the file actually exists
+            secure_key_path.parent.mkdir(parents=True, exist_ok=True)
+            secure_key_path.write_text("fake-key-data")
+            try:
+                secure_key_path.chmod(0o777)
+                errors_perms = config_secure.validate_distribution_config()
+                self.assertTrue(any("has insecure permissions" in e for e in errors_perms))
+                
+                # Set secure permissions (0o600)
+                secure_key_path.chmod(0o600)
+                errors_perms_ok = config_secure.validate_distribution_config()
+                self.assertFalse(any("has insecure permissions" in e for e in errors_perms_ok))
+            finally:
+                if secure_key_path.exists():
+                    secure_key_path.unlink()
+
     def test_project_config_validates_visual_check_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

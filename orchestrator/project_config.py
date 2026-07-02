@@ -164,6 +164,8 @@ class ProjectConfig:
     firebase_distribution: bool = False
     notification_display_name: str = ""
     signing_style: str | None = None
+    firebase_testers: str | None = None
+    firebase_groups: str | None = None
 
     @property
     def config_dir(self) -> Path:
@@ -191,6 +193,45 @@ class ProjectConfig:
                 )
             elif any([self.asc_key_id, self.asc_issuer_id, self.asc_key_path]) and not has_asc_keys:
                  errors.append("App Store Connect API keys are partially configured. Please provide all three (ID, Issuer, Path).")
+
+        if self.asc_key_path:
+            p = Path(self.asc_key_path).expanduser()
+            if not p.is_absolute():
+                p = (self.root / p).resolve()
+            else:
+                p = p.resolve()
+
+            home = Path.home().resolve()
+            secure_paths = [
+                home / ".private_keys",
+                home / ".appstoreconnect" / "private_keys"
+            ]
+            
+            is_secure = False
+            for sp in secure_paths:
+                try:
+                    if p.parent == sp.resolve():
+                        is_secure = True
+                        break
+                except Exception:
+                    pass
+            
+            if not is_secure:
+                errors.append(
+                    f"App Store Connect API key path '{self.asc_key_path}' is not in a designated secure Xcode directory. "
+                    "xcodebuild ignores/rejects .p8 keys stored elsewhere (e.g. inside the project repository). "
+                    "Please store your key in ~/.private_keys/ or ~/.appstoreconnect/private_keys/ and update project.json."
+                )
+            elif p.exists():
+                try:
+                    mode = p.stat().st_mode
+                    if (mode & 0o077) != 0:
+                        errors.append(
+                            f"App Store Connect API key file '{self.asc_key_path}' has insecure permissions. "
+                            f"Run 'chmod 600 {p}' to restrict access to owner-only."
+                        )
+                except Exception:
+                    pass
 
         if self.firebase_plist_path and self.distribution_script_path:
             dist_script = self.root / self.distribution_script_path
@@ -274,6 +315,8 @@ def load_project_config() -> ProjectConfig:
         firebase_distribution=bool(data.get("firebase_distribution", False)),
         notification_display_name=data.get("notification_display_name", f"{project_name} AI Orchestrator"),
         signing_style=data.get("signing_style", "automatic"),
+        firebase_testers=data.get("firebase_testers"),
+        firebase_groups=data.get("firebase_groups"),
     )
 
 

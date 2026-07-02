@@ -92,8 +92,8 @@ def run_smoke_delivery():
             "builder": "gemini",
             "reviewer": "gemini",
             "planner": "gemini",
-            "testers": "enmeskin@gmail.com",
-            "groups": "internal-testers"
+            "testers": getattr(PROJECT_CONFIG, "firebase_testers", None) or "enmeskin@gmail.com",
+            "groups": getattr(PROJECT_CONFIG, "firebase_groups", None) or "internal-testers"
         }
         write_json(job_file, job_data)
         print(f"      - Created mock job: {job_file.name}")

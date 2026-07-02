@@ -316,7 +316,40 @@ def _check(status_bar: StatusBar | None = None):
         has_manual = bool(PROJECT_CONFIG.provisioning_profile_specifier)
         
         if has_asc:
-            print_result(True, "Signing Credentials", "ASC API KEYS (HEADLESS)")
+            key_path_str = PROJECT_CONFIG.asc_key_path
+            p = Path(key_path_str).expanduser()
+            if not p.is_absolute():
+                p = (ROOT / p).resolve()
+            else:
+                p = p.resolve()
+
+            home = Path.home().resolve()
+            secure_paths = [
+                home / ".private_keys",
+                home / ".appstoreconnect" / "private_keys"
+            ]
+            is_secure_dir = any(p.parent == sp for sp in secure_paths)
+
+            if is_secure_dir:
+                print_result(True, "Signing Credentials", "ASC API KEYS (HEADLESS)")
+            else:
+                print_result(False, "Signing Credentials", "ASC API KEYS (INSECURE LOCATION)")
+                print("     \033[93m└─ WARNING: xcodebuild ignores/rejects API keys unless they are in ~/.private_keys/ or ~/.appstoreconnect/private_keys/\033[0m")
+                print(f"        Current path: {key_path_str}")
+                print(f"        Remediation: Move key to ~/.private_keys/{p.name} and update 'asc_key_path' in .orchestrator/project.json")
+
+            if p.exists():
+                print_result(True, "ASC Key File", "FOUND")
+                try:
+                    mode = p.stat().st_mode
+                    is_owner_only = (mode & 0o077) == 0
+                    print_result(is_owner_only, "ASC Key Permissions", "SECURE (600)" if is_owner_only else "TOO OPEN")
+                    if not is_owner_only:
+                        print(f"     \033[93m└─ REMEDIATION: Run 'chmod 600 {p}' to secure the key\033[0m")
+                except Exception as e:
+                    print_result(False, "ASC Key Permissions", f"ERROR: {e}")
+            else:
+                print_result(False, "ASC Key File", f"NOT FOUND ({key_path_str})")
         elif has_manual:
             print_result(True, "Signing Credentials", "MANUAL PROFILE SPECIFIED")
             try:

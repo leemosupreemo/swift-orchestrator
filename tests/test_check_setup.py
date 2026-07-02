@@ -202,6 +202,37 @@ enabled = true
         self.assertIn("Provisioning Profile (My Test Profile)", output)
         self.assertIn("NOT FOUND", output)
 
+    @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.stat")
+    def test_check_signing_asc_key_insecure(self, mock_stat, mock_exists) -> None:
+        mock_config = MagicMock()
+        mock_config.firebase_distribution = True
+        mock_config.project_name = "SampleApp"
+        mock_config.development_team = "TEAM123"
+        mock_config.asc_key_id = "KEY123"
+        mock_config.asc_issuer_id = "ISSUER123"
+        mock_config.asc_key_path = ".secrets/AuthKey_KEY123.p8"
+        mock_config.provisioning_profile_specifier = ""
+        mock_config.xcode_project = None
+        mock_config.xcode_workspace = None
+
+        mock_exists.side_effect = lambda: True
+
+        mock_stat_obj = MagicMock()
+        mock_stat_obj.st_mode = 0o100755
+        mock_stat.return_value = mock_stat_obj
+        
+        with patch.object(check_setup, "PROJECT_CONFIG", mock_config), \
+             patch("sys.stdout", new_callable=io.StringIO) as mock_stdout, \
+             patch("check_setup.check_file_content", return_value=True), \
+             patch("shutil.which", return_value=None):
+            check_setup.check()
+            
+        output = mock_stdout.getvalue()
+        self.assertIn("ASC API KEYS (INSECURE LOCATION)", output)
+        self.assertIn("TOO OPEN", output)
+        self.assertIn("REMEDIATION: Run 'chmod 600", output)
+
 
 if __name__ == "__main__":
     unittest.main()

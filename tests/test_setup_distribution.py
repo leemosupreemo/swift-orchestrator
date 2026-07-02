@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +78,55 @@ class SetupDistributionTests(unittest.TestCase):
             (app_root / "SampleApp" / "GoogleService-Info.plist").write_text("<plist />", encoding="utf-8")
 
             self.assertEqual(infer_firebase_plist_path(app_root, "SampleApp"), "SampleApp/GoogleService-Info.plist")
+
+    @patch("pathlib.Path.home")
+    def test_setup_distribution_secures_asc_key(self, mock_home) -> None:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-app-") as temp_dir:
+            app_root = Path(temp_dir).resolve()
+            
+            # Create a mock home directory
+            mock_home_dir = app_root / "mock_home"
+            mock_home_dir.mkdir()
+            mock_home.return_value = mock_home_dir
+            
+            # Setup project.json
+            runtime = app_root / ".orchestrator"
+            runtime.mkdir()
+            (runtime / "project.json").write_text(
+                json.dumps({
+                    "project_name": "Themis",
+                    "xcode_project": "Themis.xcodeproj",
+                }),
+                encoding="utf-8",
+            )
+            os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(app_root)
+            
+            # Create a fake key file in an insecure location
+            insecure_key_dir = app_root / ".secrets"
+            insecure_key_dir.mkdir()
+            insecure_key_file = insecure_key_dir / "AuthKey_KEY123.p8"
+            insecure_key_file.write_text("my-private-key-data")
+            insecure_key_file.chmod(0o777)
+            
+            # Call setup_distribution
+            setup_distribution(
+                team_id="ABC123DEFG",
+                asc_key_id="KEY123",
+                asc_issuer_id="ISSUER123",
+                asc_key_path=str(insecure_key_file),
+            )
+            
+            # Verify the key was copied to the secure location in the mock home
+            secure_key_file = mock_home_dir / ".private_keys" / "AuthKey_KEY123.p8"
+            self.assertTrue(secure_key_file.exists())
+            self.assertEqual(secure_key_file.read_text(), "my-private-key-data")
+            
+            # Verify file permissions on the secure key are 600
+            self.assertEqual(secure_key_file.stat().st_mode & 0o777, 0o600)
+            
+            # Verify that project.json has been updated with the secure key path
+            project = json.loads((runtime / "project.json").read_text(encoding="utf-8"))
+            self.assertEqual(project["asc_key_path"], str(secure_key_file))
 
 
 if __name__ == "__main__":

@@ -192,6 +192,56 @@ EXPORT_OPTIONS_TEMPLATE = r"""<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 """
 
+def secure_asc_key_if_needed(key_path_str: str, root: Path) -> str:
+    if not key_path_str:
+        return key_path_str
+    
+    # Resolve input key path
+    p = Path(key_path_str).expanduser()
+    if not p.is_absolute():
+        p = (root / p).resolve()
+    else:
+        p = p.resolve()
+        
+    if not p.exists():
+        return key_path_str
+        
+    home = Path.home().resolve()
+    secure_paths = [
+        home / ".private_keys",
+        home / ".appstoreconnect" / "private_keys"
+    ]
+    
+    is_secure_dir = any(p.parent == sp.resolve() for sp in secure_paths)
+    
+    if is_secure_dir:
+        # Already in a secure directory, but let's check/fix permissions
+        try:
+            mode = p.stat().st_mode
+            if (mode & 0o077) != 0:
+                print(f"  🔒 Securing permissions for existing key file to 600...")
+                p.chmod(0o600)
+        except Exception as e:
+            print(f"  ⚠️  Failed to set permissions on {p}: {e}")
+        return str(p)
+        
+    # Not in a secure directory! Let's copy it to ~/.private_keys/
+    target_dir = home / ".private_keys"
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / p.name
+        
+        print(f"  📦 xcodebuild security constraint: copying .p8 key file to secure directory ~/.private_keys/")
+        import shutil
+        shutil.copy2(p, target_path)
+        target_path.chmod(0o600)
+        print(f"  ✅ Copied key to {target_path} and set permissions (600)")
+        return str(target_path)
+    except Exception as e:
+        print(f"  ❌ Error copying API key to secure directory: {e}")
+        return key_path_str
+
+
 def setup_distribution(force=False, firebase_plist=None, provisioning_profile=None, team_id=None, method=None, asc_key_id=None, asc_issuer_id=None, asc_key_path=None, root=None):
     if root is None:
         from orchestrator.project_config import find_project_root
@@ -224,6 +274,8 @@ def setup_distribution(force=False, firebase_plist=None, provisioning_profile=No
     asc_key_id = asc_key_id or get_conf_val("asc_key_id")
     asc_issuer_id = asc_issuer_id or get_conf_val("asc_issuer_id")
     asc_key_path = asc_key_path or get_conf_val("asc_key_path")
+    if asc_key_path:
+        asc_key_path = secure_asc_key_if_needed(asc_key_path, root)
 
     # 1. Create scripts directory
     scripts_dir = root / "scripts"
