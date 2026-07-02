@@ -91,9 +91,8 @@ def run_smoke_delivery():
             "issue_number": 9999,
             "builder": "gemini",
             "reviewer": "gemini",
-            "planner": "gemini",
-            "testers": getattr(PROJECT_CONFIG, "firebase_testers", None) or "enmeskin@gmail.com",
-            "groups": getattr(PROJECT_CONFIG, "firebase_groups", None) or "internal-testers"
+            "testers": os.environ.get("FIREBASE_TESTERS", ""),
+            "groups": os.environ.get("FIREBASE_GROUPS", "")
         }
         write_json(job_file, job_data)
         print(f"      - Created mock job: {job_file.name}")
