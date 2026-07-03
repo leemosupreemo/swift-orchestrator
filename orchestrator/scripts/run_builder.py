@@ -124,6 +124,14 @@ def inspect_progress(job: dict) -> bool:
 
 def run_builder(job_path: Path, resume: bool = False) -> tuple[bool, bool, Path]:
     job = read_json(job_path)
+    if "type" not in job:
+        if "repro_steps" in job.get("plan", {}):
+            job["type"] = "bug-fix"
+        elif job.get("source") == "quick" or "quick" in job.get("job_id", ""):
+            job["type"] = "quick-fix"
+        else:
+            job["type"] = "feature-plan"
+            
     status_bar = StatusBar(job, is_processing=True)
     
     if resume and inspect_progress(job):

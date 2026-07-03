@@ -34,28 +34,30 @@ def load_job(job_path: Path) -> dict[str, Any]:
 
 
 def synthetic_group_for_job(job: dict[str, Any]) -> dict[str, Any]:
-    if job["type"] == "feature-plan" and not job.get("approved"):
+    job_type = job.get("type", "feature-plan")
+    if job_type == "feature-plan" and not job.get("approved"):
         kind = "planning"
         resource_profile = "reasoning"
-    elif job["type"] == "bug-investigate":
+    elif job_type == "bug-investigate":
         kind = "investigation"
         resource_profile = "reasoning"
-    elif job["type"] == "quick-fix":
+    elif job_type == "quick-fix":
         kind = "implementation"
         resource_profile = "implementation"
     else:
         kind = "implementation"
         resource_profile = "implementation"
 
+    title = job.get("title", "Untitled Job")
     return {
         "group_id": "MAIN",
-        "title": job["title"],
+        "title": title,
         "kind": kind,
         "resource_profile": resource_profile,
         "preferred_roles": ["worker"],
-        "preferred_models": [job["builder"]],
+        "preferred_models": [job.get("builder", "gemini-3.1-pro-preview")],
         "depends_on": [],
-        "tasks": [job["title"]],
+        "tasks": [title],
         "status": "pending",
         "assigned_machine": None,
         "assigned_model": None,
@@ -68,14 +70,23 @@ def synthetic_group_for_job(job: dict[str, Any]) -> dict[str, Any]:
 
 def normalize_job(job: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(job)
+    if "type" not in normalized:
+        if normalized.get("source") == "manual" or "repro_steps" in normalized.get("plan", {}):
+            normalized["type"] = "bug-fix"
+        elif normalized.get("source") == "quick" or "quick" in normalized.get("job_id", ""):
+            normalized["type"] = "quick-fix"
+        else:
+            normalized["type"] = "feature-plan"
+
     if not normalized.get("task_groups"):
         normalized["task_groups"] = [synthetic_group_for_job(normalized)]
     normalized.setdefault("dispatch_history", [])
 
+    builder = normalized.get("builder", "gemini-3.1-pro-preview")
     for group in normalized["task_groups"]:
         group.setdefault("depends_on", [])
         group.setdefault("preferred_roles", ["worker"])
-        group.setdefault("preferred_models", [normalized["builder"]])
+        group.setdefault("preferred_models", [builder])
         group.setdefault("status", "pending")
         group.setdefault("assigned_machine", None)
         group.setdefault("assigned_model", None)
@@ -138,15 +149,16 @@ def choose_model(group: dict[str, Any], machine: dict[str, Any], job: dict[str, 
             return candidate
 
     fallback_by_profile = {
-        "reasoning": job["planner"],
-        "review": job["reviewer"],
+        "reasoning": job.get("planner"),
+        "review": job.get("reviewer"),
     }
-    fallback = fallback_by_profile.get(group["resource_profile"], job["builder"])
-    if compatible_model(fallback, machine, allowed):
+    fallback = fallback_by_profile.get(group["resource_profile"], job.get("builder"))
+    if fallback and compatible_model(fallback, machine, allowed):
         return fallback
 
-    if compatible_model(job["builder"], machine, allowed):
-        return job["builder"]
+    builder = job.get("builder")
+    if builder and compatible_model(builder, machine, allowed):
+        return builder
 
     if allowed:
         for candidate in allowed:
