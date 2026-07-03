@@ -113,7 +113,8 @@ class DevConsoleIntegrationTests(unittest.TestCase):
 
     @patch("dev_console.get_key")
     @patch("dev_console.prompt_confirm")
-    def test_job_interaction_flow_reset_status(self, mock_confirm, mock_get_key):
+    @patch("dev_console.prompt_input")
+    def test_job_interaction_flow_reset_status(self, mock_prompt_input, mock_confirm, mock_get_key):
         # Create a dummy job in executing state
         job_id = "test-job-1"
         job_data = {
@@ -142,18 +143,19 @@ class DevConsoleIntegrationTests(unittest.TestCase):
         # 'q' -> Quit
         mock_get_key.side_effect = ["0", "a", "b", "q"]
         
-        # Mocking input for the answer
-        with patch("dev_console.input", side_effect=["Blue"]):
-            # Also mock run_script so we don't actually trigger new_job.py
-            with patch("dev_console.run_script") as mock_run_script:
-                dev_console.main_loop()
-                
-                # Check that run_script was called to re-plan
-                mock_run_script.assert_called_with(
-                    "new_job.py", 
-                    ["feature", "--no-dispatch", "--update", str(dev_console.JOBS_DIR / f"{job_id}.json"), "--feedback", "### USER CLARIFICATION ###\nBlue"], 
-                    sub_menu=True
-                )
+        # Mocking prompt input for the answer
+        mock_prompt_input.return_value = "Blue"
+
+        # Also mock run_script so we don't actually trigger new_job.py
+        with patch("dev_console.run_script") as mock_run_script:
+            dev_console.main_loop()
+            
+            # Check that run_script was called to re-plan
+            mock_run_script.assert_called_with(
+                "new_job.py", 
+                ["feature", "--no-dispatch", "--update", str(dev_console.JOBS_DIR / f"{job_id}.json"), "--feedback", "### USER CLARIFICATION ###\nBlue"], 
+                sub_menu=True
+            )
         
         # Assert the question was cleared
         updated_job = dev_console.read_json(dev_console.JOBS_DIR / f"{job_id}.json")

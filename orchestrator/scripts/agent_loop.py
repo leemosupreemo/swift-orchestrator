@@ -117,7 +117,7 @@ def main() -> int:
             print("="*60 + "\033[0m")
             print(f"\033[1;97mQuestion:\033[0m {response.get('clarification')}")
             
-            user_answer = prompt_input("Your Answer:", placeholder="(required)")
+            user_answer = prompt_input("Your Answer:", placeholder="(required)", field_below=True)
             if not user_answer:
                 print("No answer provided. Stopping.")
                 return 0
@@ -168,7 +168,7 @@ def main() -> int:
                 return 0
             elif user_choice == "f":
                 print("\033[93mfeedback\033[0m")
-                feedback = prompt_input("Feedback for Agent:", placeholder="(or Enter to cancel)")
+                feedback = prompt_input("Feedback for Agent:", placeholder="(or Enter to cancel)", field_below=True)
                 if feedback:
                     history.append(f"USER FEEDBACK (TURN {turn}): {feedback}")
                     current_input = f"USER FEEDBACK: {feedback}\n\nPlease revise your plan based on this feedback."

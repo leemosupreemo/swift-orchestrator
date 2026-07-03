@@ -249,6 +249,31 @@ def _check(status_bar: StatusBar | None = None):
                 print("        AI workflows work best with a clean slate.")
             else:
                 print(f"     \033[1;92m✅ Repository is clean.\033[0m")
+
+            # Check for hardcoded token in remote URL or insecure remote protocol
+            try:
+                remote_url = subprocess.check_output(
+                    ["git", "remote", "get-url", "origin"],
+                    cwd=str(ROOT),
+                    text=True,
+                    stderr=subprocess.DEVNULL
+                ).strip()
+            except:
+                remote_url = ""
+
+            if remote_url:
+                if "github_pat_" in remote_url or (remote_url.startswith("http") and "@" in remote_url):
+                    print(f"     \033[1;91m❌ Warning: Git remote contains hardcoded credentials/PAT.\033[0m")
+                    print("        This can lead to 403 authorization failures if the token lacks write access,")
+                    print("        and leaks credentials in .git/config and project.json.")
+                    print("        Remediation: Update to use SSH:")
+                    print("          git remote set-url origin git@github.com:owner/repo.git")
+                elif remote_url.startswith("https://"):
+                    print(f"     \033[1;93m⚠️  Note: Git remote uses HTTPS.\033[0m")
+                    print("        If automation fails to push, ensure you are authenticated or switch to SSH:")
+                    print("          git remote set-url origin git@github.com:owner/repo.git")
+                else:
+                    print(f"     \033[1;92m✅ Git remote uses secure protocol/SSH.\033[0m")
         except: pass
     
     # 1. Check Essential Files

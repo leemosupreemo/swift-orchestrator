@@ -156,21 +156,21 @@ def build_bug_issue_body(plan: dict, verification: dict | None = None, yolo: boo
         f"- **Complexity**: {plan.get('complexity', 'unknown')}",
         f"- **Recommended Job Type**: {plan.get('recommended_job_type', 'bug-fix')}",
         "",
-        "## Repro steps",
+        "## Repro Steps",
         *[f"- {x}" for x in plan["repro_steps"]],
         "",
-        f"## Expected behavior\n{plan['expected_behavior']}",
+        f"## Expected Behavior\n{plan['expected_behavior']}",
         "",
-        "## Acceptance criteria",
+        "## Acceptance Criteria",
         *[f"- {x}" for x in plan["acceptance_criteria"]],
         "",
         "## Constraints",
         *[f"- {x}" for x in plan["constraints"]],
         "",
-        "## Likely files",
+        "## Likely Files",
         *[f"- {x}" for x in plan["likely_files"]],
         "",
-        "## Test recommendations",
+        "## Test Recommendations",
         *[f"- {x}" for x in plan["test_recommendations"]],
     ]
 
@@ -207,7 +207,7 @@ def build_feature_issue_body(plan: dict, verification: dict | None = None, yolo:
         "## Risks",
         *[f"- {x}" for x in plan["risks"]],
         "",
-        "## Task breakdown",
+        "## Task Breakdown",
     ]
     for i, task in enumerate(plan["tasks"], start=1):
         lines.extend([
@@ -215,10 +215,10 @@ def build_feature_issue_body(plan: dict, verification: dict | None = None, yolo:
             f"### Task {i}: {task['title']}",
             task["description"],
             "",
-            "Acceptance criteria:",
+            "Acceptance Criteria:",
             *[f"- {x}" for x in task["acceptance_criteria"]],
             "",
-            "Likely files:",
+            "Likely Files:",
             *[f"- {x}" for x in task["likely_files"]],
             "",
             "Tests:",
@@ -452,6 +452,31 @@ def main(args_override: list[str] | None = None) -> None:
         import subprocess
         selected_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ROOT)).decode("utf-8").strip()
         print(f"      - Using current branch: {selected_branch}")
+        
+    if branch_mode == "current" and selected_branch:
+        try:
+            import subprocess
+            # Check if upstream exists and how many commits we are ahead
+            upstream_res = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "@{u}"],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if upstream_res.returncode == 0:
+                upstream = upstream_res.stdout.strip()
+                ahead_count = int(subprocess.check_output(
+                    ["git", "rev-list", "--count", f"{upstream}..{selected_branch}"],
+                    cwd=str(ROOT)
+                ).decode("utf-8").strip())
+                if ahead_count > 10:
+                    print(f"\n\033[1;93m⚠️  WARNING: Your local branch '{selected_branch}' is ahead of '{upstream}' by {ahead_count} commits.\033[0m")
+                    print("   If you proceed, your Pull Request will include all of these commits and files,")
+                    print("   which may cause the GitHub PR diff to exceed limits (300+ files) or clutter the review.")
+                    print("   Consider rebasing/merging first, or using 'new' branch mode.")
+        except Exception:
+            pass
     elif branch_mode == "manual":
         selected_branch = None
         print("      - No branch will be assigned (Builder will skip Git operations).")
@@ -515,13 +540,13 @@ def main(args_override: list[str] | None = None) -> None:
         else:
             flush_stdin()
             if args.job_type == "bug":
-                summary = prompt_multiline("Summary / Area of Focus:")
-                repro = prompt_multiline("Repro steps (one per line, optional):")
-                expected = prompt_multiline("Expected behavior (optional):")
+                summary = prompt_multiline("Summary / Area Of Focus:")
+                repro = prompt_multiline("Repro Steps (one per line, optional):")
+                expected = prompt_multiline("Expected Behavior (optional):")
                 raw_input_text = f"SUMMARY: {summary}\n\nREPRO STEPS:\n{repro}\n\nEXPECTED BEHAVIOR:\n{expected}"
             elif args.job_type == "coverage":
-                summary = prompt_multiline("Summary / Area of Focus:")
-                subsystems = prompt_multiline("Specific Subsystems to Audit (optional):")
+                summary = prompt_multiline("Summary / Area Of Focus:")
+                subsystems = prompt_multiline("Specific Subsystems To Audit (optional):")
                 raw_input_text = f"COVERAGE FOCUS: {summary}\n\nSUBSYSTEMS: {subsystems}"
             elif args.stitch or args.job_type == "design":
                 vision = prompt_multiline("Design Vision & Requirements (describe the feature, UX goals, and any specific constraints):")

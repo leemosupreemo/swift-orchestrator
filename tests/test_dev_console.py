@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -220,12 +221,13 @@ class DevConsoleTests(unittest.TestCase):
 
     @patch("dev_console.get_key")
     @patch("dev_console.input")
+    @patch("dev_console.prompt_input")
     @patch("dev_console.clear_screen")
     @patch("dev_console.StatusBar")
     @patch("dev_console.run_script")
     @patch("dev_console.save_job")
     @patch("dev_console.refresh_job")
-    def test_handle_job_selection_answers_clarification(self, mock_refresh, mock_save, mock_run_script, _mock_status, _mock_clear, mock_input, mock_get_key):
+    def test_handle_job_selection_answers_clarification(self, mock_refresh, mock_save, mock_run_script, _mock_status, _mock_clear, mock_prompt_input, mock_input, mock_get_key):
         job = {
             "job_id": "test-job",
             "status": "human-needed",
@@ -237,7 +239,8 @@ class DevConsoleTests(unittest.TestCase):
         
         # Actions: 'a' (answer), then 'Blue', then 'b' (back)
         mock_get_key.side_effect = ["a", "b"]
-        mock_input.return_value = "Blue"
+        mock_prompt_input.return_value = "Blue"
+        mock_input.return_value = ""
         
         dev_console.handle_job_selection(job, [], [])
         
@@ -251,6 +254,288 @@ class DevConsoleTests(unittest.TestCase):
             ["feature", "--no-dispatch", "--update", "test.json", "--feedback", "### USER CLARIFICATION ###\nBlue"],
             sub_menu=True
         )
+
+    @patch("dev_console.view_job_brief_summary")
+    @patch("dev_console.get_key")
+    @patch("dev_console.input")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.refresh_job")
+    def test_handle_job_selection_view_brief_summary_action(self, mock_refresh, mock_status, mock_clear, mock_input, mock_get_key, mock_view):
+        job = {
+            "job_id": "test-job",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "issue_number": 123,
+            "_path": "test.json",
+        }
+        status_bar = MagicMock()
+        mock_status.return_value.__enter__.return_value = status_bar
+        mock_refresh.return_value = job
+        mock_get_key.side_effect = ["v", "b"]
+        mock_input.return_value = ""
+
+        dev_console.handle_job_selection(job, [], [])
+
+        mock_view.assert_called_once_with(job)
+        status_bar.clear_footer.assert_called()
+        status_bar.reset_scroll_region.assert_called_with(force=True)
+        mock_clear.assert_called()
+
+    @patch("dev_console.print_header")
+    @patch("dev_console.print")
+    def test_view_job_brief_summary_shows_fallback_when_files_missing(self, mock_print, mock_header):
+        job = {
+            "job_id": "missing-output-job",
+            "plan": {
+                "summary": "Ship the feature.",
+                "tasks": [{"name": "Build UI", "description": "Create the main screen."}],
+            },
+        }
+
+        dev_console.view_job_brief_summary(job)
+
+        mock_header.assert_any_call("Brief / Summary")
+        mock_header.assert_any_call("Plan Summary")
+        printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
+        self.assertIn("No brief.md or builder_summary.md file has been generated", printed)
+        self.assertIn("Ship the feature.", printed)
+        self.assertIn("Build UI", printed)
+
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.run_script")
+    @patch("dev_console.prompt_input")
+    def test_handle_tweak_revise_builds_guided_feedback(self, mock_prompt_input, mock_run_script, mock_refresh):
+        job = {
+            "job_id": "test-job",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "_path": "test.json",
+        }
+        mock_prompt_input.side_effect = [
+            "Make the retry state explain the failure.",
+            "Checkout error panel",
+            "A failed request shows the error reason and retry button.",
+        ]
+        mock_refresh.return_value = job
+
+        result = dev_console.handle_tweak_revise(job)
+
+        expected_feedback = (
+            "Requested change: Make the retry state explain the failure.\n"
+            "Affected area: Checkout error panel\n"
+            "Done when: A failed request shows the error reason and retry button."
+        )
+        mock_run_script.assert_called_once_with(
+            "new_job.py",
+            ["feature", "--no-dispatch", "--update", "test.json", "--feedback", expected_feedback],
+            sub_menu=True,
+        )
+        first_prompt = mock_prompt_input.call_args_list[0]
+        self.assertEqual(first_prompt.args[0], "Briefly describe what should change")
+        self.assertTrue(first_prompt.kwargs["field_below"])
+        self.assertIs(result, job)
+
+    @patch("dev_console.run_script")
+    @patch("dev_console.prompt_input", return_value="")
+    def test_handle_tweak_revise_cancels_when_change_is_blank(self, _mock_prompt_input, mock_run_script):
+        job = {
+            "job_id": "test-job",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "_path": "test.json",
+        }
+
+        result = dev_console.handle_tweak_revise(job)
+
+        self.assertIsNone(result)
+        mock_run_script.assert_not_called()
+
+    def test_refresh_job_preserves_current_job_when_file_is_invalid(self):
+        job_path = self.temp_root / "invalid-job.json"
+        job_path.write_text("null\n", encoding="utf-8")
+        job = {"job_id": "test-job", "status": "review-needed", "_path": job_path}
+
+        refreshed = dev_console.refresh_job(job)
+
+        self.assertIs(refreshed, job)
+
+    @patch("dev_console.handle_tweak_revise", return_value=None)
+    @patch("dev_console.get_key", side_effect=["t", "b"])
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_handle_job_selection_keeps_job_when_tweak_is_cancelled(self, mock_status, _mock_clear, _mock_input, _mock_get_key, mock_tweak):
+        job = {
+            "job_id": "test-job",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "issue_number": 123,
+            "_path": self.temp_root / "test-job.json",
+        }
+
+        dev_console.handle_job_selection(job, ["local"], ["gemini"])
+
+        status_instance = mock_status.return_value.__enter__.return_value
+        status_instance.clear_footer.assert_called()
+        status_instance.reset_scroll_region.assert_called_with(force=True)
+        mock_tweak.assert_called_once_with(job)
+
+    @patch("dev_console.get_key", side_effect=["d", "b"])
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.prompt_input", side_effect=["", "0"])
+    @patch("dev_console.auto_link_latest_logs")
+    @patch("dev_console.run_script")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_handle_job_selection_autofix_survives_invalid_refresh(self, _mock_status, _mock_clear, mock_run_script, mock_auto_logs, _mock_prompt_input, _mock_input, _mock_get_key):
+        job_path = self.temp_root / "autofix-job.json"
+        job_path.write_text("null\n", encoding="utf-8")
+        job = {
+            "job_id": "autofix-job",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "issue_number": 123,
+            "_path": job_path,
+        }
+
+        dev_console.handle_job_selection(job, ["local"], ["gemini"])
+
+        mock_auto_logs.assert_called_once_with(job)
+        mock_run_script.assert_called_once()
+        self.assertEqual(mock_run_script.call_args.args[0], "debug_job.py")
+
+    @patch("dev_console.prompt_input", side_effect=["Focus on the latest build failure.", "3"])
+    @patch("dev_console.print_header")
+    @patch("dev_console.print")
+    def test_prompt_autofix_iteration_settings_collects_guidance(self, mock_print, mock_header, _mock_prompt_input):
+        job = {"max_iterations": 8}
+
+        feedback, final_limit = dev_console.prompt_autofix_iteration_settings(job)
+
+        self.assertEqual(feedback, "Focus on the latest build failure.")
+        self.assertEqual(final_limit, 11)
+        mock_header.assert_called_once_with("Auto-Fix / Iterate")
+        printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
+        self.assertIn("The AI will inspect the current job", printed)
+        self.assertIn("Optional guidance examples", printed)
+        self.assertIn("Guidance (Optional)", printed)
+        first_prompt = _mock_prompt_input.call_args_list[0]
+        self.assertEqual(first_prompt.args[0], "Guidance (Optional)")
+        self.assertTrue(first_prompt.kwargs["field_below"])
+
+    @patch("dev_console.get_key", side_effect=["d", "b"])
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.prompt_autofix_iteration_settings", return_value=("Focus on retries.", 12))
+    @patch("dev_console.auto_link_latest_logs")
+    @patch("dev_console.run_script")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_handle_job_selection_autofix_passes_feedback(self, mock_status, mock_clear, mock_run_script, _mock_auto_logs, mock_settings, _mock_input, _mock_get_key):
+        status_bar = MagicMock()
+        mock_status.return_value.__enter__.return_value = status_bar
+        job = {
+            "job_id": "autofix-job",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "issue_number": 123,
+            "_path": self.temp_root / "autofix-job.json",
+        }
+
+        dev_console.handle_job_selection(job, ["local"], ["gemini"])
+
+        mock_settings.assert_called_once_with(job)
+        status_bar.clear_footer.assert_called()
+        status_bar.reset_scroll_region.assert_called_with(force=True)
+        mock_clear.assert_called()
+        args = mock_run_script.call_args.args[1]
+        self.assertIn("--max-iterations", args)
+        self.assertIn("12", args)
+        self.assertIn("--feedback", args)
+        self.assertIn("Focus on retries.", args)
+
+    def test_review_needed_job_menu_actions_are_reachable(self):
+        action_keys = ["m", "f", "t", "d", "r", "l", "k", "q", "o", "y", "v", "g", "c", "x", "b"]
+
+        for key in action_keys:
+            with self.subTest(key=key):
+                job = {
+                    "job_id": "review-job",
+                    "status": "review-needed",
+                    "type": "feature-plan",
+                    "issue_number": 123,
+                    "pr_number": 456,
+                    "branch": "feature/review-job",
+                    "base_branch": "main",
+                    "_path": self.temp_root / "review-job.json",
+                }
+
+                with ExitStack() as stack:
+                    stack.enter_context(patch("dev_console.get_key", side_effect=[key, "b"]))
+                    stack.enter_context(patch("dev_console.input", return_value=""))
+                    stack.enter_context(patch("dev_console.clear_screen"))
+                    stack.enter_context(patch("dev_console.StatusBar"))
+                    stack.enter_context(patch("dev_console.refresh_job", return_value=job))
+                    mock_save = stack.enter_context(patch("dev_console.save_job"))
+                    mock_run_script = stack.enter_context(patch("dev_console.run_script"))
+                    mock_merge = stack.enter_context(patch("dev_console.handle_merge_cleanup"))
+                    mock_tweak = stack.enter_context(patch("dev_console.handle_tweak_revise", return_value=job))
+                    mock_discard = stack.enter_context(patch("dev_console.handle_discard_job"))
+                    mock_logs = stack.enter_context(patch("dev_console.prompt_for_logs", return_value=["build.log"]))
+                    mock_reference = stack.enter_context(patch("dev_console.prompt_for_reference_artifact"))
+                    mock_ask = stack.enter_context(patch("dev_console.handle_ask_ai"))
+                    mock_view = stack.enter_context(patch("dev_console.view_job_brief_summary"))
+                    mock_confirm = stack.enter_context(patch("dev_console.prompt_confirm", return_value=False))
+                    stack.enter_context(patch("dev_console.prompt_input", side_effect=["", "0"]))
+                    mock_auto_logs = stack.enter_context(patch("dev_console.auto_link_latest_logs"))
+                    stack.enter_context(patch("dev_console.prompt_autofix_iteration_settings", return_value=(None, 8)))
+                    mock_loading = stack.enter_context(patch("dev_console.run_with_loading_screen", return_value=(["Gemini"], {"Gemini": "gemini"}, {})))
+                    mock_checkbox = stack.enter_context(patch("dev_console.prompt_checkbox", return_value=[]))
+                    mock_subprocess_run = stack.enter_context(patch("dev_console.subprocess.run"))
+                    mock_project_config = stack.enter_context(patch("dev_console.PROJECT_CONFIG"))
+                    mock_project_config.base_branch = "main"
+                    mock_project_config.validate_distribution_config.return_value = []
+
+                    dev_console.handle_job_selection(job, ["local"], ["gemini"])
+
+                if key == "m":
+                    mock_merge.assert_called_once_with(job)
+                elif key == "f":
+                    mock_run_script.assert_any_call(
+                        "deliver_build.py",
+                        [str(job["_path"])],
+                        sub_menu=True,
+                        session_machines=["local"],
+                        session_models=["gemini"],
+                    )
+                elif key == "t":
+                    mock_tweak.assert_called_once_with(job)
+                elif key == "d":
+                    mock_auto_logs.assert_called_once_with(job)
+                    self.assertEqual(mock_run_script.call_args.args[0], "debug_job.py")
+                elif key == "r":
+                    mock_confirm.assert_called()
+                elif key == "l":
+                    mock_logs.assert_called_once_with(job)
+                    mock_save.assert_called()
+                    self.assertEqual(job["last_manual_log_paths"], ["build.log"])
+                elif key == "k":
+                    mock_reference.assert_called_once_with(job)
+                elif key == "q":
+                    mock_ask.assert_called_once_with(job, ["gemini"])
+                elif key == "o":
+                    mock_loading.assert_called()
+                    mock_checkbox.assert_called()
+                elif key == "y":
+                    mock_run_script.assert_any_call("export_job.py", [str(job["_path"])], sub_menu=True)
+                elif key == "v":
+                    mock_view.assert_called_once_with(job)
+                elif key == "g":
+                    mock_subprocess_run.assert_any_call(["gh", "pr", "view", "456", "--web"], cwd=str(dev_console.ROOT))
+                elif key == "c":
+                    mock_confirm.assert_called()
+                elif key == "x":
+                    mock_discard.assert_called_once_with(job)
 
     @patch("dev_console.run_streaming_process")
     @patch("dev_console.print_divider")
@@ -268,6 +553,17 @@ class DevConsoleTests(unittest.TestCase):
         printed_args = [call[0][0] for call in mock_print.call_args_list if call[0]]
         full_printed = "".join(printed_args)
         self.assertIn("Bundle id is required", full_printed)
+
+    @patch("dev_console.run_streaming_process")
+    @patch("dev_console.subprocess.run")
+    def test_run_script_runs_smoke_delivery_without_streaming_footer(self, mock_subprocess_run, mock_run_streaming):
+        mock_subprocess_run.return_value = MagicMock(returncode=0)
+
+        rc = dev_console.run_script("smoke_test_delivery.py", [], sub_menu=True, prompt="")
+
+        self.assertEqual(rc, 0)
+        mock_subprocess_run.assert_called_once()
+        mock_run_streaming.assert_not_called()
 
     @patch("dev_console.subprocess.check_output")
     @patch("dev_console.subprocess.run")

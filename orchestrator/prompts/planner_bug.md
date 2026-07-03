@@ -26,3 +26,4 @@ Guidelines:
 - Ensure all quotes and braces are balanced.
 - Stay tightly grounded in the raw input.
 - Complexity should be "complex" for shared state, async, lifecycle, networking, auth, persistence, or intermittent bugs.
+- **No Speculative Planning**: If the raw bug description is empty, sparse, or lacks concrete reproduction details, you MUST flag this by filling in the `clarification_needed` field instead of inventing/fabricating repro steps or acceptance criteria. Under-specified tickets should be paused for human input.

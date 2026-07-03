@@ -164,6 +164,17 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertIn("\033[?25l", written)
         self.assertIn("\033[?25h", written)
 
+    @patch("common.sys.stdout.isatty", return_value=False)
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_progress_indicator_is_silent_when_stdout_is_not_tty(self, mock_write, _mock_flush, _mock_isatty) -> None:
+        indicator = common.ProgressIndicator()
+
+        indicator.render(force=True)
+        indicator.clear()
+
+        mock_write.assert_not_called()
+
     @patch("common.sys.stdin.isatty", return_value=True)
     @patch("common.sys.stdout.isatty", return_value=True)
     @patch("common.sys.stdout.flush")
@@ -218,6 +229,44 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertIn("> [x]  🛠️ Iterating", written)
         self.assertIn("\033[J", written)
         self.assertIn("Choice: \033[1;96m🛠️ Iterating / Small Refactor", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_radio_prompt_renders_parenthetical_text_as_description(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        options = [
+            "new (creates a new branch automatically)",
+            "manual (no git actions; skip checkout/pull)",
+        ]
+
+        choice = common.prompt_radio("Branch selection:", options, default=options[0])
+
+        self.assertEqual(choice, options[0])
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("> [x]  new", written)
+        self.assertIn("       \033[90mcreates a new branch automatically\033[0m", written)
+        self.assertNotIn("> [x]  new (creates a new branch automatically)", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", return_value="enter")
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_confirm_prompt_can_show_description_under_short_title(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        result = common.prompt_confirm(
+            "YOLO mode?",
+            default=False,
+            description="Automatically dispatch after planning.",
+        )
+
+        self.assertFalse(result)
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("YOLO MODE?", written)
+        self.assertIn("\033[90mAutomatically dispatch after planning.\033[0m", written)
 
     @patch("common.sys.stdin.isatty", return_value=True)
     @patch("common.get_key", return_value="enter")
@@ -288,6 +337,20 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
 
         self.assertEqual(res, "/repo/path")
         status_bar.render.assert_called_with(at_bottom=True, force=True, q_msg="Enter to confirm")
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", side_effect=["u", "p", "d", "a", "t", "e", "enter"])
+    @patch("sys.stdout.write")
+    def test_prompt_input_can_render_field_below_label(self, mock_write, mock_get_key, _mock_isatty) -> None:
+        result = common.prompt_input("Briefly describe what should change", placeholder="specific behavior", field_below=True)
+
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertEqual(result, "update")
+        self.assertIn("Briefly describe what should change", written)
+        self.assertIn("specific behavior", written)
+        self.assertEqual(written.count("Briefly describe what should change"), 1)
+        self.assertIn("\033[?25h", written)
+        self.assertGreaterEqual(mock_get_key.call_count, 1)
 
 
 class MarkdownFormatterTests(unittest.TestCase):

@@ -36,6 +36,12 @@ def validate_project_config(config: ProjectConfig) -> list[str]:
         errors.append(f"visual_app_path does not exist: {config.visual_app_path}")
     if config.visual_app_path and not config.app_bundle_id:
         errors.append("visual_app_path requires app_bundle_id for simulator launch.")
+    if config.git_remote and ("github_pat_" in config.git_remote or (config.git_remote.startswith("http") and "@" in config.git_remote)):
+        errors.append(
+            "git_remote contains a hardcoded Personal Access Token (PAT). "
+            "This leaks secrets and causes 403 write access failures. "
+            "Update .orchestrator/project.json and run 'git remote set-url origin git@github.com:username/repository.git' to switch to SSH."
+        )
 
     return errors
 

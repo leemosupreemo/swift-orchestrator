@@ -164,6 +164,21 @@ class ConfigValidationTests(unittest.TestCase):
             self.assertIn("visual_app_path does not exist: build/SampleApp.app", errors)
             self.assertIn("visual_app_path requires app_bundle_id for simulator launch.", errors)
 
+    def test_project_config_flags_insecure_git_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "SampleApp.xcodeproj").mkdir()
+            
+            # 1. Test with safe remote
+            self.assertEqual(validate_project_config(make_config(root, git_remote="git@github.com:user/repo.git")), [])
+            
+            # 2. Test with PAT remote
+            errors = validate_project_config(make_config(
+                root,
+                git_remote="https://github_pat_123@github.com/user/repo.git"
+            ))
+            self.assertTrue(any("contains a hardcoded Personal Access Token" in e for e in errors))
+
     def test_machine_config_validates_ssh_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)

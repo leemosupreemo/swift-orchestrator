@@ -293,7 +293,21 @@ def flush_stdin():
     except Exception:
         pass
 
-def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None) -> str:
+def _split_option_description(option: str) -> tuple[str, str | None]:
+    """Split `label (description)` radio options without changing the returned value."""
+    matches = list(re.finditer(r"\s*\(([^()]*)\)", option))
+    if not matches:
+        return option, None
+
+    first_match = matches[0]
+    title = option[:first_match.start()].strip()
+    descriptions = [match.group(1).strip() for match in matches if match.group(1).strip()]
+    if not title or not descriptions or matches[-1].end() != len(option):
+        return option, None
+
+    return title, "; ".join(descriptions)
+
+def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None, description: str | None = None) -> str:
     """Displays interactive radio buttons navigated by arrow keys."""
     if not sys.stdin.isatty():
         return default or options[0]
@@ -302,19 +316,22 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
     if default and default in options:
         idx = options.index(default)
 
-    # Hide cursor
-    sys.stdout.write("\033[?25l")
+    # Keep the cursor visible while typing into text fields.
+    sys.stdout.write("\033[?25h")
     sys.stdout.flush()
 
     def render_radio_option(option: str, option_idx: int, selected_idx: int, highlighted: bool = True) -> str:
         cursor = ">" if option_idx == selected_idx else " "
         icon = "[x]" if option_idx == selected_idx else "[ ]"
         prefix = f"{cursor} {icon}  "
-        line = f"{prefix}{option}"
+        title, option_description = _split_option_description(option)
+        line = f"{prefix}{title}"
         if highlighted and option_idx == selected_idx:
             hl = "\033[1;97;48;5;25m"
             res = "\033[0m"
-            line = f"{hl}{prefix}{option.replace(res, hl)}\033[K{res}"
+            line = f"{hl}{prefix}{title.replace(res, hl)}\033[K{res}"
+        if option_description:
+            line += f"\n       \033[90m{option_description}\033[0m"
         return line
 
     try:
@@ -332,7 +349,13 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 sys.stdout.write(f"\033[{num_rendered_lines}A")
 
             output = []
-            output.append(get_header_string(label))
+            title, desc = split_title_description(label)
+            output.append(get_header_string(title))
+            if desc:
+                formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
+                output.append(f"\033[93m💡 {formatted_desc}\033[0m")
+            if description:
+                output.append(f"\033[90m{description}\033[0m")
             output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
             output.append("")
 
@@ -403,7 +426,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
         
     return options[idx]
 
-def prompt_confirm(question: str, default: bool = True) -> bool:
+def prompt_confirm(question: str, default: bool = True, description: str | None = None) -> bool:
     """Displays interactive yes/no radio buttons."""
     # Defensive logic for reported UI duplication
     if question.startswith("Would you Would you"):
@@ -411,12 +434,35 @@ def prompt_confirm(question: str, default: bool = True) -> bool:
     
     default_str = "yes" if default else "no"
 
-    choice = prompt_radio(question, ["yes", "no"], default_str)
+    choice = prompt_radio(question, ["yes", "no"], default_str, description=description)
     return choice == "yes"
 
 def prompt_multiline(prompt: str) -> str:
     flush_stdin()
-    print(f"\n\033[1;97m{prompt}\033[0m", flush=True)
+    title, desc = split_title_description(prompt)
+    
+    cols = 80
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        pass
+    safe_cols = cols - 2
+    
+    header_title = title.upper()
+    side_padding = (safe_cols - len(header_title) - 2) // 2
+    if side_padding < 3: side_padding = 3
+    
+    if len(header_title) + 6 > safe_cols:
+        border_line = "=" * safe_cols
+        print(f"\n\033[1;36m{border_line}\n  {header_title}\n{border_line}\033[0m", flush=True)
+    else:
+        border_line = "=" * (side_padding * 2 + len(header_title) + 2)
+        print(f"\n\033[1;36m{border_line}\n{(' ' * side_padding)}{header_title}\n{border_line}\033[0m", flush=True)
+        
+    if desc:
+        formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
+        print(f"\033[93m💡 {formatted_desc}\033[0m", flush=True)
+        
     print("\033[90m(Type your input. To finish, press Enter then \033[1;97mCtrl-D\033[0m\033[90m on a new line)\033[0m", flush=True)
     if _ACTIVE_STATUS_BAR:
         _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Ctrl-D to finish")
@@ -431,8 +477,8 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     if not sys.stdin.isatty():
         return ""
 
-    # Hide cursor
-    sys.stdout.write("\033[?25l")
+    # Keep the cursor visible while typing into text fields.
+    sys.stdout.write("\033[?25h")
     sys.stdout.flush()
 
     if _ACTIVE_STATUS_BAR:
@@ -444,6 +490,10 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     placeholder_style = "\033[90m" # Grey
     reset = "\033[0m"
     prompt_label = f"\033[1;96m{label}\033[0m"
+
+    if field_below:
+        sys.stdout.write(f"    {prompt_label}\033[K\n")
+        sys.stdout.flush()
 
     try:
         while True:
@@ -478,18 +528,82 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
 
-def prompt_input(label: str, placeholder: str = "", default: str = "", allow_back: bool = False) -> str:
+def prompt_input(label: str, placeholder: str = "", default: str = "", allow_back: bool = False, field_below: bool = False) -> str:
     """Interactive text input with styling, backspace handling, and back-out support."""
     if not sys.stdin.isatty():
         return default
 
-    # Hide cursor
-    sys.stdout.write("\033[?25l")
-    sys.stdout.flush()
-
     if _ACTIVE_STATUS_BAR:
         q_msg = "Enter to confirm" if default else "Enter to cancel"
         _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg=q_msg)
+
+    def visible_width() -> int:
+        try:
+            cols, _ = os.get_terminal_size()
+        except Exception:
+            cols = 80
+        # Keep a little margin so the field does not wrap on narrow terminals.
+        return max(12, cols - 8)
+
+    def trim_text(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        if limit <= 1:
+            return text[:limit]
+        return text[: max(1, limit - 1)] + "…"
+
+    if field_below:
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
+
+        prompt_label = f"\033[1;96m{label}\033[0m"
+        print(f"    {prompt_label}")
+
+        input_text = default
+        bg_style = "\033[48;5;236m"
+        fg_style = "\033[1;97m" # Bold White
+        placeholder_style = "\033[90m" # Grey
+        reset = "\033[0m"
+
+        try:
+            while True:
+                display = input_text
+                if not input_text and placeholder:
+                    placeholder_text = trim_text(placeholder, visible_width())
+                    display = f"{placeholder_style}{placeholder_text}{reset}"
+                else:
+                    value_text = trim_text(input_text, visible_width())
+                    display = f"{fg_style}{value_text}{reset}"
+
+                line = f"\r\033[K    {bg_style} {display} {reset}\033[K"
+                sys.stdout.write(line)
+                sys.stdout.flush()
+
+                key = get_key()
+
+                if key == "enter":
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    return input_text.strip().strip("'\"") # Remove quotes if pasted
+                elif key == "backspace":
+                    input_text = input_text[:-1]
+                elif key == "space":
+                    input_text += " "
+                elif key == "esc" or key == "\x1b":
+                    sys.stdout.write("\n")
+                    raise BackException()
+                elif len(key) == 1:
+                    # If 'b' or 'B' at the start with no text, treat as back
+                    if allow_back and len(input_text) == 0 and key.lower() == "b":
+                        sys.stdout.write("\n")
+                        raise BackException()
+                    input_text += key
+                elif key == "up" or key == "down" or key == "left" or key == "right":
+                    # For now, ignore arrows to prevent ^[[D being echoed
+                    pass
+        finally:
+            sys.stdout.write("\033[?25h")
+            sys.stdout.flush()
 
     input_text = default
     bg_style = "\033[48;5;236m"
@@ -503,12 +617,16 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
             # Render current state
             display = input_text
             if not input_text and placeholder:
-                display = f"{placeholder_style}{placeholder}{reset}"
+                placeholder_text = trim_text(placeholder, visible_width())
+                display = f"{placeholder_style}{placeholder_text}{reset}"
             else:
-                display = f"{fg_style}{input_text}{reset}"
+                value_text = trim_text(input_text, visible_width())
+                display = f"{fg_style}{value_text}{reset}"
             
             # Construct the line (indented to match other prompts)
-            line = f"\r    {prompt_label} {bg_style} {display} {reset}\033[K"
+            label_limit = max(12, visible_width() - len(label) - 4)
+            prompt_text = trim_text(label, label_limit)
+            line = f"\r\033[K    \033[1;96m{prompt_text}\033[0m {bg_style} {display} {reset}\033[K"
             sys.stdout.write(line)
             sys.stdout.flush()
 
@@ -647,7 +765,11 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
 
             output = []
             # 1. Print Header
-            output.append(get_header_string(label))
+            title, desc = split_title_description(label)
+            output.append(get_header_string(title))
+            if desc:
+                formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
+                output.append(f"\033[93m💡 {formatted_desc}\033[0m")
             output.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
             output.append("")
 
@@ -990,10 +1112,28 @@ class ProgressIndicator:
 
         spinner = self.frames[self.frame_idx]
         self.frame_idx = (self.frame_idx + 1) % len(self.frames)
-        return f"\033[1;96m{spinner}\033[0m {self.label}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
+        
+        # Prevent terminal wrapping which spawns duplicate lines
+        try:
+            import os
+            cols, _ = os.get_terminal_size()
+        except:
+            cols = 80
+            
+        static_len = 17 + len(self.hint) + len(timer_str) + len(activity_str)
+        available = cols - static_len
+        
+        label_text = self.label
+        if len(label_text) > available:
+            if available > 10:
+                label_text = label_text[:available - 3] + "..."
+            else:
+                label_text = label_text[:10] + "..."
+                
+        return f"\033[1;96m{spinner}\033[0m {label_text}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
 
     def render(self, force: bool = False, last_activity_time: float | None = None):
-        if self.is_silent: return
+        if self.is_silent or not sys.stdout.isatty(): return
         now = time.monotonic()
         if not force and now - self.last_render_time < 0.1: return
         
@@ -1006,7 +1146,7 @@ class ProgressIndicator:
         self.last_render_time = now
 
     def clear(self):
-        if self.is_silent: return
+        if self.is_silent or not sys.stdout.isatty(): return
         if _STATUS_BAR_NESTING == 0:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
@@ -1274,6 +1414,23 @@ def clear_choice_placeholder() -> None:
     """Clears any remaining characters on the current line (usually placeholder text)."""
     sys.stdout.write("\033[K")
     sys.stdout.flush()
+
+def split_title_description(text: str) -> tuple[str, str | None]:
+    """Splits a title and description from strings like 'Title (description):' or 'Title: description'."""
+    text = text.strip()
+    if text.endswith(":"):
+        text = text[:-1].strip()
+    
+    if "(" in text and ")" in text:
+        start = text.find("(")
+        end = text.rfind(")")
+        title = text[:start].strip()
+        description = text[start+1:end].strip()
+        return title, description
+    elif ":" in text:
+        parts = text.split(":", 1)
+        return parts[0].strip(), parts[1].strip()
+    return text, None
 
 def get_header_string(text: str) -> str:
     """Returns a centered header string with equals signs in cyan, responsive to terminal width."""

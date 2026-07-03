@@ -84,12 +84,19 @@ def infer_xcode(root: Path) -> tuple[str | None, str | None, str, list[str], lis
 
 def git_remote(root: Path) -> str | None:
     try:
-        return subprocess.check_output(
+        url = subprocess.check_output(
             ["git", "remote", "get-url", "origin"],
             cwd=str(root),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
+        if url:
+            if "github_pat_" in url or (url.startswith("http") and "@" in url):
+                print("\n\033[1;91m⚠️  WARNING: Your git remote URL contains a hardcoded Personal Access Token (PAT) or embedded credentials.\033[0m")
+                print("   This is insecure and can cause push failures (e.g. 403 Forbidden) if the PAT lacks write scopes.")
+                print("   We recommend changing your remote to use SSH before proceeding:")
+                print("     git remote set-url origin git@github.com:username/repository.git\n")
+        return url
     except Exception:
         return None
 
@@ -340,9 +347,9 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     return _prompt_password(label, placeholder)
 
 
-def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: Any | None = None) -> str:
+def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: Any | None = None, description: str | None = None) -> str:
     from orchestrator.scripts.common import prompt_radio as _prompt_radio
-    return _prompt_radio(label, options, default, clear_screen, status_bar)
+    return _prompt_radio(label, options, default, clear_screen, status_bar, description)
 
 
 class SkipSectionException(Exception): pass
