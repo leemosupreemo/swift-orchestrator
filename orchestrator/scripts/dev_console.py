@@ -505,6 +505,37 @@ def script_failure_summary(output_log: str) -> str | None:
         return "\n".join(error_lines[:5])
     return None
 
+def extract_step_from_line(line: str) -> str | None:
+    """Parses step, phase, or sub-task description from stdout lines."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    clean = ansi_escape.sub('', line).strip()
+    if not clean:
+        return None
+        
+    # Match print_phase style: "=== 🧠 PLANNING ==="
+    if clean.startswith("==") and clean.endswith("=="):
+        inner = clean.strip("= ")
+        # Remove emojis/non-alphanumeric at start
+        inner = re.sub(r'^[^\w\s:]+\s*', '', inner)
+        if len(inner) > 50:
+            inner = inner[:47] + "..."
+        return inner
+        
+    # Match bracketed steps: "[1/4] Preparing git branch..."
+    if clean.startswith("[") and "]" in clean:
+        idx = clean.find("]")
+        step_num = clean[:idx+1]
+        rest = clean[idx+1:].strip()
+        # Take up to the first comma, period, colon, or newline
+        rest = re.split(r'[,.\n]', rest)[0].strip()
+        if rest:
+            candidate = f"{step_num} {rest}"
+            if len(candidate) > 50:
+                candidate = candidate[:47] + "..."
+            return candidate
+            
+    return None
+
 def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None) -> tuple[int, str]:
     if job:
         job["online_machines"] = get_online_machines(job.get("allowed_machines", []))
@@ -588,12 +619,13 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                             data = chunk.decode("utf-8", errors="replace")
                             output_chunks.append(data)
                             
-                            # Safety: Force cursor back into scroll region (bottom line)
-                            # before printing remote logs. This prevents 'last line only' bug
-                            # if the remote machine sent cursor movements.
-                            _, lines = os.get_terminal_size()
-                            sys.stdout.write(f"\033[{lines-4};1H")
-                            
+                            # Parse lines for step information to update indicator label
+                            for line in reversed(data.splitlines()):
+                                step = extract_step_from_line(line)
+                                if step:
+                                    indicator.label = f"Thinking: {step}"
+                                    break
+                                    
                             # Print directly to stdout and flush immediately
                             sys.stdout.write(data)
                             sys.stdout.flush()
@@ -660,12 +692,10 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
 
     returncode = 1
     try:
-        # Reset terminal state, clear screen, and move cursor to top-left before running any subprocess
+        # Reset terminal state (restore scroll region) and show cursor before running any subprocess
         # \033[r: Reset scroll region
-        # \033[2J: Clear entire screen
-        # \033[H: Move cursor to 1,1
         # \033[?25h: Show cursor
-        sys.stdout.write("\033[r\033[2J\033[H\033[?25h")
+        sys.stdout.write("\033[r\033[?25h")
         sys.stdout.flush()
         
         # Pre-flight zombie purge for job execution scripts
@@ -813,9 +843,10 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
         spec_file = None
         if job_type != "quick":
             if prompt_confirm("Load spec from a local file or web address? (useful for large multi-page docs)", default=False):
-                # We try to help the user with a list of files in ROOT if they start typing
-                print("\n    (Enter path to .md/.txt file OR a web URL)")
-                spec_file = prompt_input("Spec Path/URL:", placeholder="feature_spec.md or https://gist.../raw", field_below=True)
+                print("\n    (Enter path to local file OR a web URL, or Enter to cancel; e.g. docs/spec.md or https://...)")
+                spec_file = prompt_input("Spec Path/URL:", placeholder="docs/spec.md or https://example.com/spec.md", field_below=True)
+                if not spec_file:
+                    spec_file = None
 
         yolo = prompt_confirm(
             "YOLO mode?",
@@ -1793,8 +1824,11 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
         clear_choice_placeholder()
         print(sub_choice)
         if sub_choice == "l":
-            path = prompt_input("Custom log path:", placeholder="path to log file or directory", field_below=True)
-            if path: log_paths.append(path)
+            print("\n    (Enter path to a log file or directory, or Enter to cancel; e.g. logs/build.log or /var/log)")
+            path = prompt_input("Custom log path:", placeholder="logs/build.log or /path/to/logs", field_below=True)
+            if not path:
+                raise BackException()
+            log_paths.append(path)
         else:
             raise BackException()
     else:
@@ -1822,7 +1856,8 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
                 if log_file:
                     log_paths.append(str(manual_out.relative_to(ROOT)))
             elif s == custom_opt:
-                path = prompt_input("Custom log path:", placeholder="path to log file or directory", field_below=True)
+                print("\n    (Enter path to a log file or directory, or Enter to cancel; e.g. logs/build.log or /var/log)")
+                path = prompt_input("Custom log path:", placeholder="logs/build.log or /path/to/logs", field_below=True)
                 if path: log_paths.append(path)
             else:
                 # Map back to actual path if it's in our mapping, otherwise use the label
@@ -1840,7 +1875,8 @@ def prompt_for_reference_artifact(job: dict[str, Any]) -> bool:
     print("Supported URLs: http/https, including Figma links stored as URL references.")
     print()
 
-    source = prompt_input("File path or URL:", placeholder="Enter to cancel", field_below=True)
+    print("    (Enter path to local file OR a web URL, or Enter to cancel; e.g. mockups/login.png or https://figma.com/...)")
+    source = prompt_input("File path or URL:", placeholder="mockups/login.png or https://figma.com/...", field_below=True)
     if not source: return False
     note = prompt_input("Reference note:", placeholder="target screen/state; optional", field_below=True)
 
@@ -2054,6 +2090,95 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
         clear_screen()
         if title:
             print_header(title)
+
+    def handle_bug_still_happening(job: dict[str, Any]) -> None:
+        print("This will re-open the bug-fix job, attach the latest logs, and trigger another iteration.\n")
+        
+        desc = prompt_input("Brief description of the failure:", placeholder="e.g. OCR download fails with timeout", field_below=True)
+        if not desc:
+            print("\nCancelled.")
+            input("\n\033[1;96mTap Enter to continue...\033[0m")
+            return
+
+        recent_log = None
+        try:
+            search_dirs = []
+            job_id = job.get("job_id")
+            if job_id:
+                search_dirs.append(OUTPUT_DIR / job_id)
+            search_dirs.extend([ROOT / "logs", OUTPUT_DIR / "manual"])
+            
+            candidates = []
+            for d in search_dirs:
+                if d.exists() and d.is_dir():
+                    for p in d.rglob("*"):
+                        if p.is_file() and p.suffix in {".log", ".txt"} and p.name != "batch_test_results.log":
+                            candidates.append(p)
+                            
+            if candidates:
+                candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                recent_log = candidates[0]
+        except Exception as e:
+            print(f"      - Error scanning for log files: {e}")
+
+        log_paths = job.get("last_manual_log_paths", [])
+        if not isinstance(log_paths, list):
+            log_paths = []
+
+        if recent_log:
+            try:
+                rel_path = str(recent_log.relative_to(ROOT))
+            except ValueError:
+                rel_path = str(recent_log)
+                
+            print(f"\n✅ Automatically detected and attached latest log file:")
+            print(f"      - \033[97m{rel_path}\033[0m")
+            if rel_path not in log_paths:
+                log_paths.append(rel_path)
+        else:
+            print("\n\033[1;93m⚠️  Warning: Could not automatically detect any recent log files in logs/ or output directories.\033[0m")
+            if prompt_confirm("Would you like to manually link or paste a log file?", default=True, clear_screen=False):
+                try:
+                    manual_logs = prompt_for_logs(job)
+                    for l in manual_logs:
+                        if l not in log_paths:
+                            log_paths.append(l)
+                except Exception:
+                    pass
+
+        # Update job state to trigger debugging phase
+        job["status"] = "debugging"
+        job["debug_phase"] = "propose"
+        job["last_manual_log_paths"] = log_paths
+        
+        # Push debug proposal history
+        if "debug_history" not in job:
+            job["debug_history"] = []
+            
+        iter_num = job.get("iteration", 0) + 1
+        job["debug_history"].append({
+            "iteration": iter_num,
+            "hypothesis": "User reported bug is still happening.",
+            "action": "Iterate fix based on user feedback.",
+            "implementation_plan": desc,
+            "expected_signal": "Validation successful",
+            "result": "pending"
+        })
+        job["iteration"] = iter_num
+        job["updated_at"] = now_iso()
+        
+        save_job(job)
+        print("\n🚀 Starting automated debugging iteration...")
+        time.sleep(1)
+        
+        run_script(
+            "worker_run.py", 
+            [str(job["_path"])], 
+            job=job, 
+            sub_menu=True, 
+            session_machines=session_allowed_machines, 
+            session_models=session_allowed_models
+        )
 
     while True:
         if not isinstance(job, dict):
@@ -2365,88 +2490,100 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         files_str += f" \033[90m(+{len(all_impacted)-5} more)\033[0m"
                     print(f"    \033[90m└─\033[0m \033[90m{files_str}\033[0m")
 
-            print("\nActions:")
-            
+            workflow_options = []
+            context_options = []
+            inspect_options = []
+            navigation_options = []
+
             # 2. Status-Specific Actions
             if status == "planned":
                 if job_type == "feature-plan":
-                    print("[\033[92mA\033[0m] Approve / Create Sub-tasks")
-                    actions.append("a")
+                    workflow_options.append(("a", "[\033[92mA\033[0m] Approve / Create Sub-tasks"))
                 else:
-                    print("[\033[92mS\033[0m] Schedule & Dispatch")
-                    actions.append("s")
-                print("[\033[93mF\033[0m] Tweak / Revise Plan")
-                actions.append("f")
+                    workflow_options.append(("s", "[\033[92mS\033[0m] Schedule & Dispatch"))
+                workflow_options.append(("f", "[\033[93mF\033[0m] Tweak / Revise Plan"))
             elif status == "scheduled":
-                print("[\033[92mE\033[0m] Execute (Worker Run)")
-                actions.append("e")
+                workflow_options.append(("e", "[\033[92mE\033[0m] Execute (Worker Run)"))
             elif status == "debugging":
                 if phase == "propose" or phase == "paused":
-                    print("[\033[92mD\033[0m] Fix Failing Tests")
-                    actions.append("d")
+                    workflow_options.append(("d", "[\033[92mD\033[0m] Fix Failing Tests"))
                 elif phase == "verify":
-                    print("[\033[92mD\033[0m] Verify Fix")
-                    actions.append("d")
+                    workflow_options.append(("d", "[\033[92mD\033[0m] Verify Fix"))
                 
-                # Broaden Resume Availability: Let users escape debugging loops
-                print("[\033[93mU\033[0m] Resume Job (Next Task)")
-                actions.append("u")
-
-                print("[\033[93mF\033[0m] Tweak / Give Hint")
-                actions.append("f")
+                workflow_options.append(("u", "[\033[93mU\033[0m] Resume Job (Next Task)"))
+                workflow_options.append(("f", "[\033[93mF\033[0m] Tweak / Give Hint"))
                 
-            elif status == "review-needed":
-                print("[\033[92mM\033[0m] Merge & Mark Completed")
-                actions.append("m")
-                print("[\033[93mF\033[0m] Deliver to Device (Firebase distribution)")
-                actions.append("f")
-                print("[\033[93mT\033[0m] Tweak / Iterate Further")
-                actions.append("t")
+            elif status == "review-needed" or status == "completed":
+                if status == "review-needed":
+                    workflow_options.append(("m", "[\033[92mM\033[0m] Merge & Mark Completed"))
+                    workflow_options.append(("f", "[\033[93mF\033[0m] Deliver to Device (Firebase distribution)"))
+                    workflow_options.append(("t", "[\033[93mT\033[0m] Tweak / Iterate Further"))
+                
+                if job_type in {"bug-fix", "bug-investigate"}:
+                    workflow_options.append(("h", "[\033[1;91mH\033[0m] Bug Still Happening? (Re-open & Fix)"))
                 
                 # If there are tasks remaining, allow Resuming to the next task
-                if tasks and len(completed) < len(tasks):
-                    print("[\033[93mU\033[0m] Resume Job (Next Task)")
-                    actions.append("u")
+                if status == "review-needed" and tasks and len(completed) < len(tasks):
+                    workflow_options.append(("u", "[\033[93mU\033[0m] Resume Job (Next Task)"))
             elif status == "human-needed":
                 if job.get("branch"):
-                    print("[\033[93mF\033[0m] Deliver to Device (Firebase distribution)")
-                    actions.append("f")
-                print("[\033[93mT\033[0m] Tweak / Revise")
-                actions.append("t")
-                print("[\033[92mU\033[0m] Resume Job")
-                actions.append("u")
+                    workflow_options.append(("f", "[\033[93mF\033[0m] Deliver to Device (Firebase distribution)"))
+                workflow_options.append(("t", "[\033[93mT\033[0m] Tweak / Revise"))
+                workflow_options.append(("u", "[\033[92mU\033[0m] Resume Job"))
             elif status == "executing" or is_stalled:
-                print("[\033[93mU\033[0m] Resume Job")
-                actions.append("u")
+                workflow_options.append(("u", "[\033[93mU\033[0m] Resume Job"))
                 
             # Global actions available for most non-archived states
             if status not in ["completed", "discarded", "planned"]:
-                if "d" not in actions:
-                    print("[\033[93mD\033[0m] Auto-Fix / Iterate")
-                    actions.append("d")
-                if "r" not in actions:
-                    print("[\033[1;91mR\033[0m] Full Re-run \033[1;91m(Deletes existing changes & resets to Planned)\033[0m")
-                    actions.append("r")
+                workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix / Iterate"))
+                workflow_options.append(("r", "[\033[1;91mR\033[0m] Full Re-run \033[1;91m(Deletes existing changes & resets to Planned)\033[0m"))
             
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
             if ai_modified or ai_untracked:
-                print("[\033[1;96mI\033[0m] View AI Changes (Files)")
-                actions.append("i")
+                inspect_options.append(("i", "[\033[1;96mI\033[0m] View AI Changes (Files)"))
                 
-            print("[\033[93mL\033[0m] Link Logs (Update Context)")
-            print("[\033[93mK\033[0m] Attach UI Mockup / Reference")
-            print("[\033[93mQ\033[0m] Ask AI (Questions about changes)")
-            actions.extend(["l", "k", "q"])
+            context_options.append(("l", "[\033[93mL\033[0m] Link Logs (Update Context)"))
+            context_options.append(("k", "[\033[93mK\033[0m] Attach UI Mockup / Reference"))
+            context_options.append(("q", "[\033[93mQ\033[0m] Ask AI (Questions about changes)"))
 
-            print("[\033[93mO\033[0m] Select LLM Models (Override)")
-            print("[\033[93mY\033[0m] Export Context (Logs, Progress, Plan)")
-            print("[\033[93mV\033[0m] View Brief / Summary")
-            print("[\033[1;96mG\033[0m] View in GitHub")
-            print("[\033[1;91mC\033[0m] Close Issue in GitHub")
-            print("[\033[1;91mX\033[0m] Discard & Revert Changes")
-            print("[\033[1;91mB\033[0m] Back to Main Menu")
-            actions.extend(["v", "g", "c", "r", "x", "m", "f", "o", "b", "u", "y"])
+            inspect_options.append(("o", "[\033[93mO\033[0m] Select LLM Models (Override)"))
+            inspect_options.append(("y", "[\033[93mY\033[0m] Export Context (Logs, Progress, Plan)"))
+            inspect_options.append(("v", "[\033[93mV\033[0m] View Brief / Summary"))
+            inspect_options.append(("g", "[\033[1;96mG\033[0m] View in GitHub"))
+            
+            navigation_options.append(("c", "[\033[1;91mC\033[0m] Close Issue in GitHub"))
+            navigation_options.append(("x", "[\033[1;91mX\033[0m] Discard & Revert Changes"))
+            navigation_options.append(("b", "[\033[1;91mB\033[0m] Back to Main Menu"))
+
+            # Print options by categories
+            if workflow_options:
+                print("\n\033[1;95m⚡ WORKFLOW ACTIONS\033[0m")
+                for opt_char, opt_str in workflow_options:
+                    print(f"  {opt_str}")
+                    if opt_char not in actions:
+                        actions.append(opt_char)
+
+            if context_options:
+                print("\n\033[1;95m📥 CONTEXT & INPUTS\033[0m")
+                for opt_char, opt_str in context_options:
+                    print(f"  {opt_str}")
+                    if opt_char not in actions:
+                        actions.append(opt_char)
+
+            if inspect_options:
+                print("\n\033[1;95m🔍 INSPECT & CONFIGURE\033[0m")
+                for opt_char, opt_str in inspect_options:
+                    print(f"  {opt_str}")
+                    if opt_char not in actions:
+                        actions.append(opt_char)
+
+            if navigation_options:
+                print("\n\033[1;95m🛡️  SAFETY & NAVIGATION\033[0m")
+                for opt_char, opt_str in navigation_options:
+                    print(f"  {opt_str}")
+                    if opt_char not in actions:
+                        actions.append(opt_char)
             
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
@@ -2565,7 +2702,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 handle_ask_ai(job, session_allowed_models)
                 job = refresh_job(job)
             elif choice == "j":
-                print_header("LLM Session Tracking")
+                open_action_screen("LLM Session Tracking")
                 sessions = job.get("llm_sessions", [])
                 if not sessions and "llm_session_ids" in job:
                     sessions = [{"id": sid, "model": "unknown"} for sid in job["llm_session_ids"]]
@@ -2652,6 +2789,15 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 revised_job = handle_tweak_revise(job)
                 if revised_job:
                     job = revised_job
+            elif choice == "h" and "h" in actions:
+                if not session_allowed_machines:
+                    print("\n\033[1;91m⚠️  ERROR: No active machines selected for this session.\033[0m")
+                    print("Please go to [\033[1;96mC\033[0m] Configuration \033[1;96m->\033[0m [\033[1;96mF\033[0m] Manage Machine Fleet and select at least one machine.")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                    continue
+                open_action_screen("Re-open & Fix Bug")
+                handle_bug_still_happening(job)
+                job = refresh_job(job)
             elif choice == "m" and "m" in actions:
                 open_action_screen("Merge & Mark Completed")
                 handle_merge_cleanup(job)
@@ -2833,12 +2979,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     continue
 
                 open_action_screen("Schedule & Dispatch")
-                print("This schedules the approved plan on an available worker.")
-                print("\033[90mUse dry run to validate dispatch setup without starting worker execution.\033[0m\n")
-                dry_run = prompt_confirm("Dry run?", default=False)
+                print("This schedules the approved plan on an available worker.\n")
                 args = [str(job["_path"])]
-                if dry_run:
-                    args.append("--dry-run")
                 run_script("schedule_job.py", args, job=job, session_machines=session_allowed_machines, session_models=session_allowed_models)
                 # Refresh job data
                 job = refresh_job(job)
@@ -3699,7 +3841,8 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             print("  \033[90m./my-ios-app\033[0m\n")
             status_bar.render(at_bottom=True, force=True)
             try:
-                path_str = prompt_input("Project path:", placeholder="(Enter to cancel)", field_below=True)
+                print("    (Enter path to project folder, or Enter to cancel; e.g. ~/projects/my-ios-app)")
+                path_str = prompt_input("Project path:", placeholder="~/projects/my-ios-app or ./my-ios-app", field_below=True)
             except BackException:
                 continue
             if not path_str:
@@ -4561,7 +4704,8 @@ def handle_import_email_recipients(status_bar: StatusBar, settings_path: Path, s
 
     status_bar.render(at_bottom=True, force=True)
     try:
-        csv_path = prompt_input("CSV path:", placeholder="(Enter to cancel)", field_below=True)
+        print("    (Enter path to CSV file, or Enter to cancel; e.g. ~/Downloads/testers.csv)")
+        csv_path = prompt_input("CSV path:", placeholder="~/Downloads/testers.csv or ./emails.csv", field_below=True)
     except BackException:
         return
     if not csv_path:

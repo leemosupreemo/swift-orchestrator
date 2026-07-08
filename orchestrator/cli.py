@@ -9,9 +9,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from orchestrator.project_config import DEFAULT_RUNTIME_DIRNAME, find_project_root, load_project_config
-from orchestrator.project_config import load_recent_projects, project_display_name
-from orchestrator.project_config import remember_project, resolve_project_reference
+from orchestrator.project_config import (
+    DEFAULT_RUNTIME_DIRNAME,
+    find_project_root,
+    load_project_config,
+    load_recent_projects,
+    project_display_name,
+    remember_project,
+    resolve_project_reference,
+    safe_cwd,
+    safe_resolve,
+)
 from orchestrator.config_validation import validate_machine_config, validate_project_config
 
 
@@ -450,7 +458,7 @@ def parse_ssh_machine(value: str) -> dict[str, Any]:
 
 
 def copy_prompt_overrides(root: Path, force: bool) -> list[Path]:
-    prompts_source = Path(__file__).resolve().parent / "prompts"
+    prompts_source = safe_resolve(Path(__file__)).parent / "prompts"
     prompts_dest = root / DEFAULT_RUNTIME_DIRNAME / "prompts"
     prompts_dest.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
@@ -496,7 +504,7 @@ def run_wizard(args: argparse.Namespace) -> int:
     from orchestrator.scripts.model_registry import get_all_models
     
     root_arg = args.project or args.root
-    root = Path(root_arg).expanduser().resolve() if root_arg else find_project_root()
+    root = safe_resolve(Path(root_arg).expanduser()) if root_arg else find_project_root()
     models = parse_csv(args.models)
     
     if args.non_interactive and not models:
@@ -917,7 +925,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
 def init_project(args: argparse.Namespace) -> int:
     root_arg = getattr(args, "project", None) or args.root
-    root = Path(root_arg).expanduser().resolve() if root_arg else find_project_root()
+    root = safe_resolve(Path(root_arg).expanduser()) if root_arg else find_project_root()
     runtime_dir = root / DEFAULT_RUNTIME_DIRNAME
     config_dir = runtime_dir / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -1034,7 +1042,7 @@ def validate_config_command() -> int:
 
 def run_script(script_name: str, script_args: list[str]) -> int:
     # Resolve scripts directory relative to this file
-    current_dir = Path(__file__).resolve().parent
+    current_dir = safe_resolve(Path(__file__)).parent
     scripts_dir = current_dir / "scripts"
     
     # Fallback: if not found (e.g. due to rename), try to find via project root
@@ -1130,7 +1138,7 @@ def _main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     
     if not argv:
-        current = Path.cwd().resolve()
+        current = safe_resolve(safe_cwd())
         local_root = None
         for candidate in [current, *current.parents]:
             if (candidate / DEFAULT_RUNTIME_DIRNAME / "project.json").exists():

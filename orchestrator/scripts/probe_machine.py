@@ -97,18 +97,16 @@ def probe_mem_free_mb() -> tuple[int, str]:
 
 def probe_disk_space(path: str) -> tuple[int, int]:
     """Returns (free_gb, total_gb) for the given path."""
+    import shutil
+    from pathlib import Path
     try:
-        # Use df -g for GB units on macOS
-        res = subprocess.run(["df", "-g", path], capture_output=True, text=True, check=False)
-        lines = res.stdout.strip().splitlines()
-        if len(lines) > 1:
-            parts = lines[1].split()
-            # On macOS df -g: Filesystem, Size, Used, Avail, Capacity, iused, ifree, %iused, Mounted on
-            # Parts index 3 is Avail (GB), index 1 is Size (GB)
-            total = int(parts[1])
-            avail = int(parts[3])
-            return avail, total
-    except:
+        p = Path(path).resolve()
+        # Fall back to parent directories if path does not exist yet
+        while not p.exists() and p.parent != p:
+            p = p.parent
+        total, used, free = shutil.disk_usage(str(p))
+        return int(free / (1024**3)), int(total / (1024**3))
+    except Exception:
         pass
     return 0, 0
 

@@ -61,7 +61,13 @@ AI_BRIEF_FILE: {brief_file}
     if existing:
         pr_number = existing[0]["number"]
         gh_text("pr", "edit", str(pr_number), "--body", body)
-        return pr_number
+        pr_url = None
+        try:
+            pr_data = gh_json("pr", "view", str(pr_number), "--json", "url")
+            pr_url = pr_data.get("url") if pr_data else None
+        except:
+            pass
+        return pr_number, pr_url
 
     out = gh_text(
         "pr",
@@ -76,5 +82,9 @@ AI_BRIEF_FILE: {brief_file}
         "--head",
         branch,
     )
-    pr_number = int(out.rstrip("/").split("/")[-1])
-    return pr_number
+    pr_url = out.strip()
+    try:
+        pr_number = int(pr_url.rstrip("/").split("/")[-1])
+    except:
+        pr_number = 0
+    return pr_number, pr_url

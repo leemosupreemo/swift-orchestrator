@@ -426,7 +426,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
         
     return options[idx]
 
-def prompt_confirm(question: str, default: bool = True, description: str | None = None) -> bool:
+def prompt_confirm(question: str, default: bool = True, description: str | None = None, clear_screen: bool = True) -> bool:
     """Displays interactive yes/no radio buttons."""
     # Defensive logic for reported UI duplication
     if question.startswith("Would you Would you"):
@@ -434,7 +434,7 @@ def prompt_confirm(question: str, default: bool = True, description: str | None 
     
     default_str = "yes" if default else "no"
 
-    choice = prompt_radio(question, ["yes", "no"], default_str, description=description)
+    choice = prompt_radio(question, ["yes", "no"], default_str, description=description, clear_screen=clear_screen)
     return choice == "yes"
 
 def prompt_multiline(prompt: str) -> str:
@@ -1151,6 +1151,13 @@ class ProgressIndicator:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
         self.restore_cursor()
+
+    def __enter__(self):
+        self.render(force=True)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.clear()
 
 _STATUS_BAR_NESTING = 0
 _ACTIVE_STATUS_BAR = None

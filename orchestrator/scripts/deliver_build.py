@@ -6,6 +6,8 @@ import os
 import re
 import sys
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +16,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import ROOT, read_json, format_markdown_for_terminal
+from common import ROOT, read_json, format_markdown_for_terminal, ProgressIndicator
 from orchestrator.project_config import PROJECT_CONFIG
 
 def send_final_notification(job: dict[str, Any], title: str, branch: str, success: bool):
@@ -158,13 +160,40 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
                 bufsize=1
             )
             
-            for line in process.stdout:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                f.write(line)
-                f.flush()
+            # Setup ProgressIndicator with the initial log message
+            indicator = ProgressIndicator(
+                label="Distributing build",
+                hint=f"Log: {dist_log.relative_to(ROOT)}"
+            )
+            
+            shared = {"line": "Starting build..."}
+            
+            def read_output():
+                for line in process.stdout:
+                    f.write(line)
+                    f.flush()
+                    stripped = line.strip()
+                    if stripped:
+                        shared["line"] = stripped
+                        
+            output_thread = threading.Thread(target=read_output, daemon=True)
+            output_thread.start()
+            
+            while process.poll() is None:
+                indicator.label = shared["line"]
+                indicator.render(force=True)
+                time.sleep(0.1)
+                
+            # Wait for output thread to finish writing any remaining lines
+            output_thread.join(timeout=2.0)
+            
+            # Show final line before clearing
+            if shared["line"]:
+                indicator.label = shared["line"]
+                indicator.render(force=True)
                 
             res = process.wait()
+            indicator.clear()
         
         if res == 0:
             print("\n✅ Build delivered to Firebase successfully!", flush=True)
@@ -190,7 +219,7 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
                     print("Xcode could not access your signing certificate because the login keychain is locked.")
                     print("\nNext steps:")
                     print("  1. Run 'orchestrator console'.")
-                    print("  2. Go to Configuration & Tools -> [K] Configure Headless Signing.")
+                    print("  2. Go to Configuration & Tools -> [D] Firebase App Distro -> [K] Configure Headless Signing.")
                     print("  3. Provide your keychain password to authorize automatic unlocking during builds.")
                 elif "failed to distribute to testers" in log_content or "HTTP Error: 404" in log_content:
                     msg = f"""# Firebase distribution failed (HTTP 404)

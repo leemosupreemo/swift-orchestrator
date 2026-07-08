@@ -3,12 +3,44 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parent
+def safe_cwd() -> Path:
+    for _ in range(10):
+        try:
+            return Path.cwd()
+        except InterruptedError:
+            time.sleep(0.001)
+    
+    pwd = os.environ.get("PWD")
+    if pwd:
+        try:
+            p = Path(pwd)
+            if p.exists():
+                return p
+        except Exception:
+            pass
+            
+    return Path.cwd()
+
+
+def safe_resolve(path: Path) -> Path:
+    for _ in range(10):
+        try:
+            return path.resolve()
+        except InterruptedError:
+            time.sleep(0.001)
+    try:
+        return path.resolve()
+    except InterruptedError:
+        return path.absolute()
+
+
+PACKAGE_ROOT = safe_resolve(Path(__file__)).parent
 DEFAULT_RUNTIME_DIRNAME = ".orchestrator"
 USER_STATE_DIR_ENV = "ORCHESTRATOR_USER_STATE_DIR"
 
@@ -16,8 +48,8 @@ USER_STATE_DIR_ENV = "ORCHESTRATOR_USER_STATE_DIR"
 def user_state_dir() -> Path:
     explicit = os.environ.get(USER_STATE_DIR_ENV)
     if explicit:
-        return Path(explicit).expanduser().resolve()
-    return (Path.home() / ".orchestrator").resolve()
+        return safe_resolve(Path(explicit).expanduser())
+    return safe_resolve(Path.home() / ".orchestrator")
 
 
 def recent_projects_path() -> Path:
@@ -51,12 +83,12 @@ def project_display_name(root: Path) -> str:
 
 
 def remember_project(root: Path, name: str | None = None, active: bool = True) -> None:
-    root = root.expanduser().resolve()
+    root = safe_resolve(root.expanduser())
     display_name = name or project_display_name(root)
     data = load_recent_projects()
     projects = [
         project for project in data.get("projects", [])
-        if Path(project.get("root", "")).expanduser().resolve() != root
+        if safe_resolve(Path(project.get("root", "")).expanduser()) != root
         and project.get("name") != display_name
     ]
     projects.insert(0, {"name": display_name, "root": str(root)})
@@ -71,11 +103,11 @@ def resolve_project_reference(reference: str | None) -> Path | None:
         return None
     candidate = Path(reference).expanduser()
     if candidate.exists() or "/" in reference or reference.startswith("."):
-        return candidate.resolve()
+        return safe_resolve(candidate)
     data = load_recent_projects()
     for project in data.get("projects", []):
         if project.get("name") == reference:
-            return Path(project["root"]).expanduser().resolve()
+            return safe_resolve(Path(project["root"]).expanduser())
     return None
 
 
@@ -90,9 +122,9 @@ def active_project_root() -> Path | None:
 def find_project_root(start: Path | None = None) -> Path:
     explicit = os.environ.get("ORCHESTRATOR_PROJECT_ROOT")
     if explicit:
-        return Path(explicit).expanduser().resolve()
+        return safe_resolve(Path(explicit).expanduser())
 
-    current = (start or Path.cwd()).resolve()
+    current = safe_resolve(start or safe_cwd())
     for candidate in [current, *current.parents]:
         if (candidate / ".git").exists():
             return candidate
@@ -197,11 +229,11 @@ class ProjectConfig:
         if self.asc_key_path:
             p = Path(self.asc_key_path).expanduser()
             if not p.is_absolute():
-                p = (self.root / p).resolve()
+                p = safe_resolve(self.root / p)
             else:
-                p = p.resolve()
+                p = safe_resolve(p)
 
-            home = Path.home().resolve()
+            home = safe_resolve(Path.home())
             secure_paths = [
                 home / ".private_keys",
                 home / ".appstoreconnect" / "private_keys"
@@ -210,7 +242,7 @@ class ProjectConfig:
             is_secure = False
             for sp in secure_paths:
                 try:
-                    if p.parent == sp.resolve():
+                    if p.parent == safe_resolve(sp):
                         is_secure = True
                         break
                 except Exception:
@@ -261,7 +293,7 @@ def load_project_config() -> ProjectConfig:
     root = find_project_root()
     config_path = os.environ.get("ORCHESTRATOR_CONFIG")
     if config_path:
-        config_file = Path(config_path).expanduser().resolve()
+        config_file = safe_resolve(Path(config_path).expanduser())
     else:
         config_file = root / DEFAULT_RUNTIME_DIRNAME / "project.json"
 
@@ -274,7 +306,7 @@ def load_project_config() -> ProjectConfig:
     ).expanduser()
     if not runtime_dir.is_absolute():
         runtime_dir = root / runtime_dir
-    runtime_dir = runtime_dir.resolve()
+    runtime_dir = safe_resolve(runtime_dir)
 
     project_name = data.get("project_name") or root.name
     xcode_project = data.get("xcode_project") or _first_match(root, "*.xcodeproj")

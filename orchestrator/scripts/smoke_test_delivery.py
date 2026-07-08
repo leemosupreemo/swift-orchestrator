@@ -58,7 +58,8 @@ def run_smoke_delivery():
         print("     - \"provisioning_profile_specifier\": \"<Profile Name>\"")
         print("")
         
-        if prompt_confirm("Would you like to run the Setup Wizard now?", default=True):
+        wizard_desc = "Runs the interactive project configuration wizard to set up Apple Team ID, Firebase credentials, and provisioning profiles."
+        if prompt_confirm("Would you like to run the Setup Wizard now?", default=True, description=wizard_desc, clear_screen=False):
             print("\n\033[1;96mStarting Orchestrator Wizard...\033[0m")
             cli_path = SCRIPTS_DIR.parent / "cli.py"
             res = subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
@@ -122,7 +123,8 @@ def run_smoke_delivery():
         # But actually, the dev_console run_script handles this better.
         # We'll just do the cleanup and exit.
         
-        if prompt_confirm("Cleanup: Delete temporary mock job?", default=True):
+        desc = f"Deletes the temporary mock job configuration file: {job_file.relative_to(ROOT)}"
+        if prompt_confirm("Cleanup: Delete temporary mock job?", default=True, description=desc, clear_screen=False):
             if job_file.exists():
                 os.remove(job_file)
             print("      - Temporary job deleted.")
@@ -135,7 +137,8 @@ def run_smoke_delivery():
     except Exception as e:
         print(f"\n!!! Error during smoke test: {e}")
         if job_file.exists():
-            if prompt_confirm("Emergency Cleanup: Delete temporary mock job?", default=True):
+            desc = f"Deletes the temporary mock job configuration file: {job_file.relative_to(ROOT)}"
+            if prompt_confirm("Emergency Cleanup: Delete temporary mock job?", default=True, description=desc, clear_screen=False):
                 os.remove(job_file)
                 print("      - Deleted temporary job file.")
 

@@ -71,6 +71,7 @@ def send_email_notification(title: str, message: str, job_id: str | None = None,
 
     emails = settings.get("notification_emails", [])
     if not emails:
+        print("      - Skipped email notification (no recipient emails configured in settings.json).")
         return False
 
     primary_provider = settings.get("notification_provider", "gmail").lower()
@@ -228,6 +229,10 @@ def send_email_notification(title: str, message: str, job_id: str | None = None,
             last_error = e
             continue
             
+    if last_error:
+        print(f"      - Email notification failed: {last_error}")
+    else:
+        print("      - Skipped email notification (no SMTP or API provider credentials configured in settings.json).")
     return False
 
 def main() -> None:

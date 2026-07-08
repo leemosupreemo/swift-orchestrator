@@ -122,7 +122,7 @@ def mark_human_needed(job_path: Path, job: dict, question: str) -> None:
     write_json(job_path, job)
 
 
-def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Optional[int] = None) -> None:
+def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Optional[int] = None, pr_url: Optional[str] = None, distributed_status: Optional[str] = None) -> None:
     is_success = build_ok and test_ok
     status = job.get("status", "unknown")
     
@@ -149,10 +149,17 @@ def print_status_report(job: dict, build_ok: bool, test_ok: bool, pr_number: Opt
         print(f"  Status:      {status}")
         if pr_number:
             print(f"  PR:          #{pr_number}")
+        if distributed_status:
+            print(f"  Distributed: {distributed_status}")
         print("\033[0m")
         
         print("\n\033[1;97mNEXT STEPS:\033[0m")
-        print(f"  1. Review the changes on GitHub: \033[4;96mgh pr view {pr_number} --web\033[0m")
+        if pr_url:
+            print(f"  1. Review the changes on GitHub: \033[4;96m{pr_url}\033[0m")
+        elif pr_number:
+            print(f"  1. Review the changes on GitHub: \033[4;96mgh pr view {pr_number} --web\033[0m")
+        else:
+            print("  1. Review the changes on GitHub.")
         print(f"  2. Run the orchestrator console to manage this job: \033[1;96morchestrator console\033[0m")
         print(f"  3. Merge and cleanup using dev_console when satisfied.")
     else:
@@ -484,17 +491,32 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
         completed = job.get("completed_task_indices", [])
         all_tasks_done = len(completed) >= len(tasks)
 
+        distributed_status = "Not Triggered"
         if PROJECT_CONFIG.firebase_distribution and is_ios and (not is_yolo or all_tasks_done):
             print("\n🚀 Automated build delivery triggered after verification...")
             try:
-                subprocess.run([sys.executable, str(SCRIPTS_DIR / "deliver_build.py"), str(job_path)], cwd=str(ROOT))
+                res = subprocess.run([sys.executable, str(SCRIPTS_DIR / "deliver_build.py"), str(job_path)], cwd=str(ROOT))
+                if res.returncode == 0:
+                    formatted_time = now_iso().replace("T", " ")[:19]
+                    method = PROJECT_CONFIG.delivery_method or "ad-hoc"
+                    distributed_status = f"SUCCESS via Firebase App Distribution ({method}) at {formatted_time}"
+                else:
+                    distributed_status = f"FAILED (exit code {res.returncode})"
             except Exception as e:
                 print(f"\n⚠️ Build automated delivery failed: {e}")
+                distributed_status = f"FAILED ({e})"
+        else:
+            if not PROJECT_CONFIG.firebase_distribution:
+                distributed_status = "Skipped (Firebase distribution disabled)"
+            elif not is_ios:
+                distributed_status = "Skipped (Non-iOS task)"
+            else:
+                distributed_status = "Skipped (YOLO mode - awaiting final task)"
 
         print_phase("pull_request")
         status_bar.render()
         print(f"[4/4] Implementation successful. Opening/updating Pull Request...")
-        pr_number = open_or_update_pr(job_path)
+        pr_number, pr_url = open_or_update_pr(job_path)
 
         if is_debug:
             # Update history with success
@@ -515,6 +537,7 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
             run_shell(f"git push origin {branch}", cwd=ROOT, check=False)
 
         job["pr_number"] = pr_number
+        job["pr_url"] = pr_url
         if not is_debug:
             job["status"] = "review-needed"
 
@@ -543,7 +566,7 @@ def execute_job(job_path: Path, resume: bool = False) -> None:
             capture=False,
         )
 
-        print_status_report(job, True, True, pr_number=pr_number)
+        print_status_report(job, True, True, pr_number=pr_number, pr_url=pr_url, distributed_status=distributed_status)
         
         # Determine if we should distribute
         is_yolo = job.get("is_yolo", False)
