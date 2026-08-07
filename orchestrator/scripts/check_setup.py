@@ -163,9 +163,9 @@ def detect_codex_integration(names: list[str]) -> bool:
     except Exception:
         return False
 
-def run_with_activity(label: str, operation, status_bar: StatusBar | None = None):
-    """Run a blocking check while keeping the terminal footer and spinner alive."""
-    if status_bar is None or not should_render_progress_ui():
+def run_with_activity(label: str, operation):
+    """Run a blocking check while keeping an inline progress spinner alive."""
+    if not should_render_progress_ui():
         return operation()
 
     indicator = ProgressIndicator(label=label, hint="working")
@@ -179,11 +179,21 @@ def run_with_activity(label: str, operation, status_bar: StatusBar | None = None
 
     thread = threading.Thread(target=target, daemon=True)
     thread.start()
-    while thread.is_alive():
-        status_bar.render(at_bottom=True, activity=indicator)
-        time.sleep(0.1)
-    thread.join()
-    status_bar.render(at_bottom=True, activity=indicator, force=True)
+    
+    # Hide cursor
+    sys.stdout.write("\033[?25l")
+    sys.stdout.flush()
+    
+    try:
+        while thread.is_alive():
+            sys.stdout.write(f"\r\033[K{indicator.get_line()}")
+            sys.stdout.flush()
+            time.sleep(0.1)
+    finally:
+        thread.join()
+        sys.stdout.write("\r\033[K")
+        sys.stdout.write("\033[?25h")  # Restore cursor
+        sys.stdout.flush()
 
     if "error" in result:
         raise result["error"]
@@ -198,21 +208,12 @@ def xcode_list_command() -> list[str]:
     return args
 
 def check():
-    progress_ui = should_render_progress_ui()
-    status_context = StatusBar({"allowed_machines": [], "allowed_models": []}, is_processing=True) if progress_ui else None
-    if status_context:
-        status_context.__enter__()
-        status_context.set_scroll_region()
-        status_context.render(at_bottom=True, force=True)
-
     try:
-        return _check(status_context)
-    finally:
-        if status_context:
-            status_context.clear_footer()
-            status_context.__exit__(None, None, None)
+        return _check()
+    except KeyboardInterrupt:
+        sys.stdout.write("\n\n\033[1;91mCheck aborted by user.\033[0m\n")
 
-def _check(status_bar: StatusBar | None = None):
+def _check():
     print_header("AI Agent 'Plug & Play' Verification")
     settings_path = CONFIG_DIR / "settings.json"
     
@@ -242,7 +243,7 @@ def _check(status_bar: StatusBar | None = None):
                     check=False,
                 )
 
-            res = run_with_activity("Refreshing Git index", git_status, status_bar)
+            res = run_with_activity("Refreshing Git index", git_status)
             status = res.stdout.strip() if res.returncode == 0 else ""
             if status:
                 print(f"     \033[1;93m⚠️  Warning: Uncommitted changes detected.\033[0m")
@@ -305,7 +306,6 @@ def _check(status_bar: StatusBar | None = None):
             res = run_with_activity(
                 "Reading Xcode build settings",
                 lambda: subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=45),
-                status_bar,
             )
             if res.returncode != 0:
                 stderr = (res.stderr or res.stdout or "").strip().splitlines()
@@ -433,7 +433,6 @@ def _check(status_bar: StatusBar | None = None):
             res = run_with_activity(
                 "Checking GitHub authentication",
                 lambda: subprocess.run(["gh", "auth", "status"], capture_output=True, text=True),
-                status_bar,
             )
             is_auth = res.returncode == 0
             print_result(is_auth, "GitHub Auth session", "LOGGED IN" if is_auth else "EXPIRED", "GitHub CLI (gh)")
@@ -466,7 +465,6 @@ def _check(status_bar: StatusBar | None = None):
             res = run_with_activity(
                 f"Checking {cli_name} authentication",
                 lambda: subprocess.run([cli_name] + status_args, capture_output=True, text=True, timeout=5),
-                status_bar,
             )
             is_auth = res.returncode == 0
             print_result(is_auth, f"{cli_name} Auth", "LOGGED IN" if is_auth else "NOT LOGGED IN", fix_key if not is_auth else None)

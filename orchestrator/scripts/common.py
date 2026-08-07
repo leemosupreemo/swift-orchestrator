@@ -307,7 +307,7 @@ def _split_option_description(option: str) -> tuple[str, str | None]:
 
     return title, "; ".join(descriptions)
 
-def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None, description: str | None = None) -> str:
+def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None, description: str | list[str] | None = None) -> str:
     """Displays interactive radio buttons navigated by arrow keys."""
     if not sys.stdin.isatty():
         return default or options[0]
@@ -358,6 +358,11 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 output.append(f"\033[90m{description}\033[0m")
             output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
             output.append("")
+
+            if description:
+                for line in description:
+                    output.append(line)
+                output.append("")
 
             for i, opt in enumerate(options):
                 if opt.startswith("---"):
@@ -426,7 +431,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
         
     return options[idx]
 
-def prompt_confirm(question: str, default: bool = True, description: str | None = None, clear_screen: bool = True) -> bool:
+def prompt_confirm(question: str, default: bool = True, description: str | list[str] | None = None, clear_screen: bool = True) -> bool:
     """Displays interactive yes/no radio buttons."""
     # Defensive logic for reported UI duplication
     if question.startswith("Would you Would you"):
@@ -484,6 +489,15 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     if _ACTIVE_STATUS_BAR:
         _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Enter to skip")
 
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+
+    fixed_len = 4 + len(label) + 2
+    available_width = cols - fixed_len - 4
+
     input_text = ""
     bg_style = "\033[48;5;236m"
     fg_style = "\033[1;97m" # Bold White
@@ -499,9 +513,16 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
         while True:
             # Render current state as asterisks
             if not input_text and placeholder:
-                display = f"{placeholder_style}{placeholder}{reset}"
+                disp_placeholder = placeholder
+                if len(disp_placeholder) > available_width:
+                    disp_placeholder = disp_placeholder[:available_width - 3] + "..."
+                display = f"{placeholder_style}{disp_placeholder}{reset}"
             else:
-                display = f"{fg_style}{'*' * len(input_text)}{reset}"
+                stars_len = len(input_text)
+                if stars_len > available_width:
+                    display = f"{fg_style}{'*' * available_width}{reset}"
+                else:
+                    display = f"{fg_style}{'*' * stars_len}{reset}"
             
             # Construct the line
             line = f"\r    {prompt_label} {bg_style} {display} {reset}\033[K"
@@ -572,8 +593,10 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
                     placeholder_text = trim_text(placeholder, visible_width())
                     display = f"{placeholder_style}{placeholder_text}{reset}"
                 else:
-                    value_text = trim_text(input_text, visible_width())
-                    display = f"{fg_style}{value_text}{reset}"
+                    disp_text = input_text
+                    if len(disp_text) > visible_width():
+                        disp_text = "..." + disp_text[-(visible_width() - 3):]
+                    display = f"{fg_style}{disp_text}{reset}"
 
                 line = f"\r\033[K    {bg_style} {display} {reset}\033[K"
                 sys.stdout.write(line)
@@ -605,6 +628,15 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
             sys.stdout.write("\033[?25h")
             sys.stdout.flush()
 
+    try:
+        cols, _ = os.get_terminal_size()
+    except Exception:
+        cols = 80
+    cols = max(cols, 40)
+
+    fixed_len = 4 + len(label) + 2
+    available_width = max(12, cols - fixed_len - 4)
+
     input_text = default
     bg_style = "\033[48;5;236m"
     fg_style = "\033[1;97m" # Bold White
@@ -615,13 +647,16 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
     try:
         while True:
             # Render current state
-            display = input_text
             if not input_text and placeholder:
-                placeholder_text = trim_text(placeholder, visible_width())
-                display = f"{placeholder_style}{placeholder_text}{reset}"
+                disp_placeholder = placeholder
+                if len(disp_placeholder) > available_width:
+                    disp_placeholder = disp_placeholder[:available_width - 3] + "..."
+                display = f"{placeholder_style}{disp_placeholder}{reset}"
             else:
-                value_text = trim_text(input_text, visible_width())
-                display = f"{fg_style}{value_text}{reset}"
+                disp_text = input_text
+                if len(disp_text) > available_width:
+                    disp_text = "..." + disp_text[-(available_width - 3):]
+                display = f"{fg_style}{disp_text}{reset}"
             
             # Construct the line (indented to match other prompts)
             label_limit = max(12, visible_width() - len(label) - 4)
@@ -812,13 +847,14 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 current_option = options[idx]
                 details = details_map.get(current_option, [])
                 if details:
+                    output.append("")
                     if details_title:
-                        output.append(f"\n  \033[1;96m{details_title}\033[0m")
+                        output.append(f"  \033[1;96m{details_title}\033[0m")
                     for line in details:
                         if line.startswith("\033"):
-                            output.append(line)
+                            output.append(f"  {line}")
                         else:
-                            output.append(f"\033[90m{line}\033[0m")
+                            output.append(f"  \033[90m{line}\033[0m")
             
             # 4. Print footer
             if footer_actions:
@@ -1115,10 +1151,10 @@ class ProgressIndicator:
         
         # Prevent terminal wrapping which spawns duplicate lines
         try:
-            import os
             cols, _ = os.get_terminal_size()
-        except:
+        except Exception:
             cols = 80
+        cols = max(cols, 40)
             
         static_len = 17 + len(self.hint) + len(timer_str) + len(activity_str)
         available = cols - static_len
@@ -1153,6 +1189,7 @@ class ProgressIndicator:
         self.restore_cursor()
 
     def __enter__(self):
+        self.start_time = datetime.now()
         self.render(force=True)
         return self
 

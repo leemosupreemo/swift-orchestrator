@@ -55,6 +55,142 @@ def input(prompt: str = "") -> str:
         sys.stdout.flush()
         return ""
 
+def print_wrapped_description(text: str, indent_size: int = 4) -> None:
+    """Prints a description string wrapped to the terminal width, maintaining indentation."""
+    import textwrap
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+    available_width = cols - indent_size - 4  # safety margin
+    lines = textwrap.wrap(text, width=available_width)
+    indent = " " * indent_size
+    for line in lines:
+        print(f"{indent}\033[90m{line}\033[0m")
+
+def print_box_line_rich(label: str, rich_text: str) -> None:
+    """Prints a labeled line inside a box outline, supporting word wrapping with preserved ANSI colors and indentation."""
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+    
+    label_len = len(label)
+    prefix_len = 5 + label_len  # "  │  " + label
+    available_width = cols - prefix_len - 4
+    
+    import re
+    # Tokenize ANSI codes, whitespace, or non-whitespace words
+    token_pattern = re.compile(r'(\x1b\[[0-9;]*[mK])|(\s+)|([^\s\x1b]+)')
+    tokens = [m.group(0) for m in token_pattern.finditer(rich_text)]
+    
+    lines = []
+    current_line_parts = []
+    current_line_plain_len = 0
+    active_ansi_state = ""
+    
+    for token in tokens:
+        if token.startswith('\x1b'):
+            current_line_parts.append(token)
+            if token == '\x1b[0m':
+                active_ansi_state = ""
+            else:
+                active_ansi_state = token
+        elif token.isspace():
+            if current_line_parts:
+                current_line_parts.append(token)
+                current_line_plain_len += len(token)
+        else:
+            word_len = len(token)
+            if current_line_plain_len + word_len > available_width and current_line_plain_len > 0:
+                if active_ansi_state:
+                    current_line_parts.append('\x1b[0m')
+                lines.append("".join(current_line_parts))
+                
+                current_line_parts = []
+                if active_ansi_state:
+                    current_line_parts.append(active_ansi_state)
+                current_line_parts.append(token)
+                current_line_plain_len = word_len
+            else:
+                current_line_parts.append(token)
+                current_line_plain_len += word_len
+                
+    if current_line_parts:
+        lines.append("".join(current_line_parts))
+        
+    for i, line in enumerate(lines):
+        if i == 0:
+            print(f"  \033[90m│\033[0m  {label}{line}")
+        else:
+            indent = " " * (label_len + 2)
+            print(f"  \033[90m│\033[0m{indent}{line}")
+
+def print_wrapped_kv(label: str, rich_text: str, indent_size: int | None = None) -> None:
+    """Prints a key-value or menu action item, wrapping the value portion and indenting wraps."""
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+    
+    import re
+    # Strip ANSI to measure the label length
+    plain_label = re.sub(r"\033\[[0-9;]*m", "", label)
+    label_len = len(plain_label)
+    
+    actual_indent = indent_size if indent_size is not None else label_len
+    available_width = cols - actual_indent - 4
+    if available_width < 10:
+        available_width = 10
+        
+    # Tokenize ANSI codes, whitespace, or non-whitespace words
+    token_pattern = re.compile(r'(\x1b\[[0-9;]*[mK])|(\s+)|([^\s\x1b]+)')
+    tokens = [m.group(0) for m in token_pattern.finditer(rich_text)]
+    
+    lines = []
+    current_line_parts = []
+    current_line_plain_len = 0
+    active_ansi_state = ""
+    
+    for token in tokens:
+        if token.startswith('\x1b'):
+            current_line_parts.append(token)
+            if token == '\x1b[0m':
+                active_ansi_state = ""
+            else:
+                active_ansi_state = token
+        elif token.isspace():
+            if current_line_parts:
+                current_line_parts.append(token)
+                current_line_plain_len += len(token)
+        else:
+            word_len = len(token)
+            if current_line_plain_len + word_len > available_width and current_line_plain_len > 0:
+                if active_ansi_state:
+                    current_line_parts.append('\x1b[0m')
+                lines.append("".join(current_line_parts))
+                
+                current_line_parts = []
+                if active_ansi_state:
+                    current_line_parts.append(active_ansi_state)
+                current_line_parts.append(token)
+                current_line_plain_len = word_len
+            else:
+                current_line_parts.append(token)
+                current_line_plain_len += word_len
+                
+    if current_line_parts:
+        lines.append("".join(current_line_parts))
+        
+    for i, line in enumerate(lines):
+        if i == 0:
+            print(f"{label}{line}")
+        else:
+            print(f"{' ' * actual_indent}{line}")
+
 FLEET_AVAILABILITY: dict[str, bool] = {}
 FLEET_DETAILS: dict[str, dict[str, Any]] = {}
 
@@ -121,26 +257,26 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         ready = False
         try:
             if binary == "claude":
-                res = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=1.5)
+                res = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=5.0)
                 ready = res.returncode == 0
             elif binary == "codex":
-                res = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=1.5)
+                res = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=5.0)
                 ready = res.returncode == 0
             elif binary in {"gemini", "antigravity", "agy"}:
                 ready = (os.path.exists(os.path.expanduser("~/.gemini/oauth_creds.json")) or 
                          os.path.exists(os.path.expanduser("~/.gemini/google_accounts.json")))
             elif binary == "opencode":
-                res = subprocess.run(["opencode", "auth", "status"], capture_output=True, text=True, timeout=1.5)
+                res = subprocess.run(["opencode", "auth", "status"], capture_output=True, text=True, timeout=5.0)
                 if res.returncode == 0:
                     ready = True
                 else:
-                    res2 = subprocess.run(["opencode", "models"], capture_output=True, text=True, timeout=1.5)
+                    res2 = subprocess.run(["opencode", "models"], capture_output=True, text=True, timeout=5.0)
                     ready = res2.returncode == 0 and bool(res2.stdout.strip())
             elif binary == "ollama":
-                res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=1.5)
+                res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5.0)
                 ready = res.returncode == 0
             elif binary == "gh":
-                res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=1.5)
+                res = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=5.0)
                 ready = res.returncode == 0
             else:
                 ready = True
@@ -710,7 +846,7 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
         # the terminal directly instead of fighting the parent streaming footer.
         if script_name in ["new_job.py", "check_setup.py", "discover_machines.py", "smoke_test_delivery.py"]:
             sub_env = os.environ.copy()
-            if sub_menu:
+            if sub_menu and script_name != "check_setup.py":
                 sub_env["AI_PROGRESS_SILENT"] = "1"
             returncode = subprocess.run(cmd, cwd=str(ROOT), stdin=sys.stdin, stdout=None, stderr=None, env=sub_env).returncode
             output_log = ""
@@ -807,7 +943,6 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
             input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             return
 
-        print_header("Create New Job")
         job_options = [
             "✨ Brand New Feature (Design-First)",
             "🛠️ Iterating / Small Refactor (Plan or Quick Mode)",
@@ -815,7 +950,18 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
             "🎨 Design Prototype (Can promote to Implementation)",
             "🧪 Test Coverage Audit (Maintenance)"
         ]
-        choice = prompt_radio("Select Job Type:", job_options, job_options[1])
+        
+        import textwrap
+        try:
+            cols, _ = os.get_terminal_size()
+        except:
+            cols = 80
+        cols = max(cols, 40)
+        
+        desc_text = "Select the type of AI job to create. This configures the planning workflow, prompting strategies, and verification checkpoints (e.g. Design-First mode for brand new features, or Quick mode for minor refactors)."
+        desc_lines = [f"  \033[90m{line}\033[0m" for line in textwrap.wrap(desc_text, width=cols - 6)]
+        
+        choice = prompt_radio("Select Job Type", job_options, job_options[1], description=desc_lines)
 
         # Map back to internal type
         job_type = "feature"
@@ -842,7 +988,9 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
 
         spec_file = None
         if job_type != "quick":
-            if prompt_confirm("Load spec from a local file or web address? (useful for large multi-page docs)", default=False):
+            desc_text = "Would you like to load the feature specification from a local file or web address? This is useful for importing large multi-page documents."
+            desc_lines = [f"  \033[90m{line}\033[0m" for line in textwrap.wrap(desc_text, width=cols - 6)]
+            if prompt_confirm("Load External Spec?", default=False, description=desc_lines):
                 print("\n    (Enter path to local file OR a web URL, or Enter to cancel; e.g. docs/spec.md or https://...)")
                 spec_file = prompt_input("Spec Path/URL:", placeholder="docs/spec.md or https://example.com/spec.md", field_below=True)
                 if not spec_file:
@@ -1374,28 +1522,29 @@ def handle_tooling_tests(session_allowed_machines: list[str], session_allowed_mo
             print_header("Tooling & AI Test Menu")
             
             print("\n  \033[1;90m--- AI INTEGRATION (Xcode/Swift) ---\033[0m")
-            print("  [\033[1;96m0\033[0m] Full Integrated Workflow (Swift-to-Python Bridge)")
-            print("  [\033[1;96m1\033[0m] Tooling & Build Logic   (Xcode build/indexing)")
-            print("  [\033[1;96m2\033[0m] Machine Probing Tests   (SSH & Fleet Environment)")
+            print_wrapped_kv("  [\033[1;96m0\033[0m] ", "Full Integrated Workflow (Swift-to-Python Bridge)")
+            print_wrapped_kv("  [\033[1;96m1\033[0m] ", "Tooling & Build Logic (Xcode build/indexing)")
+            print_wrapped_kv("  [\033[1;96m2\033[0m] ", "Machine Probing Tests (SSH & Fleet Environment)")
 
             print("\n  \033[1;90m--- WORKFLOW SMOKE TESTS (Mock) ---\033[0m")
-            print("  [\033[1;96m3\033[0m] Resume & State Recovery (End-to-End Simulation)")
+            print_wrapped_kv("  [\033[1;96m3\033[0m] ", "Resume & State Recovery (End-to-End Simulation)")
 
             print("\n  \033[1;90m--- SCRIPT LOGIC (Python Unit) ---\033[0m")
-            print("  [\033[1;96m4\033[0m] Full Python Test Suite  (All isolated unit tests)")
-            print("  [\033[1;96m5\033[0m] Console UI Smoke Tests  (Menu navigation & UI logic)")
-            print("  [\033[1;96m6\033[0m] Model Registry & Discovery (routing aliases, sync, fallbacks)")
+            print_wrapped_kv("  [\033[1;96m4\033[0m] ", "Full Python Test Suite (All isolated unit tests)")
+            print_wrapped_kv("  [\033[1;96m5\033[0m] ", "Console UI Smoke Tests (Menu navigation & UI logic)")
+            print_wrapped_kv("  [\033[1;96m6\033[0m] ", "Model Registry & Discovery (routing aliases, sync, fallbacks)")
 
             print("\n  \033[1;90m--- FLEET OPERATIONS (Live) ---\033[0m")
-            print("  [\033[1;96m7\033[0m] Fleet Health Report     (all machines report)")
-            print("  [\033[1;96m8\033[0m] GitHub Metadata Sync    (status & PR cleanup)")
-            print("  [\033[1;96m9\033[0m] Local Model Pings       (connectivity & logs)")
-            print("  [\033[1;96m10\033[0m] Build & Delivery       (Live Firebase upload)")
+            print_wrapped_kv("  [\033[1;96m7\033[0m] ", "Fleet Health Report (all machines report)")
+            print_wrapped_kv("  [\033[1;96m8\033[0m] ", "GitHub Metadata Sync (status & PR cleanup)")
+            print_wrapped_kv("  [\033[1;96m9\033[0m] ", "Local Model Pings (connectivity & logs)")
+            print_wrapped_kv("  [\033[1;96m10\033[0m] ", "Build & Delivery (Live Firebase upload)")
 
             print("\n  \033[1;90m--- ENVIRONMENT & SETUP ---\033[0m")
-            print("  [\033[1;96mP\033[0m] Plug & Play Self-Tests  (Setup logic verification)")
+            print_wrapped_kv("  [\033[1;96mP\033[0m] ", "Plug & Play Self-Tests (Setup logic verification)")
 
-            print("\n[\033[1;91mB\033[0m] Back")
+            print()
+            print_wrapped_kv("  [\033[1;91mB\033[0m] ", "Back")
             
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
@@ -2632,7 +2781,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
 
                     try:
                         footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
-                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
+                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             job["allowed_models"] = [value_map[label] for label in new_labels]
                             save_job(job)
@@ -3452,7 +3601,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                         key_color = "\033[1;96m" # Cyan
                         key_ready = False
                 else:
-                    raw_key_status = "CLI Only"
+                    raw_key_status = "Local CLI"
                     key_color = "\033[90m"
 
                 key_display = f"{key_color}{raw_key_status:11}\033[0m"
@@ -3473,13 +3622,13 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             
             # Single-column Layout for Actions
             print(f"  \033[1;96mFallback Credentials\033[0m")
-            print(f"    \033[90m(API keys stored locally; used when CLI logins are expired or in headless/CI environments)\033[0m")
+            print_wrapped_description("(API keys stored locally; used when CLI logins are expired or in headless/CI environments)", indent_size=4)
             print(f"    [\033[1;92mG\033[0m] Update Antigravity credential")
             print(f"    [\033[1;92mA\033[0m] Update Anthropic credential")
             print(f"    [\033[1;92mO\033[0m] Update OpenAI credential")
 
             print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
-            print(f"    \033[90m(Authenticates provider CLIs directly using browser OAuth for local development)\033[0m")
+            print_wrapped_description("(Authenticates provider CLIs directly using browser OAuth for local development)", indent_size=4)
             print(f"    [\033[1;92m1\033[0m] Login Antigravity")
             print(f"    [\033[1;92m2\033[0m] Login Claude")
             print(f"    [\033[1;92m3\033[0m] Login Codex")
@@ -3487,7 +3636,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             print(f"    [\033[1;92m5\033[0m] Login OpenCode")
 
             print_header("MANAGEMENT")
-            print(f"    \033[90m(Clear configured API keys or exit the provider setup submenu)\033[0m")
+            print_wrapped_description("(Clear configured API keys or exit the provider setup submenu)", indent_size=4)
             print(f"    [\033[1;91mC\033[0m] Clear saved credentials")
             print(f"    [\033[1;91mB\033[0m] Back")
 
@@ -3560,6 +3709,9 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
 def handle_system_health(session_allowed_machines: list[str], session_allowed_models: list[str], status_bar: StatusBar | None = None):
     # 1. Local Prerequisites & Environment (formerly check_setup.py)
     run_script("check_setup.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt="")
+    
+    input("\n\033[1;96mTap Enter to proceed to Fleet Dependency Matrix...\033[0m")
+    
     sys.stdout.write("\033[r\033[2J\033[H\033[?25h")
     sys.stdout.flush()
     
@@ -3613,21 +3765,21 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
         readiness = "complete" if not missing and reachable else "partial" if reachable else "offline"
 
         print(f"\n  \033[90m┌─\033[0m \033[1;97m{name}\033[0m")
-        print(f"  \033[90m│\033[0m  Status:    {status}")
-        print(f"  \033[90m│\033[0m  Coverage:  {readiness_color}{installed_count}/{total_count} tools, {readiness}\033[0m")
+        print_box_line_rich("Status:    ", status)
+        print_box_line_rich("Coverage:  ", f"{readiness_color}{installed_count}/{total_count} tools, {readiness}\033[0m")
         if probe.get("repo_path") and not probe.get("repo_path_ok", True):
-            print(f"  \033[90m│\033[0m  Repo Path: \033[1;91mMISSING\033[0m \033[90m{probe.get('repo_path')}\033[0m")
+            print_box_line_rich("Repo Path: ", f"\033[1;91mMISSING\033[0m \033[90m{probe.get('repo_path')}\033[0m")
         elif probe.get("repo_path"):
-            print(f"  \033[90m│\033[0m  Repo Path: \033[92mOK\033[0m \033[90m{probe.get('repo_path')}\033[0m")
+            print_box_line_rich("Repo Path: ", f"\033[92mOK\033[0m \033[90m{probe.get('repo_path')}\033[0m")
         if probe.get("repo_warning"):
-            print(f"  \033[90m│\033[0m  Repo Note: \033[93m{probe.get('repo_warning')}\033[0m")
+            print_box_line_rich("Repo Note: ", f"\033[93m{probe.get('repo_warning')}\033[0m")
         if probe.get("probe_error"):
-            print(f"  \033[90m│\033[0m  Error:     \033[1;91m{probe.get('probe_error')}\033[0m")
-        print(f"  \033[90m│\033[0m  Available: \033[92m{', '.join(installed) if installed else 'none'}\033[0m")
-        print(f"  \033[90m│\033[0m  Missing:   \033[1;91m{', '.join(missing) if missing else 'none'}\033[0m")
+            print_box_line_rich("Error:     ", f"\033[1;91m{probe.get('probe_error')}\033[0m")
+        print_box_line_rich("Available: ", f"\033[92m{', '.join(installed) if installed else 'none'}\033[0m")
+        print_box_line_rich("Missing:   ", f"\033[1;91m{', '.join(missing) if missing else 'none'}\033[0m")
         mcp_plugins = probe.get("mcp_plugins", {})
         optional = [label for label, active in mcp_plugins.items() if active]
-        print(f"  \033[90m│\033[0m  Optional:  \033[96m{', '.join(optional) if optional else 'none'}\033[0m")
+        print_box_line_rich("Optional:  ", f"\033[96m{', '.join(optional) if optional else 'none'}\033[0m")
         print(f"  \033[90m└─\033[0m")
         
     print(f"\n\033[90mTotal Machines in session: {len(machines)}\033[0m")
@@ -3635,7 +3787,7 @@ def handle_system_health(session_allowed_machines: list[str], session_allowed_mo
 
 def handle_fleet_hygiene(session_allowed_machines):
     from probe_machine import load_machines, probe_machine
-    print_header("Zombie Purge & Cache Cleanup")
+    print_header("Purge Processes")
 
     print("\033[1;97mWhat does this do?\033[0m")
     print(" This tool scans your fleet for 'Zombie' processes—builds or simulators that")
@@ -3672,8 +3824,26 @@ def handle_fleet_hygiene(session_allowed_machines):
         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
         return
 
-    print(f"\nFound {len(all_stale)} potential zombie processes.")
-    if prompt_confirm("\033[1;91mPurge listed processes and clear DerivedData?\033[0m", default=False):
+    description = [
+        "This tool terminates zombie processes (running > 12h) and clears build caches.",
+        "",
+        "\033[1;92mBenefits:\033[0m",
+        "  ✅ Frees up system memory (RAM) and CPU cores.",
+        "  ✅ Clears local DerivedData to resolve 'ghost' compiler errors.",
+        "",
+        "\033[1;91mRisks:\033[0m",
+        "  ⚠️  Will forcefully terminate active old Xcode builds.",
+        "  ⚠️  First build after purge will be slower (re-indexing cache).",
+        "",
+        "\033[1;97mPotential Zombie Processes Found:\033[0m"
+    ]
+    for m, p in all_stale:
+        description.append(f"  ❌ \033[1;97m{m['name']:15}\033[0m | PID: {p['pid']:8} | Runtime: {p['etime']:10} | CMD: {p['comm']}")
+    
+    description.append("")
+    description.append("\033[1;91mPurge listed processes and clear DerivedData?\033[0m")
+
+    if prompt_confirm("Purge Processes", default=False, description=description):
         purged = purge_zombie_processes(session_allowed_machines, silent=False)
         print(f"\n✅ Zombie purge & cache cleanup complete. Purged {purged} processes.")
         input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -3786,7 +3956,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
 
             print("\n\033[1;97mActions\033[0m")
             print("  [\033[1;92mA\033[0m] Add Project")
-            print("  [\033[1;92mH\033[0m] Add project help")
+            print("  [\033[1;96mH\033[0m] Help")
             print("  [\033[1;91mB\033[0m] Back")
 
             status_bar.render(at_bottom=True, force=True)
@@ -3803,7 +3973,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             if key == "h":
                 clear_screen()
                 status_bar.set_scroll_region()
-                print_header("Add Project Help")
+                print_header("Help")
                 print("\033[1;97mRecommended\033[0m")
                 print("  Press \033[1;92mA\033[0m from the project menu, then paste or drag the project folder path.")
                 print("  The console will add it to Recent Projects and switch to it after you confirm.\n")
@@ -3960,7 +4130,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
 
                     try:
                         footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
-                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, status_bar=status_bar)
+                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             session_allowed_models = [value_map[label] for label in new_labels]
                         else:
@@ -4036,9 +4206,11 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                         "online_machines": get_online_machines(session_allowed_machines),
                         "allowed_models": session_allowed_models
                     }, sub_menu=True) as status_bar:
+                        status_bar.anchor_to_bottom = False
                         status_bar.set_scroll_region()
                         print_header("Documentation & Architecture Guides")
-                        print("  New here? Start with Getting Started. Use User Guide as the full reference.\n")
+                        print_wrapped_description("New here? Start with Getting Started. Use User Guide as the full reference.", indent_size=2)
+                        print()
                         
                         help_docs = [
                             ORCHESTRATOR_HELP_DOCS_DIR / name
@@ -4073,17 +4245,20 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                                 description = DOC_MENU_DESCRIPTIONS.get(doc.name)
                                 print(f"    [\033[1;96m{next_index:2}\033[0m] {name}")
                                 if description:
-                                    print(f"         \033[90m{description}\033[0m")
+                                    print_wrapped_description(description, indent_size=9)
                                 next_index += 1
                             print()
                         
                         print("    [\033[1;91mB\033[0m] Back")
                         
-                        prompt = get_choice_prompt("Choice:", "(index or B)")
-                        status_bar.render(at_bottom=True, force=True, prompt=prompt)
-                        sub_choice = get_key().strip().lower()
-                        clear_choice_placeholder()
-                        
+                        status_bar.render(at_bottom=True, force=True, prompt=None)
+                        try:
+                            sub_choice = prompt_input("Choice:", placeholder="(index or B)")
+                        except BackException:
+                            break
+                        if not sub_choice:
+                            continue
+                        sub_choice = sub_choice.strip().lower()
                         if sub_choice == "b":
                             break
                         
@@ -4362,7 +4537,8 @@ def handle_instruction_files(session_allowed_machines: list[str] | None = None, 
         "Copilot": ".github/copilot-instructions.md",
         "Ollama": "OLLAMA.md",
         "DeepSeek": "DEEPSEEK.md",
-        "OpenCode": "OPENCODE.md"
+        "OpenCode": "OPENCODE.md",
+        "Qwen": "QWEN.md"
     }
 
     required_links = [
@@ -4404,8 +4580,8 @@ Read these files first and treat them as authoritative:
             status_bar.set_scroll_region()
 
             print_header("Manage CLI Instructions (.md files)")
-            print("  Checks the instruction files used by each AI CLI.")
-            print("  Each file should point agents back to the shared project docs.\n")
+            print_wrapped_description("Checks the instruction files used by each AI CLI. Each file should point agents back to the shared project docs.", indent_size=2)
+            print()
             
             keys = list(cli_files.keys())
             file_statuses = {}
@@ -4435,7 +4611,7 @@ Read these files first and treat them as authoritative:
             if any(s == "invalid" for s in file_statuses.values()):
                 print("    [\033[1;92mR\033[0m] Repair Misconfigured Files")
             
-            print("    [\033[1;92mP\033[0m] Customize Agent Instructions (Planner/Builder/etc)")
+            print("    [\033[1;96mP\033[0m] Customize Agent Instructions (Planner/Builder/etc)")
             print("    [\033[1;91mB\033[0m] Back")
             
             # Anchor prompt to bottom
@@ -4586,39 +4762,39 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
             print_header("Firebase App Distro Health & Settings")
             
             print("\n  \033[1;90m--- SYSTEM CHECKS ---\033[0m")
-            print(f"  Firebase CLI: {cli_status}")
-            print(f"  Account:      {auth_status}")
-            print(f"  Project:      {project_status}")
+            print_wrapped_kv("  Firebase CLI: ", cli_status)
+            print_wrapped_kv("  Account:      ", auth_status)
+            print_wrapped_kv("  Project:      ", project_status)
             
             has_ci_token = "FIREBASE_TOKEN" in os.environ
             if has_ci_token:
-                print(f"  Auth Method:  \033[92mCI TOKEN (Environment)\033[0m")
+                print_wrapped_kv("  Auth Method:  ", "\033[92mCI TOKEN (Environment)\033[0m")
             else:
-                print(f"  Auth Method:  \033[1;96mLocal CLI Session\033[0m")
+                print_wrapped_kv("  Auth Method:  ", "\033[1;96mLocal CLI Session\033[0m")
                 
             print("\n  \033[1;90m--- REQUIRED FILES ---\033[0m")
             if has_gs_info:
-                print(f"  GoogleService-Info.plist: \033[92mEXISTS\033[0m")
-                print(f"  App ID (iOS):             {app_id_status}")
+                print_wrapped_kv("  GoogleService-Info.plist: ", "\033[92mEXISTS\033[0m")
+                print_wrapped_kv("  App ID (iOS):             ", app_id_status)
             else:
-                print(f"  GoogleService-Info.plist: \033[1;91mMISSING\033[0m")
+                print_wrapped_kv("  GoogleService-Info.plist: ", "\033[1;91mMISSING\033[0m")
                 
             if has_export_opts:
-                print(f"  ExportOptions.plist:      \033[92mEXISTS\033[0m")
+                print_wrapped_kv("  ExportOptions.plist:      ", "\033[92mEXISTS\033[0m")
             else:
-                print(f"  ExportOptions.plist:      \033[1;91mMISSING\033[0m")
+                print_wrapped_kv("  ExportOptions.plist:      ", "\033[1;91mMISSING\033[0m")
                 
             print("\n  \033[1;90m--- KEYCHAIN & SIGNING ---\033[0m")
             has_password = "KEYCHAIN_PASSWORD" in os.environ
             pwd_status = "\033[92mAUTOMATED (No UI popups)\033[0m" if has_password else "\033[93mMANUAL (Requires UI prompt)\033[0m"
-            print(f"  Headless Signing: {pwd_status}")
+            print_wrapped_kv("  Headless Signing: ", pwd_status)
             
             print("\n  \033[1;90m--- ACTIONS ---\033[0m")
-            print("    [\033[1;96mL\033[0m] Login to Firebase (Browser)")
-            print("    [\033[1;96mK\033[0m] Configure Headless Signing (Keychain Auto-Unlock)")
-            print("    [\033[1;96mT\033[0m] Test Distribution Script (Dry Run via build delivery)")
-            print("    [\033[1;96mR\033[0m] Refresh Status (Re-run checks)")
-            print("    [\033[1;91mB\033[0m] Back")
+            print_wrapped_kv("    [\033[1;96mL\033[0m] ", "Login to Firebase (Browser)")
+            print_wrapped_kv("    [\033[1;96mK\033[0m] ", "Configure Headless Signing (Keychain Auto-Unlock)")
+            print_wrapped_kv("    [\033[1;96mT\033[0m] ", "Test Distribution Script (Dry Run via build delivery)")
+            print_wrapped_kv("    [\033[1;96mR\033[0m] ", "Refresh Status (Re-run checks)")
+            print_wrapped_kv("    [\033[1;91mB\033[0m] ", "Back")
             
             status_bar.render(at_bottom=True, force=True, prompt=None)
             choice = get_key().strip().lower()
@@ -4654,7 +4830,17 @@ def handle_keychain_setup(status_bar: StatusBar):
         "Cancel"
     ]
     
-    choice = prompt_radio("Choose Keychain Setup Mode:", options, default=options[0], clear_screen=False)
+    import textwrap
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+    
+    desc_text = "Select how to unlock the macOS keychain during the build and distribution process. Storing the password enables automated headless/remote builds, while manual mode prompts for your password dynamically."
+    desc_lines = [f"  \033[90m{line}\033[0m" for line in textwrap.wrap(desc_text, width=cols - 6)]
+    
+    choice = prompt_radio("Choose Keychain Setup Mode", options, default=options[0], clear_screen=True, description=desc_lines)
     
     if "Auto" in choice:
         print("\n\033[1;96mEnter your macOS login password (it will be saved to .secrets/project-secrets.zsh):\033[0m")
@@ -4693,11 +4879,11 @@ def handle_import_email_recipients(status_bar: StatusBar, settings_path: Path, s
     print_header("Import Recipients from CSV")
 
     print("\033[1;97mWhat this does\033[0m")
-    print("  Scans a CSV or text file for email addresses and adds any new unique recipients.")
-    print("  The file does not need a specific column name; every email-looking value is imported.\n")
+    print_wrapped_description("Scans a CSV or text file for email addresses and adds any new unique recipients. The file does not need a specific column name; every email-looking value is imported.", indent_size=2)
+    print()
 
     print("\033[1;97mFile Path\033[0m")
-    print("  Drag and drop a CSV file here, or type a path manually.")
+    print_wrapped_description("Drag and drop a CSV file here, or type a path manually.", indent_size=2)
     print("  Examples:")
     print("    \033[90m~/Downloads/testers.csv\033[0m")
     print("    \033[90m./emails.csv\033[0m\n")
@@ -4753,6 +4939,12 @@ def handle_import_email_recipients(status_bar: StatusBar, settings_path: Path, s
     get_key()
     clear_choice_placeholder()
 
+def is_valid_email(email: str) -> bool:
+    """Verifies if the email matches a standard valid format."""
+    import re
+    pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+    return bool(re.match(pattern, email))
+
 def handle_email_settings(session_allowed_machines: list[str], session_allowed_models: list[str]):
     settings_path = CONFIG_DIR / "settings.json"
     settings = {}
@@ -4782,8 +4974,8 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
             status_bar.set_scroll_region()
 
             print_header("Email Notification Settings")
-            print("  \033[90mConfigures email alerts for job completions, build delivery updates, failures,\033[0m")
-            print("  \033[90mor when a running task is paused and requires human review.\033[0m\n")
+            print_wrapped_description("Configures email alerts for job completions, build delivery updates, failures, or when a running task is paused and requires human review.", indent_size=2)
+            print()
             if provider == "resend":
                 sender_display = f"{settings.get('resend_from_email', 'NOT SET')} (via Resend)"
             else:
@@ -4815,17 +5007,35 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                 # Use run_script to execute notify.py
                 run_script("notify.py", [f"Test Notification ({provider})", f"This is a test message from the AI Orchestrator console using {provider}.", "test-job-id"], session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "a":
-                status_bar.render(at_bottom=True, force=True)
-                try:
-                    email = prompt_input("Enter recipient email address:", placeholder="(or Enter to cancel)", field_below=True)
-                except BackException:
+                while True:
+                    clear_screen()
+                    status_bar.set_scroll_region()
+                    print_header("Add Recipient Email")
+                    print_wrapped_description("Add a new email address to the notification list to receive job updates, failures, and tasks requiring manual review.", indent_size=2)
+                    print()
+                    try:
+                        email = prompt_input("Enter recipient email address:", placeholder="(or Enter to cancel)", field_below=True)
+                    except BackException:
+                        email = ""
+                        break
+                    
+                    if not email:
+                        break
+                    
+                    if is_valid_email(email):
+                        break
+                    else:
+                        print(f"\n    \033[1;91m⚠️  Error: Invalid email format '{email}'\033[0m")
+                        print("    Please enter a valid email address (e.g. user@example.com).")
+                        input("\n\033[1;96mTap Enter to try again...\033[0m")
+
+                if not email:
                     continue
-                if not email: continue
 
                 emails.append(email)
                 settings["notification_emails"] = emails
                 write_json(settings_path, settings)
-                print(f"✅ Added: {email}")
+                print(f"\n✅ Added: {email}")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i":
                 handle_import_email_recipients(status_bar, settings_path, settings, emails)
@@ -4845,7 +5055,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    1. Go to: \033[4;96mhttps://myaccount.google.com/apppasswords\033[0m")
                     print("    2. Log in and create a name (e.g. 'AI Orchestrator')")
                     print("    3. Copy the 16-character code generated.")
-                    print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
+                    print_wrapped_description("(Leave blank and press Enter to skip/keep current)", indent_size=4)
 
                     new_smtp = prompt_input("Gmail Address:", field_below=True)
                     new_pass = prompt_password("🔑 App Password:", placeholder="(enter to skip)")
@@ -4856,12 +5066,12 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
                     print("    1. Go to: \033[4;96mhttps://resend.com/api-keys\033[0m")
                     print("    2. Create a new API key with 'Sending' permissions.")
                     print("    3. If you haven't verified a domain, use your Resend login email.")
-                    print("    \033[90m(Leave blank and press Enter to skip/keep current)\033[0m")
+                    print_wrapped_description("(Leave blank and press Enter to skip/keep current)", indent_size=4)
 
                     new_key = prompt_password("Resend API Key:", placeholder="(enter to skip)")
-                    print("    \033[90m(Must be a verified domain on Resend, or your login email)\033[0m")
+                    print_wrapped_description("(Must be a verified domain on Resend, or your login email)", indent_size=4)
                     new_from = prompt_input("From Email:", field_below=True)
-                    print("    \033[90m(The name that appears in the inbox, e.g. 'AI Orchestrator')\033[0m")
+                    print_wrapped_description("(The name that appears in the inbox, e.g. 'AI Orchestrator')", indent_size=4)
                     new_name = prompt_input("Display Name:", field_below=True)
                     if new_key: settings["resend_api_key"] = new_key
                     if new_from: settings["resend_from_email"] = new_from

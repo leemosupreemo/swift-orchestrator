@@ -1,0 +1,12 @@
+{
+  "last_session_id": "d7549ea3-cbc0-41ab-b889-3a6b5aa6f5d5",
+  "last_event_key": "d7549ea3-cbc0-41ab-b889-3a6b5aa6f5d5:transcript:41ee78f1f85b80602dc28f051d60ebeddc7ca4449d20af58131a08300b92e67a",
+  "last_prompted_session_id": "",
+  "last_reason": "short-session",
+  "last_prompted_at": "",
+  "last_user_message_count": 0,
+  "last_actionable_message_count": 0,
+  "deep_interview_lock_active": false,
+  "deep_interview_lock_source": "/Users/neemaameskin/Projects/swift-orchestrator/.omg/state/deep-interview.json",
+  "updated_at": "2026-06-14T22:39:06.347Z"
+}
