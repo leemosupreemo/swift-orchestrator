@@ -169,8 +169,56 @@ MODELS = [
         required_clis=["codex"]
     ),
     ModelMetadata(
+        id="gpt-4.5-preview",
+        family="openai",
+        tier=ModelTier.EXTREME,
+        capabilities=[ModelCapability.REASONING, ModelCapability.CODING, ModelCapability.CONTEXT],
+        cost_factor=8.0,
+        required_clis=["codex"]
+    ),
+    ModelMetadata(
+        id="gpt-4o",
+        family="openai",
+        tier=ModelTier.HIGH,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED, ModelCapability.VISION],
+        cost_factor=3.0,
+        required_clis=["codex"]
+    ),
+    ModelMetadata(
+        id="gpt-4o-mini",
+        family="openai",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.5,
+        required_clis=["codex"]
+    ),
+    ModelMetadata(
+        id="o1",
+        family="openai",
+        tier=ModelTier.EXTREME,
+        capabilities=[ModelCapability.REASONING, ModelCapability.CODING],
+        cost_factor=10.0,
+        required_clis=["codex"]
+    ),
+    ModelMetadata(
+        id="o1-mini",
+        family="openai",
+        tier=ModelTier.MEDIUM,
+        capabilities=[ModelCapability.REASONING, ModelCapability.SPEED],
+        cost_factor=1.5,
+        required_clis=["codex"]
+    ),
+    ModelMetadata(
+        id="o3-mini",
+        family="openai",
+        tier=ModelTier.MEDIUM,
+        capabilities=[ModelCapability.REASONING, ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=1.5,
+        required_clis=["codex"]
+    ),
+    ModelMetadata(
         id="deepseek",
-        family="deepseek",
+        family="ollama",
         tier=ModelTier.HIGH,
         capabilities=[ModelCapability.CODING, ModelCapability.REASONING],
         cost_factor=0.0,
@@ -189,7 +237,7 @@ MODELS = [
         family="opencode",
         tier=ModelTier.LOW,
         capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
-        cost_factor=1.0,
+        cost_factor=0.0,
         aliases=["opencode", "big-pickle"],
         required_clis=["opencode"]
     ),
@@ -199,6 +247,52 @@ MODELS = [
         tier=ModelTier.LOW,
         capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
         cost_factor=0.0,
+        aliases=["deepseek-v4-flash-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/laguna-s-2.1-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["laguna-s-2.1-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/ling-3.0-flash-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["ling-3.0-flash-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/longcat-2.0-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["longcat-2.0-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/mimo-v2.5-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["mimo-v2.5-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/minimax-m2.5-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["minimax-m2.5-free"],
         required_clis=["opencode"]
     ),
     ModelMetadata(
@@ -207,6 +301,25 @@ MODELS = [
         tier=ModelTier.LOW,
         capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
         cost_factor=0.0,
+        aliases=["nemotron-3-super-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/nemotron-3-ultra-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["nemotron-3-ultra-free"],
+        required_clis=["opencode"]
+    ),
+    ModelMetadata(
+        id="opencode/north-mini-code-free",
+        family="opencode",
+        tier=ModelTier.LOW,
+        capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
+        cost_factor=0.0,
+        aliases=["north-mini-code-free"],
         required_clis=["opencode"]
     ),
     ModelMetadata(
@@ -215,6 +328,7 @@ MODELS = [
         tier=ModelTier.LOW,
         capabilities=[ModelCapability.CODING, ModelCapability.SPEED],
         cost_factor=0.0,
+        aliases=["qwen3.6-plus-free"],
         required_clis=["opencode"]
     ),
     ModelMetadata(
@@ -368,14 +482,18 @@ def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
     caps = [ModelCapability.CODING, ModelCapability.REASONING]
     
     # Tier mapping
-    if any(x in m_id for x in ["opus", "o1", "gpt-5", "extreme"]):
-        tier = ModelTier.EXTREME
+    if any(x in m_id for x in ["opus", "o1", "o3", "o4", "gpt-5", "extreme"]):
+        tier = ModelTier.LOW if "mini" in m_id else ModelTier.EXTREME
     elif any(x in m_id for x in ["sonnet", "pro", "gpt-4", "high"]):
-        tier = ModelTier.HIGH
+        tier = ModelTier.LOW if "mini" in m_id else ModelTier.HIGH
     elif any(x in m_id for x in ["haiku", "flash", "gpt-3.5", "medium"]):
         tier = ModelTier.MEDIUM
     elif any(x in m_id for x in ["mini", "lite", "small", "low"]):
         tier = ModelTier.LOW
+
+    aliases = []
+    if family == "opencode" and model_id.startswith("opencode/"):
+        aliases.append(model_id.split("opencode/", 1)[1])
         
     # Capability mapping
     if any(x in m_id for x in ["vision", "visual"]):
@@ -386,7 +504,7 @@ def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
         caps.append(ModelCapability.SPEED)
         
     # Cost factor (rough guess)
-    if family == "ollama":
+    if family == "ollama" or "-free" in m_id or m_id.endswith("free"):
         cost = 0.0
     else:
         cost = 1.0
@@ -405,6 +523,7 @@ def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
         tier=tier,
         capabilities=list(set(caps)),
         cost_factor=cost,
+        aliases=aliases,
         required_clis=[cli],
         api_model_id=model_id
     )
@@ -439,6 +558,21 @@ def parse_agy_models_output(output: str) -> list[str]:
 
     return sorted(set(models))
 
+def parse_opencode_models_output(output: str) -> list[str]:
+    """Extracts model IDs from `opencode models` text output."""
+    models = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith(("available", "models", "error", "usage")):
+            continue
+        line = line.lstrip("-*• \t")
+        token = line.split()[0].strip("`'\",")
+        if token:
+            if not token.startswith("opencode/") and "/" not in token:
+                token = f"opencode/{token}"
+            models.append(token)
+    return sorted(set(models))
+
 def summarize_cli_error(output: str) -> str:
     """Returns the most actionable single line from CLI output."""
     lines = [line.strip() for line in output.splitlines() if line.strip()]
@@ -456,7 +590,7 @@ def summarize_cli_error(output: str) -> str:
     return lines[0]
 
 def discover_from_sources_with_details() -> DiscoveryResult:
-    """Pings various provider APIs to find new models."""
+    """Pings various provider APIs and CLIs to find new models."""
     import urllib.request
     import json
     discovered = []
@@ -471,9 +605,10 @@ def discover_from_sources_with_details() -> DiscoveryResult:
                                          headers={"Authorization": f"Bearer {openai_key}"})
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read())
+                exclude_prefixes = ("dall-e", "whisper", "tts", "text-embedding", "babbage", "davinci", "omni-moderation")
                 for m in data.get("data", []):
                     mid = m["id"]
-                    if mid.startswith(("gpt-", "o1-")):
+                    if (mid.startswith(("gpt-", "o1-", "o3-", "o4-", "chatgpt-", "codex-")) or any(x in mid.lower() for x in ["gpt", "o1", "o3", "o4"])) and not any(mid.startswith(x) for x in exclude_prefixes):
                         discovered.append(heuristic_classify(mid, "openai"))
             details.append(f"OpenAI API: found {len(discovered) - before} model(s).")
         except Exception as e:
@@ -528,7 +663,24 @@ def discover_from_sources_with_details() -> DiscoveryResult:
         details.append(f"Ollama: found {len(discovered) - before} model(s).")
     except Exception as e:
         details.append(f"Ollama: unavailable ({e}).")
-    
+
+    # 5. OpenCode CLI
+    if shutil.which("opencode"):
+        before = len(discovered)
+        try:
+            res = subprocess.run(["opencode", "models"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                for mid in parse_opencode_models_output(res.stdout):
+                    discovered.append(heuristic_classify(mid, "opencode"))
+                details.append(f"OpenCode CLI: found {len(discovered) - before} model(s).")
+            else:
+                msg = summarize_cli_error(f"{res.stderr}\n{res.stdout}")
+                details.append(f"OpenCode CLI: unavailable ({msg}).")
+        except Exception as e:
+            details.append(f"OpenCode CLI: failed ({e}).")
+    else:
+        details.append("OpenCode CLI: skipped (opencode not installed or not on PATH).")
+
     return DiscoveryResult(models=discovered, details=details)
 
 def discover_from_sources() -> list[ModelMetadata]:

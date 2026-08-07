@@ -246,7 +246,9 @@ def get_llm_env() -> dict[str, str]:
                 "gemini_api_key": "GEMINI_API_KEY",
                 "anthropic_api_key": "ANTHROPIC_API_KEY",
                 "codex_api_key": "CODEX_API_KEY",
-                "openai_api_key": "OPENAI_API_KEY"
+                "openai_api_key": "OPENAI_API_KEY",
+                "ollama_api_key": "OLLAMA_API_KEY",
+                "ollama_host": "OLLAMA_HOST"
             }
             
             for s_key, e_var in key_map.items():

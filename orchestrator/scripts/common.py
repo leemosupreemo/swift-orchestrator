@@ -477,6 +477,63 @@ def prompt_multiline(prompt: str) -> str:
     except EOFError:
         return ""
 
+def print_wrapped_option(option_str: str, indent_size: int = 4, subsequent_indent_size: int = 8) -> None:
+    """Prints a menu option line, preserving ANSI colors and wrapping lines with a deeper subsequent indent."""
+    try:
+        cols, _ = os.get_terminal_size()
+    except Exception:
+        cols = 80
+    cols = max(cols, 40)
+
+    import re
+    token_pattern = re.compile(r'(\x1b\[[0-9;]*[mK])|(\s+)|([^\s\x1b]+)')
+    tokens = [m.group(0) for m in token_pattern.finditer(option_str)]
+
+    lines = []
+    current_line_parts = []
+    current_line_plain_len = 0
+    active_ansi_state = ""
+
+    first_indent_str = " " * indent_size
+    subsequent_indent_str = " " * subsequent_indent_size
+
+    max_width = max(cols - indent_size - 2, 20)
+
+    for token in tokens:
+        if token.startswith('\x1b'):
+            current_line_parts.append(token)
+            if token == '\x1b[0m':
+                active_ansi_state = ""
+            else:
+                active_ansi_state = token
+        elif token.isspace():
+            if current_line_parts:
+                current_line_parts.append(token)
+                current_line_plain_len += len(token)
+        else:
+            word_len = len(token)
+            if current_line_plain_len + word_len > max_width and current_line_plain_len > 0:
+                if active_ansi_state:
+                    current_line_parts.append('\x1b[0m')
+                lines.append("".join(current_line_parts))
+
+                current_line_parts = []
+                max_width = max(cols - subsequent_indent_size - 2, 20)
+                if active_ansi_state:
+                    current_line_parts.append(active_ansi_state)
+                current_line_parts.append(token)
+                current_line_plain_len = word_len
+            else:
+                current_line_parts.append(token)
+                current_line_plain_len += word_len
+
+    if current_line_parts:
+        lines.append("".join(current_line_parts))
+
+    for i, line in enumerate(lines):
+        ind = first_indent_str if i == 0 else subsequent_indent_str
+        print(f"{ind}{line}")
+
 def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     """Interactive password input that shows asterisks instead of clear text."""
     if not sys.stdin.isatty():
@@ -816,7 +873,10 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             # 2. Print options
             for i, opt in enumerate(options):
                 if opt.startswith("---"):
-                    output.append(f"  \033[1;90m{opt}\033[0m")
+                    if opt.strip() == "---":
+                        output.append("")
+                    else:
+                        output.append(f"  \033[1;90m{opt}\033[0m")
                     continue
                 cursor = "> " if i == idx else "  "
                 checked = "[\033[1;96mx\033[0m]" if i in selected_indices else "[ ]"

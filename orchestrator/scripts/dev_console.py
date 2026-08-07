@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -218,16 +218,21 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
     - details_map: Map of display label -> list of detail strings
     """
     models = get_all_models()
-    
+
+    def get_effective_family(m: ModelMetadata) -> str:
+        if m.family == "ollama" or "ollama" in m.required_clis:
+            return "ollama"
+        return m.family
+
     # Sort by Family, then Tier (Extreme < High < Medium < Low)
-    sorted_models = sorted(models, key=lambda m: (m.family, m.tier.value))
+    sorted_models = sorted(models, key=lambda m: (get_effective_family(m), m.tier.value, m.id))
     
     family_display_names = {
         "claude": "ANTHROPIC (Claude)",
         "gemini": "GOOGLE (Antigravity)",
         "openai": "OPENAI (GPT)",
         "opencode": "OPENCODE",
-        "deepseek": "DEEPSEEK (Ollama)",
+        "ollama": "OLLAMA (Local Models)",
         "copilot": "GITHUB (Copilot)",
         "codex": "OPENAI (Legacy)"
     }
@@ -316,18 +321,13 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
     options = []
     value_map = {}
     details_map = {}
+    primary_families = {"claude", "gemini", "openai", "opencode", "ollama", "copilot"}
+    enabled_families = set()
     
     current_family = None
     for m in sorted_models:
-        if m.family != current_family:
-            current_family = m.family
-            name = family_display_names.get(current_family, current_family.upper())
-            options.append(f"--- {name} ---")
+        eff_fam = get_effective_family(m)
 
-        tier_str = m.tier.name.capitalize()
-        alias_info = f" (Standard)" if m.aliases else ""
-        effort_info = f" ({m.reasoning_effort})" if m.reasoning_effort else ""
-        
         # Check if the model family has credentials configured
         has_api_key = False
         if m.family == "gemini":
@@ -367,20 +367,42 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         # Overall readiness
         is_ready = (cli_installed and cli_authed) or has_api_key
 
+        # Dynamically hide models/sections the user does not have access to
+        if not is_ready:
+            continue
+
+        enabled_families.add(eff_fam)
+
+        if eff_fam != current_family:
+            if current_family is not None:
+                options.append("---")
+            current_family = eff_fam
+            name = family_display_names.get(current_family, current_family.upper())
+            options.append(f"--- {name} ---")
+
+        display_id = m.id.split("opencode/", 1)[1] if m.id.startswith("opencode/") else m.id
+
+        is_free = (m.cost_factor == 0.0 or "-free" in m.id or m.id.endswith("free"))
+        free_tag = " \033[1;92m(Free)\033[0m" if is_free else ""
+
         # Format label with suffix status
         status_suffix = ""
         if not cli_installed:
             status_suffix = " \033[1;90m[Not Installed]\033[0m"
+        elif missing_ollama_model:
+            status_suffix = " \033[1;90m[Not Downloaded]\033[0m"
         elif not is_ready:
             status_suffix = " \033[1;91m[Not Enabled]\033[0m"
 
-        label = f"{m.id}{status_suffix}"
+        label = f"{display_id}{free_tag}{status_suffix}"
         
         options.append(label)
         value_map[label] = m.id
 
         if not cli_installed:
             access_str = "\033[1;90mNot installed\033[0m"
+        elif missing_ollama_model:
+            access_str = f"\033[1;90mNot downloaded (run 'ollama pull {missing_ollama_model}')\033[0m"
         elif is_ready:
             access_str = "\033[92mReady\033[0m"
         else:
@@ -398,14 +420,17 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
             credential_sources.append("CLI login/local model")
         credential_str = ", ".join(credential_sources) if credential_sources else "none detected"
         
+        cost_str = "\033[1;92m0.0x (Free)\033[0m" if is_free else f"\033[90m{m.cost_factor:.1f}x\033[0m"
+        tier_str = m.tier.name.capitalize()
+
         details = [
-            f"\033[1;97mModel:\033[0m        \033[90m{m.id}\033[0m",
+            f"\033[1;97mModel:\033[0m        \033[90m{display_id}\033[0m",
             f"\033[1;97mAccess:\033[0m       {access_str}",
             f"\033[1;97mProvider:\033[0m     \033[90m{m.family.capitalize()}\033[0m",
             f"\033[1;97mBackend:\033[0m      \033[90m{cli_str}\033[0m",
             f"\033[1;97mCredentials:\033[0m  \033[90m{credential_str}\033[0m",
             f"\033[1;97mTier:\033[0m         \033[90m{tier_str}\033[0m",
-            f"\033[1;97mCost:\033[0m         \033[90m{m.cost_factor:.1f}x\033[0m",
+            f"\033[1;97mCost:\033[0m         {cost_str}",
             f"\033[1;97mCapabilities:\033[0m \033[90m{', '.join([c.value.capitalize() for c in m.capabilities])}\033[0m"
         ]
 
@@ -413,7 +438,7 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
             ollama_model = required_ollama_model_id(m.id)
             installed = ollama_model in get_installed_ollama_models()
             state = "\033[92minstalled\033[0m" if installed else "\033[1;91mmissing\033[0m"
-            details.append(f"\033[1;97mLocal model:\033[0m  {state} \033[90m({ollama_model})\033[0m")
+            details.append(f"\033[1;97mOllama Model:\033[0m \033[90m{ollama_model}\033[0m ({state})")
         
         if not cli_installed:
             details.append(f"\033[1;91mWarning: Missing required CLI '{missing_cli}'\033[0m")
@@ -429,7 +454,18 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
             
         details_map[label] = details
         
-    return options, value_map, details_map
+    if not options:
+        options = ["--- NO ACCESSIBLE MODELS ---", "No active CLI logins or API keys found."]
+        details_map["No active CLI logins or API keys found."] = [
+            "\033[1;91mNo usable models detected.\033[0m",
+            "\033[90mGo to Configuration > Manage LLM API Keys to sign in or add API keys.\033[0m"
+        ]
+
+    enabled_count = len(enabled_families & primary_families)
+    total_count = len(primary_families)
+    services_summary = f"{enabled_count}/{total_count}"
+
+    return options, value_map, details_map, services_summary
 
 def print_model_selection_loading(title: str, status_bar: StatusBar | None = None):
     """Show the model selection screen before running slower availability checks."""
@@ -2764,7 +2800,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             elif choice == "o":
                 open_action_screen("Select LLM Models")
                 while True:
-                    options, value_map, details_map = run_with_loading_screen(
+                    options, value_map, details_map, service_summary = run_with_loading_screen(
                         "Override LLM Models for Job",
                         [
                             "\n\033[90mChecking model availability from local CLIs and configured API keys...\033[0m",
@@ -2780,8 +2816,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     curr_defaults = resolve_model_selection_defaults(curr_allowed_ids, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
-                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
+                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. To manage available provider models or add API keys, press [\033[93mK\033[0m] for Key Management"
+                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             job["allowed_models"] = [value_map[label] for label in new_labels]
                             save_job(job)
@@ -2793,12 +2830,13 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     except KeyInterruptException as exc:
                         if exc.key == "b":
                             break
-                        if exc.key in ["r", "d"]:
-                            live = (exc.key == "d")
+                        elif exc.key == "k":
+                            handle_api_keys(session_allowed_machines, curr_allowed_ids)
+                            continue
+                        elif exc.key in ["r", "d"]:
                             from model_registry import sync_models
-                            action = "Syncing with registry..." if not live else "Pinging provider APIs..."
-                            print(f"\n\n📡 {action}")
-                            success, msg = sync_models(live_discovery=live)
+                            print("\n\n📡 Scanning local CLIs (Ollama, OpenCode) and provider APIs for new models...")
+                            success, msg = sync_models(live_discovery=True)
                             if success:
                                 print(f"✅ {msg}")
                             else:
@@ -3527,105 +3565,93 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             status_bar.set_scroll_region()
 
             print_header("AI Provider Access")
-            print("\033[90mAccess is checked through provider CLIs first; saved credentials are fallback only.\033[0m")
-            print("\033[90mColumns:\033[0m")
-            print("  • \033[97mCLI Readiness\033[0m : Status of the local CLI executable (Signed in, CLI ready, Not installed, etc.)")
-            print("  • \033[97mCredentials\033[0m   : API Key status (Saved in settings, set via Env Var, or using active CLI Login)")
-            print("  • \033[97mAccess\033[0m        : Overall usability status (READY if CLI is authenticated OR an API key is available)\n")
+            print("\033[90mAccess uses local CLIs first; saved API keys act as fallback.\033[0m")
+            print()
 
             # Gather Status Data using cached CLI statuses
             providers = [
-                {"label": "Antigravity CLI", "cli": "agy", "key_id": "gemini_api_key", "status": cli_statuses["gemini"]},
-                {"label": "Claude Code", "cli": "claude", "key_id": "anthropic_api_key", "status": cli_statuses["claude"]},
-                {"label": "Codex / GPT-5", "cli": "codex", "key_id": "openai_api_key", "status": cli_statuses["codex"]},
-                {"label": "GitHub CLI", "cli": "gh", "key_id": None, "status": cli_statuses["gh"]},
-                {"label": "OpenCode CLI", "cli": "opencode", "key_id": None, "status": cli_statuses["opencode"]},
-                {"label": "Ollama (Local)", "cli": "ollama", "key_id": None, "status": cli_statuses["ollama"]},
+                {"label": "Antigravity", "cli": "agy", "key_id": "gemini_api_key", "status": cli_statuses["gemini"]},
+                {"label": "Claude", "cli": "claude", "key_id": "anthropic_api_key", "status": cli_statuses["claude"]},
+                {"label": "Codex", "cli": "codex", "key_id": "openai_api_key", "status": cli_statuses["codex"]},
+                {"label": "GitHub", "cli": "gh", "key_id": None, "status": cli_statuses["gh"]},
+                {"label": "OpenCode", "cli": "opencode", "key_id": None, "status": cli_statuses["opencode"]},
+                {"label": "Ollama", "cli": "ollama", "key_id": "ollama_api_key", "status": cli_statuses["ollama"]},
             ]
 
-            # Table Header - Narrower for better responsiveness
-            header = f"{'Provider/Tool':15} | {'CLI Readiness':13} | {'Credentials':11} | {'Access'}"
+            # Table Header
+            header = f"{'Provider':11} | {'Authentication':20} | {'Access'}"
             print(f"\033[1;97m{header}\033[0m")
             print_divider("-")
 
             for p in providers:
                 status = p["status"]
-                
-                # 1. CLI Column
-                if status == "Checking...":
-                    raw_cli_status = "Checking..."
-                    cli_display = f"\033[93m{raw_cli_status:13}\033[0m"
-                    cli_ready = False
-                elif status in ["Logged In", "Ready", "Running"]:
-                    raw_cli_status = {
-                        "Logged In": "Signed in",
-                        "Ready": "CLI ready",
-                        "Running": "Running",
-                    }[status]
-                    cli_display = f"\033[92m{raw_cli_status:13}\033[0m"
-                    cli_ready = True
-                elif status == "Not Installed":
-                    raw_cli_status = "Not installed"
-                    cli_display = f"\033[90m{raw_cli_status:13}\033[0m"
-                    cli_ready = False
-                elif status == "Not Logged In":
-                    raw_cli_status = "Need sign-in"
-                    cli_display = f"\033[1;91m{raw_cli_status:13}\033[0m"
-                    cli_ready = False
-                elif status == "Offline":
-                    raw_cli_status = "Offline"
-                    cli_display = f"\033[1;91m{raw_cli_status:13}\033[0m"
-                    cli_ready = False
-                else:
-                    raw_cli_status = "Failed"
-                    cli_display = f"\033[1;91m{raw_cli_status:13}\033[0m"
-                    cli_ready = False
+                key_id = p["key_id"]
 
-                # 2. Credential Column
-                key_ready = False
-                raw_key_status = "None"
-                key_color = "\033[90m" # Default grey
-
-                if p["key_id"]:
-                    current_key = settings.get(p["key_id"], "")
+                # Check for configured API keys
+                has_saved_key = False
+                has_env_key = False
+                if key_id:
+                    current_key = settings.get(key_id, "") or (settings.get("ollama_host", "") if key_id == "ollama_api_key" else "")
                     if current_key:
-                        raw_key_status = "Saved"
-                        key_color = "\033[92m" # Green
-                        key_ready = True
-                    elif p["key_id"].upper() in os.environ:
-                        raw_key_status = "Env Var"
-                        key_color = "\033[1;96m" # Blue
-                        key_ready = True
-                    elif cli_ready:
-                        raw_key_status = "CLI Login"
-                        key_color = "\033[1;96m" # Cyan
-                        key_ready = False
+                        has_saved_key = True
+                    elif key_id.upper() in os.environ or (key_id == "ollama_api_key" and "OLLAMA_HOST" in os.environ):
+                        has_env_key = True
+
+                # Determine single Authentication status & Readiness
+                if status == "Checking...":
+                    raw_auth = "Checking..."
+                    auth_color = "\033[93m"
+                    is_ready = False
+                elif status in ["Logged In", "Ready", "Running"]:
+                    if status == "Running":
+                        raw_auth = "Running locally"
+                    else:
+                        raw_auth = "CLI Ready"
+                    auth_color = "\033[92m"
+                    is_ready = True
+                elif has_saved_key:
+                    raw_auth = "Saved API key"
+                    auth_color = "\033[92m"
+                    is_ready = True
+                elif has_env_key:
+                    raw_auth = "Env Var API key"
+                    auth_color = "\033[1;96m"
+                    is_ready = True
+                elif status == "Not Logged In":
+                    raw_auth = "Sign-in required"
+                    auth_color = "\033[1;91m"
+                    is_ready = False
+                elif status == "Not Installed":
+                    raw_auth = "Not installed"
+                    auth_color = "\033[90m"
+                    is_ready = False
                 else:
-                    raw_key_status = "Local CLI"
-                    key_color = "\033[90m"
+                    raw_auth = "Offline"
+                    auth_color = "\033[1;91m"
+                    is_ready = False
 
-                key_display = f"{key_color}{raw_key_status:11}\033[0m"
+                auth_display = f"{auth_color}{raw_auth:20}\033[0m"
 
-                # 3. Overall Ready Column
-                if cli_ready or key_ready:
+                if is_ready:
                     ready_display = "\033[1;92m✓ READY\033[0m"
                 elif status == "Checking...":
                     ready_display = "\033[93m⏱ CHECKING\033[0m"
                 else:
                     ready_display = "\033[1;91m✗ LOCKED\033[0m"
 
-                print(f"{p['label']:15} | {cli_display} | {key_display} | {ready_display}")
+                print(f"{p['label']:11} | {auth_display} | {ready_display}")
 
             print()
 
             print_header("ACTIONS")
             
             # Single-column Layout for Actions
-            print(f"  \033[1;96mFallback Credentials\033[0m")
-            print_wrapped_description("(API keys stored locally; used when CLI logins are expired or in headless/CI environments)", indent_size=4)
+            print(f"  \033[1;96mFallback & Cloud Credentials\033[0m")
+            print_wrapped_description("(API keys or host endpoints stored locally; used when CLI logins are expired, in cloud/remote environments, or for custom GPU endpoints)", indent_size=4)
             print(f"    [\033[1;92mG\033[0m] Update Antigravity credential")
             print(f"    [\033[1;92mA\033[0m] Update Anthropic credential")
             print(f"    [\033[1;92mO\033[0m] Update OpenAI credential")
+            print(f"    [\033[1;92mL\033[0m] Update Ollama Cloud credential")
 
             print(f"\n  \033[1;96mBrowser Logins (OAuth)\033[0m")
             print_wrapped_description("(Authenticates provider CLIs directly using browser OAuth for local development)", indent_size=4)
@@ -3636,8 +3662,8 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             print(f"    [\033[1;92m5\033[0m] Login OpenCode")
 
             print_header("MANAGEMENT")
-            print_wrapped_description("(Clear configured API keys or exit the provider setup submenu)", indent_size=4)
             print(f"    [\033[1;91mC\033[0m] Clear saved credentials")
+            print()
             print(f"    [\033[1;91mB\033[0m] Back")
 
             # If we are loading statuses for the first time, render the loading indicator,
@@ -3664,6 +3690,24 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
             if choice == "g": key_to_update = "gemini_api_key"
             elif choice == "a": key_to_update = "anthropic_api_key"
             elif choice == "o": key_to_update = "openai_api_key"
+            elif choice == "l":
+                print(f"\n  Updating: \033[97mOllama Cloud Credential\033[0m")
+                key_val = prompt_password("🔑 Ollama API Key:", placeholder="(enter to skip)")
+                host_val = prompt_input("🌐 Ollama Host URL (e.g. https://my-ollama:11434):", placeholder="(enter to skip)")
+                updated = False
+                if key_val:
+                    settings["ollama_api_key"] = key_val
+                    updated = True
+                if host_val:
+                    settings["ollama_host"] = host_val
+                    updated = True
+                if updated:
+                    write_json(settings_path, settings)
+                    print("✅ Ollama Cloud credentials saved.")
+                else:
+                    print("⚠️  No changes made.")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
             elif choice == "1":
                 if cli_statuses["gemini"] == "Logged In":
                     print("\n\033[1;93mYou are already logged in to Antigravity CLI.\033[0m")
@@ -3678,7 +3722,7 @@ def handle_api_keys(session_allowed_machines, session_allowed_models):
                 warning = "\033[1;91m⚠️  DANGER: THIS WILL PERMANENTLY REMOVE ALL MANUAL API KEYS FROM YOUR CONFIG.\033[0m\n"
                 warning += "You will have to re-enter them manually. Are you sure?"
                 if prompt_confirm(warning, default=False):
-                    for kid in ["gemini_api_key", "anthropic_api_key", "openai_api_key"]: settings.pop(kid, None)
+                    for kid in ["gemini_api_key", "anthropic_api_key", "openai_api_key", "ollama_api_key", "ollama_host"]: settings.pop(kid, None)
                     write_json(settings_path, settings)
                     print("✅ Saved keys cleared.")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -4089,22 +4133,28 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 except:
                     pass
 
-            print("    [\033[93mM\033[0m] LLM Models (Session Defaults)")
-            print("    [\033[93mK\033[0m] Manage LLM API Keys")
-            print("    [\033[93mF\033[0m] Manage Machine Fleet")
-            print("    [\033[93mP\033[0m] Run Prerequisite Audit")
-            print(f"    [\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
-            print("    [\033[93mC\033[0m] Change Target Project")
-            print("    [\033[93mA\033[0m] Manage Archived Jobs")
-            print("    [\033[93mI\033[0m] AI Instruction Settings (.md files)")
-            print("    [\033[93mE\033[0m] Email Notification Settings")
-            print("    [\033[93mS\033[0m] Documentation & Architecture Guides")
+            print("  \033[1;96m--- Models & Instructions ---\033[0m")
+            print_wrapped_option("[\033[93mM\033[0m] LLM Models (Session Defaults)")
+            print_wrapped_option("[\033[93mK\033[0m] Manage LLM API Keys")
+            print_wrapped_option("[\033[93mI\033[0m] AI Instruction Settings (.md files)")
 
-            print("    [\033[93mD\033[0m] Firebase App Distro (Delivery)")
+            print("\n  \033[1;96m--- Machine Fleet & Project Config ---\033[0m")
+            print_wrapped_option("[\033[93mF\033[0m] Manage Machine Fleet")
+            print_wrapped_option(f"[\033[93mG\033[0m] Select Base Branch (\033[97m{global_base}\033[0m)")
+            print_wrapped_option("[\033[93mC\033[0m] Change Target Project")
+            print_wrapped_option("[\033[93mA\033[0m] Manage Archived Jobs")
 
-            print("    [\033[93mT\033[0m] Orchestrator Self-Tests")
-            print("    [\033[93mU\033[0m] Update Orchestrator (Local & Fleet)")
-            print("    [\033[1;91mB\033[0m] Back")
+            print("\n  \033[1;96m--- Delivery & Notifications ---\033[0m")
+            print_wrapped_option("[\033[93mD\033[0m] Firebase App Distro (Delivery)")
+            print_wrapped_option("[\033[93mE\033[0m] Email Notification Settings")
+
+            print("\n  \033[1;96m--- Setup, Health & Documentation ---\033[0m")
+            print_wrapped_option("[\033[93mP\033[0m] Run Prerequisite Audit")
+            print_wrapped_option("[\033[93mS\033[0m] Documentation & Architecture Guides")
+            print_wrapped_option("[\033[93mT\033[0m] Orchestrator Self-Tests")
+            print_wrapped_option("[\033[93mU\033[0m] Update Orchestrator (Local & Fleet)")
+            print()
+            print_wrapped_option("[\033[1;91mB\033[0m] Back", indent_size=4, subsequent_indent_size=4)
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(letter)")
             status_bar.render(at_bottom=True, force=True, prompt=prompt)
@@ -4115,7 +4165,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 break
             elif choice == "m":
                 while True:
-                    options, value_map, details_map = run_with_loading_screen(
+                    options, value_map, details_map, service_summary = run_with_loading_screen(
                         "Select LLM Models for Session",
                         [
                             "\n\033[90mChecking model availability from local CLIs and configured API keys...\033[0m",
@@ -4129,8 +4179,9 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     curr_defaults = resolve_model_selection_defaults(session_allowed_models, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Sync Registry  [\033[1;92mD\033[0m] Live Discovery  [\033[1;91mB\033[0m] Back"
-                        new_labels = prompt_checkbox("select models", options, curr_defaults, extra_keys=["r", "d", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
+                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. To manage available provider models or add API keys, press [\033[93mK\033[0m] for Key Management"
+                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             session_allowed_models = [value_map[label] for label in new_labels]
                         else:
@@ -4140,12 +4191,13 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     except KeyInterruptException as exc:
                         if exc.key == "b":
                             break
-                        if exc.key in ["r", "d"]:
-                            live = (exc.key == "d")
+                        elif exc.key == "k":
+                            handle_api_keys(session_allowed_machines, session_allowed_models)
+                            continue
+                        elif exc.key in ["r", "d"]:
                             from model_registry import sync_models
-                            action = "Syncing with registry..." if not live else "Pinging provider APIs..."
-                            print(f"\n\n📡 {action}")
-                            success, msg = sync_models(live_discovery=live)
+                            print("\n\n📡 Scanning local CLIs (Ollama, OpenCode) and provider APIs for new models...")
+                            success, msg = sync_models(live_discovery=True)
                             if success:
                                 print(f"✅ {msg}")
                             else:
@@ -4531,8 +4583,8 @@ def handle_instruction_files(session_allowed_machines: list[str] | None = None, 
     session_allowed_models = session_allowed_models or []
 
     cli_files = {
-        "Antigravity CLI": "GEMINI.md",
-        "Claude Code": "CLAUDE.md",
+        "Antigravity": "GEMINI.md",
+        "Claude": "CLAUDE.md",
         "Codex": "AGENTS.md",
         "Copilot": ".github/copilot-instructions.md",
         "Ollama": "OLLAMA.md",
@@ -4583,6 +4635,10 @@ Read these files first and treat them as authoritative:
             print_wrapped_description("Checks the instruction files used by each AI CLI. Each file should point agents back to the shared project docs.", indent_size=2)
             print()
             
+            header = f"{'#':4} | {'Tool':11} | {'Instruction File':32} | {'Status'}"
+            print(f"\033[1;97m{header}\033[0m")
+            print_divider("-")
+
             keys = list(cli_files.keys())
             file_statuses = {}
             for i, name in enumerate(keys):
@@ -4592,19 +4648,19 @@ Read these files first and treat them as authoritative:
                         content = path.read_text(encoding="utf-8")
                         missing_links = [link for link in required_links if link not in content]
                         if missing_links:
-                            status_str = "\033[93mMISCONFIGURED\033[0m"
+                            status_str = "\033[93m⚠ INVALID\033[0m"
                             file_statuses[name] = "invalid"
                         else:
-                            status_str = "\033[92mVALID\033[0m"
+                            status_str = "\033[1;92m✓ VALID\033[0m"
                             file_statuses[name] = "valid"
                     except Exception:
-                        status_str = "\033[1;91mERROR\033[0m"
+                        status_str = "\033[1;91m✗ ERROR\033[0m"
                         file_statuses[name] = "error"
                 else:
-                    status_str = "\033[1;91mMISSING\033[0m"
+                    status_str = "\033[1;91m✗ MISSING\033[0m"
                     file_statuses[name] = "missing"
                     
-                print(f"    [\033[1;96m{i}\033[0m] {name:15} -> {cli_files[name]:30} [{status_str}]")
+                print(f"[\033[1;96m{i}\033[0m]  | {name:11} | {cli_files[name]:32} | {status_str}")
             
             print("\nActions:")
             print("    [\033[1;92mA\033[0m] Create All Missing Files")

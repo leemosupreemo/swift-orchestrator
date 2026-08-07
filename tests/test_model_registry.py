@@ -258,6 +258,30 @@ Error: Please sign in to view available models.
         self.assertIn("Gemini API: skipped", msg)
         self.assertIn("Antigravity CLI (agy): unavailable", msg)
         self.assertIn("Ollama: unavailable", msg)
+        self.assertIn("OpenCode CLI: skipped", msg)
+
+    def test_parse_opencode_models_output(self) -> None:
+        raw_output = """
+opencode/big-pickle
+opencode/deepseek-v4-flash-free
+opencode/laguna-s-2.1-free
+opencode/ling-3.0-flash-free
+opencode/longcat-2.0-free
+opencode/mimo-v2.5-free
+opencode/nemotron-3-ultra-free
+opencode/north-mini-code-free
+"""
+        parsed = model_registry.parse_opencode_models_output(raw_output)
+        self.assertEqual(parsed, [
+            "opencode/big-pickle",
+            "opencode/deepseek-v4-flash-free",
+            "opencode/laguna-s-2.1-free",
+            "opencode/ling-3.0-flash-free",
+            "opencode/longcat-2.0-free",
+            "opencode/mimo-v2.5-free",
+            "opencode/nemotron-3-ultra-free",
+            "opencode/north-mini-code-free",
+        ])
 
     def test_llm_command_routing_for_qwen_and_ollama(self) -> None:
         from orchestrator.scripts.llm import get_llm_command
