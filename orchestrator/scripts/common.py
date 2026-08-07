@@ -293,7 +293,7 @@ def flush_stdin():
     except Exception:
         pass
 
-def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None) -> str:
+def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: StatusBar | None = None, description: list[str] | None = None) -> str:
     """Displays interactive radio buttons navigated by arrow keys."""
     if not sys.stdin.isatty():
         return default or options[0]
@@ -335,6 +335,11 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
             output.append(get_header_string(label))
             output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
             output.append("")
+
+            if description:
+                for line in description:
+                    output.append(line)
+                output.append("")
 
             for i, opt in enumerate(options):
                 if opt.startswith("---"):
@@ -403,7 +408,7 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
         
     return options[idx]
 
-def prompt_confirm(question: str, default: bool = True) -> bool:
+def prompt_confirm(question: str, default: bool = True, description: list[str] | None = None) -> bool:
     """Displays interactive yes/no radio buttons."""
     # Defensive logic for reported UI duplication
     if question.startswith("Would you Would you"):
@@ -411,7 +416,7 @@ def prompt_confirm(question: str, default: bool = True) -> bool:
     
     default_str = "yes" if default else "no"
 
-    choice = prompt_radio(question, ["yes", "no"], default_str)
+    choice = prompt_radio(question, ["yes", "no"], default_str, description=description)
     return choice == "yes"
 
 def prompt_multiline(prompt: str) -> str:
@@ -438,6 +443,15 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
     if _ACTIVE_STATUS_BAR:
         _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Enter to skip")
 
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+
+    fixed_len = 4 + len(label) + 2
+    available_width = cols - fixed_len - 4
+
     input_text = ""
     bg_style = "\033[48;5;236m"
     fg_style = "\033[1;97m" # Bold White
@@ -449,9 +463,16 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
         while True:
             # Render current state as asterisks
             if not input_text and placeholder:
-                display = f"{placeholder_style}{placeholder}{reset}"
+                disp_placeholder = placeholder
+                if len(disp_placeholder) > available_width:
+                    disp_placeholder = disp_placeholder[:available_width - 3] + "..."
+                display = f"{placeholder_style}{disp_placeholder}{reset}"
             else:
-                display = f"{fg_style}{'*' * len(input_text)}{reset}"
+                stars_len = len(input_text)
+                if stars_len > available_width:
+                    display = f"{fg_style}{'*' * available_width}{reset}"
+                else:
+                    display = f"{fg_style}{'*' * stars_len}{reset}"
             
             # Construct the line
             line = f"\r    {prompt_label} {bg_style} {display} {reset}\033[K"
@@ -491,6 +512,15 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
         q_msg = "Enter to confirm" if default else "Enter to cancel"
         _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg=q_msg)
 
+    try:
+        cols, _ = os.get_terminal_size()
+    except:
+        cols = 80
+    cols = max(cols, 40)
+
+    fixed_len = 4 + len(label) + 2
+    available_width = cols - fixed_len - 4
+
     input_text = default
     bg_style = "\033[48;5;236m"
     fg_style = "\033[1;97m" # Bold White
@@ -501,11 +531,16 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
     try:
         while True:
             # Render current state
-            display = input_text
             if not input_text and placeholder:
-                display = f"{placeholder_style}{placeholder}{reset}"
+                disp_placeholder = placeholder
+                if len(disp_placeholder) > available_width:
+                    disp_placeholder = disp_placeholder[:available_width - 3] + "..."
+                display = f"{placeholder_style}{disp_placeholder}{reset}"
             else:
-                display = f"{fg_style}{input_text}{reset}"
+                disp_text = input_text
+                if len(disp_text) > available_width:
+                    disp_text = "..." + disp_text[-(available_width - 3):]
+                display = f"{fg_style}{disp_text}{reset}"
             
             # Construct the line (indented to match other prompts)
             line = f"\r    {prompt_label} {bg_style} {display} {reset}\033[K"
@@ -690,13 +725,14 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 current_option = options[idx]
                 details = details_map.get(current_option, [])
                 if details:
+                    output.append("")
                     if details_title:
-                        output.append(f"\n  \033[1;96m{details_title}\033[0m")
+                        output.append(f"  \033[1;96m{details_title}\033[0m")
                     for line in details:
                         if line.startswith("\033"):
-                            output.append(line)
+                            output.append(f"  {line}")
                         else:
-                            output.append(f"\033[90m{line}\033[0m")
+                            output.append(f"  \033[90m{line}\033[0m")
             
             # 4. Print footer
             if footer_actions:
@@ -990,7 +1026,23 @@ class ProgressIndicator:
 
         spinner = self.frames[self.frame_idx]
         self.frame_idx = (self.frame_idx + 1) % len(self.frames)
-        return f"\033[1;96m{spinner}\033[0m {self.label}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
+        
+        try:
+            cols, _ = os.get_terminal_size()
+        except:
+            cols = 80
+        cols = max(cols, 40)
+        
+        hint_str = f"({self.hint}, {timer_str}{activity_str})"
+        # 1 char spinner + 1 space + len(label) + 4 chars ("... ") + len(hint_str)
+        fixed_len = 1 + 1 + 4 + len(hint_str)
+        available_label_len = cols - fixed_len - 2
+        
+        label = self.label
+        if len(label) > available_label_len and available_label_len > 5:
+            label = label[:available_label_len - 3] + "..."
+            
+        return f"\033[1;96m{spinner}\033[0m {label}... \033[90m{hint_str}\033[0m"
 
     def render(self, force: bool = False, last_activity_time: float | None = None):
         if self.is_silent: return
@@ -1011,6 +1063,14 @@ class ProgressIndicator:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
         self.restore_cursor()
+
+    def __enter__(self):
+        self.start_time = datetime.now()
+        self.render(force=True)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.clear()
 
 _STATUS_BAR_NESTING = 0
 _ACTIVE_STATUS_BAR = None
