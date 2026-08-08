@@ -39,6 +39,7 @@
       "tier": "HIGH",
       "capabilities": ["reasoning", "coding", "context", "vision"],
       "cost_factor": 5.0,
+      "api_model_id": "Gemini 3.1 Pro (High)",
       "aliases": ["gemini", "antigravity", "agy"],
       "required_clis": ["gemini"]
     },
@@ -48,6 +49,7 @@
       "tier": "MEDIUM",
       "capabilities": ["speed", "context", "vision"],
       "cost_factor": 1.0,
+      "api_model_id": "Gemini 3.6 Flash (High)",
       "required_clis": ["gemini"]
     },
     {
@@ -56,6 +58,62 @@
       "tier": "LOW",
       "capabilities": ["speed", "context"],
       "cost_factor": 0.5,
+      "api_model_id": "Gemini 3.6 Flash (Medium)",
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.6-flash-high",
+      "family": "gemini",
+      "tier": "HIGH",
+      "capabilities": ["speed", "coding", "context", "vision"],
+      "cost_factor": 1.5,
+      "api_model_id": "Gemini 3.6 Flash (High)",
+      "aliases": ["gemini-3.6-flash"],
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.6-flash-medium",
+      "family": "gemini",
+      "tier": "MEDIUM",
+      "capabilities": ["speed", "context", "vision"],
+      "cost_factor": 1.0,
+      "api_model_id": "Gemini 3.6 Flash (Medium)",
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.6-flash-low",
+      "family": "gemini",
+      "tier": "LOW",
+      "capabilities": ["speed", "context"],
+      "cost_factor": 0.5,
+      "api_model_id": "Gemini 3.6 Flash (Low)",
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.5-flash-high",
+      "family": "gemini",
+      "tier": "HIGH",
+      "capabilities": ["speed", "context", "vision"],
+      "cost_factor": 1.2,
+      "api_model_id": "Gemini 3.5 Flash (High)",
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.5-flash-medium",
+      "family": "gemini",
+      "tier": "MEDIUM",
+      "capabilities": ["speed", "context"],
+      "cost_factor": 0.8,
+      "api_model_id": "Gemini 3.5 Flash (Medium)",
+      "required_clis": ["gemini"]
+    },
+    {
+      "id": "gemini-3.5-flash-low",
+      "family": "gemini",
+      "tier": "LOW",
+      "capabilities": ["speed", "context"],
+      "cost_factor": 0.4,
+      "api_model_id": "Gemini 3.5 Flash (Low)",
       "required_clis": ["gemini"]
     },
     {

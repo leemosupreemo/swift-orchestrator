@@ -44,6 +44,7 @@ PRESETS = {
     "hard-bug": {"planner": "gemini", "builder": "claude-opus-4-7", "reviewer": "gemini"},
     "architecture": {"planner": "claude-opus-4-7", "builder": "claude-opus-4-7", "reviewer": "gemini"},
     "fast": {"planner": "gemini-3-flash-preview", "builder": "codex", "reviewer": "gemini-3.1-flash-lite-preview"},
+    "free": {"planner": "opencode/qwen-3.7-max", "builder": "qwen2.5-coder", "reviewer": "opencode/big-pickle"},
 }
 
 BRANCH_MODE_CHOICES = ["new", "current", "manual"]
@@ -343,6 +344,7 @@ def main(args_override: list[str] | None = None) -> None:
     parser.add_argument("--stitch", action="store_true", help="Enable Google Stitch AI design phase")
     parser.add_argument("--feedback", help="User feedback for design or plan revision")
     parser.add_argument("--update", help="Path to an existing job JSON to update/re-plan")
+    parser.add_argument("--free", action="store_true", help="Restrict allowed models to free models only (cost_factor == 0.0)")
     args = parser.parse_args(args_override)
 
     existing_job = None
@@ -390,11 +392,29 @@ def main(args_override: list[str] | None = None) -> None:
 
     # Model Selection
     all_models = sorted(list(SUPPORTED_MODELS))
-    if args.allowed_models:
+    if args.free:
+        from model_registry import get_free_models
+        free_models = [m.id for m in get_free_models()]
+        if free_models:
+            allowed_models = free_models
+            print(f"      - Free-models-only mode active: Restricted to {len(allowed_models)} free models: {', '.join(allowed_models)}")
+        else:
+            allowed_models = args.allowed_models.split(",") if args.allowed_models else DEFAULT_FALLBACKS
+    elif args.allowed_models:
         allowed_models = args.allowed_models.split(",")
     else:
         print("\nLLM Model Selection (restrict workflow to these models):")
-        allowed_models = prompt_checkbox("select models", all_models, DEFAULT_FALLBACKS)
+        footer = "[\033[1;92mF\033[0m] Select Free Models Only  [\033[1;91mB\033[0m] Back"
+        try:
+            allowed_models = prompt_checkbox("select models", all_models, DEFAULT_FALLBACKS, extra_keys=["f"], footer=footer)
+        except KeyInterruptException as exc:
+            if exc.key == "f":
+                from model_registry import get_free_models
+                free_models = [m.id for m in get_free_models() if m.id in all_models]
+                allowed_models = free_models if free_models else DEFAULT_FALLBACKS
+                print(f"\n✅ Restricted model selection to Free Tier models ({len(allowed_models)} models).")
+            else:
+                raise
     
     if not allowed_models:
         print("\n\033[1;91m⚠️  ERROR: No AI models selected.\033[0m")

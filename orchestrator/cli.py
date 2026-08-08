@@ -1125,6 +1125,51 @@ def update_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def fix_command(args: argparse.Namespace) -> int:
+    if args.project and apply_project_env(args.project):
+        return 1
+
+    feedback = args.feedback
+    if not feedback:
+        print("\033[1;91mError: Please provide feedback or a bug description. Example: orchestrator fix \"button X is broken\"\033[0m")
+        return 1
+
+    from orchestrator.scripts.common import JOBS_DIR, read_json, print_header
+    
+    target_job_path = None
+    if args.job:
+        job_file = JOBS_DIR / f"{args.job}.json" if not args.job.endswith(".json") else Path(args.job)
+        if job_file.exists():
+            target_job_path = job_file
+    
+    if not target_job_path:
+        job_files = sorted(list(JOBS_DIR.glob("*.json")), key=lambda p: p.stat().st_mtime, reverse=True)
+        if job_files:
+            target_job_path = job_files[0]
+
+    print_header("FAST AUTO-FIX")
+    print(f"   \033[1;36m• Feedback:\033[0m \033[1;97m{feedback}\033[0m", flush=True)
+
+    if target_job_path and target_job_path.exists():
+        job_data = read_json(target_job_path)
+        print(f"   \033[1;36m• Target Job:\033[0m \033[97m{job_data.get('job_id')} ({job_data.get('title')})\033[0m\n", flush=True)
+        
+        script_args = ["bug", "--no-dispatch", "--update", str(target_job_path), "--feedback", feedback]
+        if getattr(args, "free", False):
+            script_args.append("--free")
+        res = run_script("new_job.py", script_args)
+        if res == 0:
+            print("\n\033[1;92m🚀 Feedback applied. Dispatching auto-fix execution...\033[0m\n", flush=True)
+            return run_script("schedule_job.py", [str(target_job_path)])
+        return res
+    else:
+        print("   \033[1;36m• Creating new quick bug fix job...\033[0m\n", flush=True)
+        script_args = ["bug", "--title", f"Quick Fix: {feedback[:40]}", "--raw-input", feedback]
+        if getattr(args, "free", False):
+            script_args.append("--free")
+        return run_script("new_job.py", script_args)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         return _main(argv)
@@ -1247,6 +1292,12 @@ def _main(argv: list[str] | None = None) -> int:
     update_parser.add_argument("--fleet", action="store_true", help="Update all enabled remote workers in the fleet")
     update_parser.add_argument("--project", help="Recent project name or project root path (required for --fleet)")
 
+    fix_parser = subparsers.add_parser("fix", help="Fast 1-line bug fix / feedback for active or new job")
+    fix_parser.add_argument("feedback", help="Description of what is broken or what to fix")
+    fix_parser.add_argument("--job", help="Specific job ID or job JSON file path")
+    fix_parser.add_argument("--project", help="Recent project name or project root path")
+    fix_parser.add_argument("--free", action="store_true", help="Restrict execution to free models only (cost_factor == 0.0)")
+
     passthrough = subparsers.add_parser("script")
     passthrough.add_argument("--project", help="Recent project name or project root path")
     passthrough.add_argument("script_name")
@@ -1261,6 +1312,8 @@ def _main(argv: list[str] | None = None) -> int:
         if args.project and apply_project_env(args.project):
             return 1
         return run_script("dev_console.py", [])
+    if args.command == "fix":
+        return fix_command(args)
     if args.command == "check":
         if args.project and apply_project_env(args.project):
             return 1

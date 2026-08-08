@@ -180,11 +180,11 @@ def get_llm_command(model: str, prompt_file: str, role: str | None = None, sessi
         if role in [ModelRole.BUILDER, ModelRole.DEBUGGER]:
             safe_tools += ",replace,write_file"
         if provider_cli == "agy":
-            cmd_base = f"agy --model {model_id} --dangerously-skip-permissions --prompt -"
+            cmd_base = f"agy --model {shlex.quote(cli_model_id)} --dangerously-skip-permissions --prompt -"
             if session_id:
                 cmd_base += f" --conversation {session_id}"
         else:
-            cmd_base = f"{provider_cli} --model {model_id} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
+            cmd_base = f"{provider_cli} --model {shlex.quote(cli_model_id)} --skip-trust --prompt - --yolo --allowed-mcp-server-names {safe_servers} --allowed-tools {safe_tools} --raw-output --accept-raw-output-risk"
             if session_id:
                 cmd_base += f" --session-id {session_id}"
     elif model_id == "gemini":

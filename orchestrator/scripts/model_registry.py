@@ -77,6 +77,7 @@ MODELS = [
         tier=ModelTier.HIGH,
         capabilities=[ModelCapability.REASONING, ModelCapability.CODING, ModelCapability.CONTEXT, ModelCapability.VISION],
         cost_factor=5.0,
+        api_model_id="Gemini 3.1 Pro (High)",
         aliases=["gemini", "antigravity", "agy"],
         required_clis=["gemini"]
     ),
@@ -86,6 +87,7 @@ MODELS = [
         tier=ModelTier.MEDIUM,
         capabilities=[ModelCapability.SPEED, ModelCapability.CONTEXT, ModelCapability.VISION],
         cost_factor=1.0,
+        api_model_id="Gemini 3.6 Flash (High)",
         required_clis=["gemini"]
     ),
     ModelMetadata(
@@ -94,6 +96,7 @@ MODELS = [
         tier=ModelTier.LOW,
         capabilities=[ModelCapability.SPEED, ModelCapability.CONTEXT],
         cost_factor=0.5,
+        api_model_id="Gemini 3.6 Flash (Medium)",
         required_clis=["gemini"]
     ),
     ModelMetadata(
@@ -474,6 +477,10 @@ def get_model(model_id: str) -> ModelMetadata | None:
         if model_id == m.id or model_id in m.aliases:
             return m
     return None
+
+def get_free_models() -> list[ModelMetadata]:
+    """Returns all available models with cost_factor == 0.0 (e.g. Ollama local models, OpenCode free models, GitHub Copilot)."""
+    return [m for m in get_all_models() if m.cost_factor == 0.0]
 
 def heuristic_classify(model_id: str, family: str) -> ModelMetadata:
     """Best-effort classification of a raw model ID into our metadata structure."""

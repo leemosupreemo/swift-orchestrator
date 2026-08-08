@@ -46,6 +46,103 @@ except:
 for p in [CONFIG_DIR, JOBS_DIR, INBOX_DIR, ARCHIVE_DIR, LOGS_DIR, OUTPUT_DIR, STATE_DIR, MACHINE_STATE_DIR]:
     p.mkdir(parents=True, exist_ok=True)
 
+def load_secrets():
+    """Loads environment variables from .secrets/project-secrets.zsh or .env if present."""
+    secrets_paths = [
+        ROOT / ".secrets" / "project-secrets.zsh",
+        ORCHESTRATOR_RUNTIME_DIR / ".env",
+        ROOT / ".env"
+    ]
+    for sp in secrets_paths:
+        if sp.exists():
+            try:
+                content = sp.read_text(encoding="utf-8")
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith("export "):
+                        line = line[7:].strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+            except Exception:
+                pass
+
+load_secrets()
+
+def ensure_keychain_unlocked(prompt_if_missing: bool = False) -> tuple[bool, str]:
+    """Ensures macOS login keychain is unlocked using KEYCHAIN_PASSWORD if present or prompting upfront if required."""
+    load_secrets()
+    pwd = os.environ.get("KEYCHAIN_PASSWORD")
+    keychain_path = os.path.expanduser("~/Library/Keychains/login.keychain-db")
+    if not os.path.exists(keychain_path):
+        keychain_path = os.path.expanduser("~/Library/Keychains/login.keychain")
+    
+    if pwd:
+        res = subprocess.run(
+            ["security", "unlock-keychain", "-p", pwd, keychain_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if res.returncode == 0:
+            subprocess.run(
+                ["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", pwd, keychain_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return True, "Keychain unlocked successfully using saved KEYCHAIN_PASSWORD."
+        else:
+            err = res.stderr.strip() or "Invalid password"
+            return False, f"Failed to unlock keychain with saved password: {err}"
+    
+    # Check if already unlocked
+    res = subprocess.run(
+        ["security", "show-keychain-info", keychain_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    if res.returncode == 0:
+        return True, "Keychain is already unlocked."
+        
+    if prompt_if_missing:
+        print("\n\033[1;93m🔑 macOS Login Keychain is locked.\033[0m")
+        print("\033[90mTo avoid pausing or failing during build archiving/distribution, please enter your keychain password now:\033[0m")
+        import getpass
+        try:
+            input_pwd = getpass.getpass("Keychain Password: ")
+        except Exception:
+            input_pwd = ""
+        
+        if input_pwd:
+            res = subprocess.run(
+                ["security", "unlock-keychain", "-p", input_pwd, keychain_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if res.returncode == 0:
+                subprocess.run(
+                    ["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", input_pwd, keychain_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                secrets_path = ROOT / ".secrets" / "project-secrets.zsh"
+                secrets_path.parent.mkdir(parents=True, exist_ok=True)
+                content = secrets_path.read_text(encoding="utf-8") if secrets_path.exists() else ""
+                lines = [l for l in content.splitlines() if "KEYCHAIN_PASSWORD=" not in l]
+                lines.append(f'export KEYCHAIN_PASSWORD="{input_pwd}"')
+                secrets_path.write_text("\n".join(lines) + "\n")
+                os.environ["KEYCHAIN_PASSWORD"] = input_pwd
+                return True, "Keychain unlocked and password saved for headless builds."
+            else:
+                return False, "Provided password failed to unlock keychain."
+                
+    return False, "Keychain is locked and KEYCHAIN_PASSWORD is not configured."
+
 def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -355,14 +452,13 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                 formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
                 output.append(f"\033[93m💡 {formatted_desc}\033[0m")
             if description:
-                output.append(f"\033[90m{description}\033[0m")
+                if isinstance(description, str):
+                    output.append(f"\033[90m{description}\033[0m")
+                else:
+                    for line in description:
+                        output.append(f"\033[90m{line}\033[0m")
             output.append("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m")
             output.append("")
-
-            if description:
-                for line in description:
-                    output.append(line)
-                output.append("")
 
             for i, opt in enumerate(options):
                 if opt.startswith("---"):

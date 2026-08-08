@@ -841,7 +841,7 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
         script_path = SCRIPTS_DIR / script_name
         cmd = [sys.executable, "-u", str(script_path)] + args
 
-    print(f"\nRunning: {shlex.join(cmd)}\n")
+    print(f"\n\033[1;90m▶ Running:\033[0m \033[96m{shlex.join(cmd)}\033[0m\n", flush=True)
 
     # Extract and emphasize chosen tests
     test_targets = []
@@ -2816,9 +2816,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     curr_defaults = resolve_model_selection_defaults(curr_allowed_ids, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
-                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. To manage available provider models or add API keys, press [\033[93mK\033[0m] for Key Management"
-                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
+                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[1;92mF\033[0m] Free Models Only  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. Press [\033[1;92mF\033[0m] for Free Tier models only."
+                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "f", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             job["allowed_models"] = [value_map[label] for label in new_labels]
                             save_job(job)
@@ -2832,6 +2832,18 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             break
                         elif exc.key == "k":
                             handle_api_keys(session_allowed_machines, curr_allowed_ids)
+                            continue
+                        elif exc.key == "f":
+                            from model_registry import get_free_models
+                            free_ids = {m.id for m in get_free_models()}
+                            free_selected = [m_id for label, m_id in value_map.items() if m_id in free_ids]
+                            if free_selected:
+                                job["allowed_models"] = free_selected
+                                save_job(job)
+                                print(f"\n✅ Restricted job allowed models to Free Tier ({len(free_selected)} models).")
+                            else:
+                                print("\n⚠️ No free models currently detected in enabled services.")
+                            input("\n\033[1;96mTap Enter to continue...\033[0m")
                             continue
                         elif exc.key in ["r", "d"]:
                             from model_registry import sync_models
@@ -3261,10 +3273,34 @@ def view_job_brief_summary(job: dict[str, Any]) -> None:
     if isinstance(plan, dict):
         summary = plan.get("summary")
         tasks = plan.get("tasks")
+        risks = plan.get("risks")
+        impact = plan.get("impact_analysis")
+        decisions = plan.get("architecture_decisions")
+        assumptions = plan.get("assumptions")
+        constraints = plan.get("constraints")
 
         if summary:
             print_header("Plan Summary")
             print(format_markdown_for_terminal(str(summary)))
+
+        if impact:
+            print_header("Impact Analysis")
+            print(format_markdown_for_terminal(str(impact)))
+
+        if decisions and isinstance(decisions, list):
+            print_header("Architecture Decisions")
+            for item in decisions:
+                print(f"  • {item}")
+
+        if assumptions and isinstance(assumptions, list):
+            print_header("Assumptions")
+            for item in assumptions:
+                print(f"  • {item}")
+
+        if constraints and isinstance(constraints, list):
+            print_header("Constraints")
+            for item in constraints:
+                print(f"  • {item}")
 
         if isinstance(tasks, list) and tasks:
             print_header("Tasks")
@@ -3277,6 +3313,22 @@ def view_job_brief_summary(job: dict[str, Any]) -> None:
                         print(f"   {detail}")
                 else:
                     print(f"{idx}. {task}")
+
+        if risks:
+            print_header("Risks & Edge Cases")
+            if isinstance(risks, list):
+                for item in risks:
+                    print(f"  ⚠️  {item}")
+            else:
+                print(format_markdown_for_terminal(str(risks)))
+
+    verification = job.get("verification")
+    if isinstance(verification, dict):
+        v_risks = verification.get("risks_identified")
+        if v_risks and isinstance(v_risks, list):
+            print_header("Architect Verification Risks")
+            for item in v_risks:
+                print(f"  ⚠️  {item}")
 
 def prompt_autofix_iteration_settings(job: dict[str, Any]) -> tuple[str | None, int]:
     print_header("Auto-Fix / Iterate")
@@ -4179,9 +4231,9 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     curr_defaults = resolve_model_selection_defaults(session_allowed_models, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
-                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. To manage available provider models or add API keys, press [\033[93mK\033[0m] for Key Management"
-                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
+                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[1;92mF\033[0m] Free Models Only  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. Press [\033[1;92mF\033[0m] for Free Tier models only."
+                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "f", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             session_allowed_models = [value_map[label] for label in new_labels]
                         else:
@@ -4193,6 +4245,17 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                             break
                         elif exc.key == "k":
                             handle_api_keys(session_allowed_machines, session_allowed_models)
+                            continue
+                        elif exc.key == "f":
+                            from model_registry import get_free_models
+                            free_ids = {m.id for m in get_free_models()}
+                            free_selected = [m_id for label, m_id in value_map.items() if m_id in free_ids]
+                            if free_selected:
+                                session_allowed_models = free_selected
+                                print(f"\n✅ Restricted session allowed models to Free Tier ({len(free_selected)} models).")
+                            else:
+                                print("\n⚠️ No free models currently detected in enabled services.")
+                            input("\n\033[1;96mTap Enter to continue...\033[0m")
                             continue
                         elif exc.key in ["r", "d"]:
                             from model_registry import sync_models
