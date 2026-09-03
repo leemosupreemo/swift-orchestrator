@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -217,6 +219,29 @@ class OldAuthTests: XCTestCase {
         pct = dev_console.run_calculate_coverage(["local"], ["gemini"])
         # Should return calculated percentage (or float/None without raising NameError)
         self.assertTrue(pct is None or isinstance(pct, (int, float)))
+
+    def test_setup_xcode_cloud_scripts(self):
+        """Test generation of standard Xcode Cloud ci_scripts/."""
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            created = dev_console.setup_xcode_cloud_scripts(temp_dir)
+            self.assertEqual(len(created), 3)
+            self.assertTrue((temp_dir / "ci_scripts" / "ci_post_clone.sh").exists())
+            self.assertTrue((temp_dir / "ci_scripts" / "ci_pre_xcodebuild.sh").exists())
+            self.assertTrue((temp_dir / "ci_scripts" / "ci_post_xcodebuild.sh").exists())
+            # Check executable bit
+            self.assertTrue(os.access(temp_dir / "ci_scripts" / "ci_post_clone.sh", os.X_OK))
+        finally:
+            shutil.rmtree(temp_dir)
+
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_xcode_cloud_menu_smoke(self, _mock_status, _mock_clear, mock_get_key):
+        """Superficially run through Xcode Cloud menu."""
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["b"])
+        dev_console.handle_xcode_cloud_menu(["local"], ["gemini"])
+        self.assertTrue(True)
 
 if __name__ == "__main__":
     unittest.main()

@@ -2264,21 +2264,33 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
 
             print_header("Manage Tests & Code Coverage")
 
-            # 1. Code Coverage Status
+            # 1. Code Coverage Status & Visual Progress Bar
             cov_data = get_coverage_data()
+            bar_width = 30
             if cov_data and cov_data.get("overall_coverage_pct") is not None:
                 cov_pct = cov_data["overall_coverage_pct"]
                 cov_ts = cov_data.get("timestamp", "")
                 cov_ts_short = cov_ts[:19].replace("T", " ") if cov_ts else ""
-                cov_color = "\033[1;92m" if cov_pct >= 80 else ("\033[1;93m" if cov_pct >= 50 else "\033[1;91m")
+                filled = int(round((cov_pct / 100.0) * bar_width))
+                filled = max(0, min(bar_width, filled))
+                empty = bar_width - filled
+                if cov_pct >= 80:
+                    cov_color = "\033[1;92m"
+                elif cov_pct >= 50:
+                    cov_color = "\033[1;93m"
+                else:
+                    cov_color = "\033[1;91m"
+                
+                bar_str = f"{cov_color}{'█' * filled}\033[90m{'░' * empty}\033[0m"
                 cov_display = f"{cov_color}{cov_pct:.1f}%\033[0m \033[90m(Calculated: {cov_ts_short})\033[0m"
             else:
+                bar_str = f"\033[90m{'░' * bar_width}\033[0m"
                 cov_display = "\033[93mNot calculated yet\033[0m \033[90m(Press 'C' to calculate)\033[0m"
 
-            print("  \033[1;90m--- COVERAGE & HEALTH ---\033[0m")
-            print(f"  \033[1;36m• Code Coverage:\033[0m       {cov_display}")
-            print(f"  \033[1;36m• Test Target:\033[0m         \033[97m{PROJECT_CONFIG.test_target}\033[0m")
-            print()
+            print("  \033[1;90m┌────────────────────────────────────────────────────────────────────────┐\033[0m")
+            print(f"  \033[1;90m│\033[0m \033[1;97mCODE COVERAGE:\033[0m [{bar_str}]  {cov_display}")
+            print(f"  \033[1;90m│\033[0m \033[1;36mTest Target:\033[0m   \033[97m{PROJECT_CONFIG.test_target}\033[0m")
+            print("  \033[1;90m└────────────────────────────────────────────────────────────────────────┘\033[0m\n")
 
             # 2. Discover Test Suites
             suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
@@ -4723,6 +4735,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
 
             print("\n  \033[1;96m--- Delivery & Notifications ---\033[0m")
             print_wrapped_option("[\033[93mD\033[0m] Firebase App Distro (Delivery)")
+            print_wrapped_option("[\033[93mX\033[0m] Xcode Cloud & CI Workflows (ci_scripts)")
             print_wrapped_option("[\033[93mE\033[0m] Email Notification Settings")
 
             print("\n  \033[1;96m--- Setup, Health & Documentation ---\033[0m")
@@ -4838,6 +4851,8 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                 handle_instruction_files(session_allowed_machines, session_allowed_models)
             elif choice == "d":
                 handle_firebase_distro(session_allowed_machines, session_allowed_models)
+            elif choice == "x":
+                handle_xcode_cloud_menu(session_allowed_machines, session_allowed_models)
             elif choice == "s":
                 while True:
                     clear_screen()
@@ -4964,6 +4979,196 @@ def check_essential_environment(session_allowed_machines: list[str]):
             check()
             print("\n    Check complete. You can run it again any time from the Configuration menu.")
             input("    \033[1;96mPress Enter to start the Orchestrator...\033[0m")
+
+def setup_xcode_cloud_scripts(root: Path) -> list[Path]:
+    """Generates standard Xcode Cloud lifecycle hook scripts in ci_scripts/."""
+    ci_dir = root / "ci_scripts"
+    ci_dir.mkdir(parents=True, exist_ok=True)
+    created = []
+
+    post_clone = ci_dir / "ci_post_clone.sh"
+    if not post_clone.exists():
+        post_clone.write_text("""#!/bin/sh
+
+# Xcode Cloud Post-Clone Hook (Runs after repository is cloned)
+# Use this script to install tools, Homebrew packages, and setup dependencies.
+
+set -e
+
+echo "🚀 Xcode Cloud: Initializing environment after clone..."
+
+# 1. Install Homebrew tools if needed (e.g., xcbeautify for clean logs)
+if which brew >/dev/null 2>&1; then
+    echo "📦 Installing xcbeautify for test formatting..."
+    brew install xcbeautify || true
+fi
+
+# 2. Cocoapods or SPM resolution (if applicable)
+if [ -f "Podfile" ]; then
+    echo "📦 Installing CocoaPods dependencies..."
+    pod install
+fi
+
+echo "✅ Xcode Cloud post-clone setup complete."
+""", encoding="utf-8")
+        post_clone.chmod(0o755)
+        created.append(post_clone)
+
+    pre_build = ci_dir / "ci_pre_xcodebuild.sh"
+    if not pre_build.exists():
+        pre_build.write_text("""#!/bin/sh
+
+# Xcode Cloud Pre-Xcodebuild Hook (Runs before xcodebuild runs)
+# Use this script for code-generation, environment variables, or config validation.
+
+set -e
+
+echo "🛠️ Xcode Cloud: Preparing build..."
+echo "  • CI_BUILD_NUMBER: $CI_BUILD_NUMBER"
+echo "  • CI_BRANCH: $CI_BRANCH"
+echo "  • CI_COMMIT: $CI_COMMIT"
+
+if [ -f ".orchestrator/project.json" ]; then
+    echo "✅ Detected Orchestrator project configuration."
+fi
+
+echo "✅ Pre-xcodebuild preparation complete."
+""", encoding="utf-8")
+        pre_build.chmod(0o755)
+        created.append(pre_build)
+
+    post_build = ci_dir / "ci_post_xcodebuild.sh"
+    if not post_build.exists():
+        post_build.write_text("""#!/bin/sh
+
+# Xcode Cloud Post-Xcodebuild Hook (Runs after xcodebuild finishes)
+# Use this script for custom notifications or artifact processing.
+
+set -e
+
+echo "📊 Xcode Cloud: Post-build processing..."
+echo "  • CI_XCODEBUILD_ACTION: $CI_XCODEBUILD_ACTION"
+echo "  • CI_RESULT: $CI_RESULT"
+
+echo "✅ Post-xcodebuild hook finished."
+""", encoding="utf-8")
+        post_build.chmod(0o755)
+        created.append(post_build)
+
+    return created
+
+def handle_xcode_cloud_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
+    error_msg = ""
+    while True:
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
+
+            print_header("Xcode Cloud & CI Workflows")
+
+            ci_dir = ROOT / "ci_scripts"
+            scripts = ["ci_post_clone.sh", "ci_pre_xcodebuild.sh", "ci_post_xcodebuild.sh"]
+            existing = [s for s in scripts if (ci_dir / s).exists()]
+
+            print("  \033[1;90m--- XCODE CLOUD SCRIPTS STATUS ---\033[0m")
+            if existing:
+                for s in scripts:
+                    p = ci_dir / s
+                    if p.exists():
+                        is_exec = os.access(p, os.X_OK)
+                        exec_str = "\033[92mExecutable (755)\033[0m" if is_exec else "\033[93mNot Executable\033[0m"
+                        print(f"  • \033[1;97mci_scripts/{s}:\033[0m \033[92mPRESENT\033[0m ({exec_str})")
+                    else:
+                        print(f"  • \033[1;97mci_scripts/{s}:\033[0m \033[90mMISSING (Optional)\033[0m")
+            else:
+                print("  \033[90mNo custom ci_scripts/ found. Xcode Cloud uses standard xcodebuild defaults.\033[0m")
+            print()
+
+            # Check for live PR / CI checks if gh is installed
+            print("  \033[1;90m--- LIVE CI / XCODE CLOUD CHECKS ---\033[0m")
+            import shutil
+            has_gh = shutil.which("gh") is not None
+            if has_gh:
+                try:
+                    checks_out = subprocess.check_output(
+                        ["gh", "pr", "checks"],
+                        cwd=str(ROOT),
+                        stderr=subprocess.STDOUT,
+                        timeout=6
+                    ).decode("utf-8").strip()
+                    if checks_out:
+                        for line in checks_out.splitlines()[:5]:
+                            print(f"    {line}")
+                    else:
+                        print("    \033[90mNo active PR checks running on current branch.\033[0m")
+                except Exception:
+                    print("    \033[90mNo active PR or remote CI checks found for current branch.\033[0m")
+            else:
+                print("    \033[90mInstall GitHub CLI (gh) to view live PR check status.\033[0m")
+            print()
+
+            print("  \033[1;90m--- ACTIONS ---\033[0m")
+            print("  [\033[1;96m1\033[0m] Setup / Generate Standard Xcode Cloud ci_scripts/ (3 Hook Scripts)")
+            print("  [\033[1;96m2\033[0m] Make all ci_scripts executable (chmod +x)")
+            print("  [\033[1;96m3\033[0m] View Xcode Cloud & CI Architecture Guide")
+            print("  [\033[1;91mB\033[0m] Back")
+
+            if error_msg:
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                error_msg = ""
+
+            prompt = get_choice_prompt("Choice:", "(1-3, B)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if choice == "b":
+                break
+            elif choice == "1":
+                clear_screen()
+                print_header("Setting Up Xcode Cloud ci_scripts/")
+                created = setup_xcode_cloud_scripts(ROOT)
+                if created:
+                    print(f"✅ Generated {len(created)} Xcode Cloud script(s):")
+                    for p in created:
+                        print(f"   • \033[1;92m{p.relative_to(ROOT)}\033[0m (executable)")
+                else:
+                    print("ℹ️ All standard ci_scripts already exist.")
+                input("\n\033[1;96mTap Enter to continue...\033[0m")
+            elif choice == "2":
+                ci_dir = ROOT / "ci_scripts"
+                if ci_dir.exists():
+                    for sh in ci_dir.glob("*.sh"):
+                        sh.chmod(0o755)
+                    print("\n✅ Set chmod +x on all scripts in ci_scripts/.")
+                else:
+                    print("\n⚠️ No ci_scripts/ directory found. Use option [1] to generate.")
+                input("\n\033[1;96mTap Enter to continue...\033[0m")
+            elif choice == "3":
+                clear_screen()
+                print_header("Xcode Cloud Workflow Guide")
+                print("""\033[1;97mXcode Cloud & Orchestrator Integration:\033[0m
+
+  1. \033[1;96mAutomated Triggers:\033[0m
+     When you create/push branches or open PRs with Orchestrator, Xcode Cloud
+     automatically picks up the change on GitHub and starts cloud builds & tests.
+
+  2. \033[1;96mCustom Lifecycle Hooks (ci_scripts/):\033[0m
+     • \033[97mci_post_clone.sh:\033[0m Runs right after git clone. Installs Homebrew packages (xcbeautify),
+       SPM plugins, and Cocoapods.
+     • \033[97mci_pre_xcodebuild.sh:\033[0m Runs before build/test. Injects environment variables and builds.
+     • \033[97mci_post_xcodebuild.sh:\033[0m Runs after tests finish. Forwards artifacts or sends notifications.
+
+  3. \033[1;96mApp Store Connect Configuration:\033[0m
+     To connect your repo: Xcode > Integrate > Create Workflow, or configure in
+     App Store Connect > Xcode Cloud.""")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            else:
+                error_msg = f"'{choice}'"
 
 def handle_quick_distribute(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
     error_msg = ""
@@ -5186,6 +5391,7 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
                     print("    [\033[1;92mL\033[0m] Login to GitHub (gh auth login)")
                 else:
                     print("    [\033[1;96mL\033[0m] Re-authenticate GitHub (gh auth login)")
+            print("    [\033[1;96mX\033[0m] Xcode Cloud Workflows & CI Scripts")
             print("    [\033[1;96mR\033[0m] Refresh Status")
             print("    [\033[1;91mB\033[0m] Back")
 
@@ -5291,6 +5497,9 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
                 print("Launching 'gh auth login'...\n")
                 subprocess.run(["gh", "auth", "login"], cwd=str(ROOT))
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif choice == "x":
+                handle_xcode_cloud_menu(session_allowed_machines, session_allowed_models)
                 continue
             else:
                 error_msg = f"'{choice}'"
