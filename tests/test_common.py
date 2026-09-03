@@ -402,5 +402,15 @@ class MarkdownFormatterTests(unittest.TestCase):
         self.assertIn("swift build", formatted)
 
 
+    def test_get_simulator_diagnostic(self) -> None:
+        diag = common.get_simulator_diagnostic()
+        self.assertIn("has_simctl", diag)
+        self.assertIn("has_runtimes", diag)
+        self.assertIn("available_devices_count", diag)
+        self.assertIn("best_destination", diag)
+        self.assertIsInstance(diag["has_simctl"], bool)
+        self.assertIsInstance(diag["has_runtimes"], bool)
+
+
 if __name__ == "__main__":
     unittest.main()

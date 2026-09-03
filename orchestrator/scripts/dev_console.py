@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -2027,7 +2027,25 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
                 print(f"   \033[1;36m• {t.get('name')}:\033[0m \033[97m{t.get('coverage_pct')}%\033[0m")
         print(f"\033[1;92m======================================================================\033[0m")
     else:
-        print("\n\033[1;91m❌ Failed to calculate code coverage. Ensure tests build and run on iOS Simulator.\033[0m")
+        diag = get_simulator_diagnostic()
+        print("\n\033[1;91m❌ Failed to calculate code coverage.\033[0m")
+        if not diag["has_simctl"]:
+            print("  \033[93m• Xcode Command Line Tools (xcrun) are not installed or configured.\033[0m")
+            print("    Run: \033[1;97mxcode-select --install\033[0m or set path with \033[1;97msudo xcode-select -s /Applications/Xcode.app\033[0m")
+        elif not diag["has_runtimes"] or diag["available_devices_count"] == 0:
+            print("\n  \033[1;93m╭───────────────────────────────────────────────────────────────────────────╮\033[0m")
+            print("  \033[1;93m│ ⚠️  No Available iOS Simulator Runtimes or Devices Found                  │\033[0m")
+            print("  \033[1;93m╰───────────────────────────────────────────────────────────────────────────╯\033[0m")
+            print("  xcodebuild requires a concrete iOS Simulator instance to execute unit tests.\n")
+            print("  \033[1;97mTroubleshooting Instructions:\033[0m")
+            print("  1. Open \033[1;96mXcode > Settings > Platforms\033[0m and install the latest \033[1;97miOS Simulator\033[0m runtime.")
+            print("  2. Launch Simulator app to initialize default devices:")
+            print("     \033[1;92mopen -a Simulator\033[0m")
+            print("  3. Or create a new simulator device via CLI:")
+            print("     \033[1;92mxcrun simctl create \"iPhone 16\" \"com.apple.CoreSimulator.SimDeviceType.iPhone-16\"\033[0m")
+        else:
+            print(f"  \033[93m• Target simulator destination:\033[0m {diag.get('best_destination')}")
+            print("  • Ensure the scheme's test target builds without compilation errors.")
 
     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
     return overall_pct

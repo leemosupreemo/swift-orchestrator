@@ -1227,6 +1227,57 @@ def get_best_simulator_destination() -> str:
     except Exception:
         # Final hardcoded fallback if everything fails
         return "platform=iOS Simulator,name=iPhone 16"
+
+def get_simulator_diagnostic() -> dict[str, Any]:
+    """
+    Checks the system's iOS simulator health and runtime availability.
+    """
+    diag: dict[str, Any] = {
+        "has_simctl": False,
+        "has_runtimes": False,
+        "runtimes": [],
+        "available_devices_count": 0,
+        "booted_devices_count": 0,
+        "best_destination": None,
+        "is_concrete": False,
+        "error_message": ""
+    }
+    import shutil
+    if shutil.which("xcrun") is None:
+        diag["error_message"] = "Xcode Command Line Tools / xcrun is not installed."
+        return diag
+
+    diag["has_simctl"] = True
+    try:
+        r_res = subprocess.run(["xcrun", "simctl", "list", "runtimes", "--json"], capture_output=True, text=True, timeout=5.0)
+        if r_res.returncode == 0:
+            r_data = json.loads(r_res.stdout)
+            runtimes = [r["name"] for r in r_data.get("runtimes", []) if "iOS" in r.get("name", "")]
+            diag["runtimes"] = runtimes
+            diag["has_runtimes"] = len(runtimes) > 0
+
+        d_res = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "--json"], capture_output=True, text=True, timeout=5.0)
+        if d_res.returncode == 0:
+            d_data = json.loads(d_res.stdout)
+            devices_by_runtime = d_data.get("devices", {})
+            total_avail = 0
+            total_booted = 0
+            for rt, devs in devices_by_runtime.items():
+                if "iOS" not in rt: continue
+                for d in devs:
+                    if d.get("isAvailable") != False:
+                        total_avail += 1
+                        if d.get("state") == "Booted":
+                            total_booted += 1
+            diag["available_devices_count"] = total_avail
+            diag["booted_devices_count"] = total_booted
+    except Exception as e:
+        diag["error_message"] = str(e)
+
+    dest = get_best_simulator_destination()
+    diag["best_destination"] = dest
+    diag["is_concrete"] = "id=" in dest
+    return diag
 def get_test_plan_flags(plan_path: Path) -> str:
     """
     Manually parses an .xctestplan file and returns -only-testing flags.
