@@ -138,5 +138,60 @@ class ConsoleSmokeTests(unittest.TestCase):
         dev_console.handle_github_menu(["local"], ["gemini"])
         self.assertTrue(True)
 
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_manage_tests_menu_smoke(self, _mock_status, _mock_clear, mock_get_key):
+        """Superficially run through Manage Tests & Coverage menu options."""
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["b"])
+        
+        dev_console.handle_manage_tests(["local"], ["gemini"])
+        self.assertTrue(True)
+
+    def test_discover_test_suites(self):
+        """Verify discovery of Swift test suites and test count parsing."""
+        test_dir = self.temp_root / "AppTests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        test_file = test_dir / "AuthTests.swift"
+        test_file.write_text("""import XCTest
+class AuthTests: XCTestCase {
+    func testLoginSuccess() { XCTAssertTrue(true) }
+    func testLoginFailure() { XCTAssertFalse(false) }
+    func testTokenExpiry() { }
+}
+""")
+        suites = dev_console.discover_test_suites(self.temp_root, "AppTests")
+        self.assertEqual(len(suites), 1)
+        self.assertEqual(suites[0]["name"], "AuthTests")
+        self.assertEqual(suites[0]["test_count"], 3)
+
+    @patch("dev_console.prompt_input")
+    @patch("dev_console.input")
+    def test_rename_test_suite(self, mock_input, mock_prompt_input):
+        """Verify renaming a Swift test suite updates both the file and class definition."""
+        test_dir = self.temp_root / "AppTests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        test_file = test_dir / "OldAuthTests.swift"
+        test_file.write_text("""import XCTest
+class OldAuthTests: XCTestCase {
+    func testExample() {}
+}
+""")
+        suite = {
+            "path": test_file,
+            "rel_path": "AppTests/OldAuthTests.swift",
+            "name": "OldAuthTests",
+            "test_count": 1
+        }
+        mock_prompt_input.return_value = "NewAuthTests"
+        mock_input.return_value = ""
+
+        success = dev_console.rename_test_suite(suite, self.temp_root)
+        self.assertTrue(success)
+        self.assertFalse(test_file.exists())
+        new_file = test_dir / "NewAuthTests.swift"
+        self.assertTrue(new_file.exists())
+        self.assertIn("class NewAuthTests: XCTestCase", new_file.read_text())
+
 if __name__ == "__main__":
     unittest.main()
