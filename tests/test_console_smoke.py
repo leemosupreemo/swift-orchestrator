@@ -203,5 +203,20 @@ class OldAuthTests: XCTestCase {
         dev_console.handle_test_frameworks_menu(["local"], ["gemini"])
         self.assertTrue(True)
 
+    @patch("dev_console.input")
+    @patch("dev_console.subprocess.Popen")
+    @patch("dev_console.clear_screen")
+    def test_run_calculate_coverage_smoke(self, _mock_clear, mock_popen, mock_input):
+        """Verify run_calculate_coverage executes without NameError or crash."""
+        mock_input.return_value = ""
+        mock_proc = MagicMock()
+        mock_proc.stdout = ["Test Suite Passed\n"]
+        mock_proc.wait.return_value = 0
+        mock_popen.return_value = mock_proc
+
+        pct = dev_console.run_calculate_coverage(["local"], ["gemini"])
+        # Should return calculated percentage (or float/None without raising NameError)
+        self.assertTrue(pct is None or isinstance(pct, (int, float)))
+
 if __name__ == "__main__":
     unittest.main()

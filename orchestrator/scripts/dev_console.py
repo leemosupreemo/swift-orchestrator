@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -1930,14 +1930,15 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
         "-allowProvisioningUpdates"
     ]
     if PROJECT_CONFIG.xcode_workspace:
-        cmd.extend(["-workspace", PROJECT_CONFIG.xcode_workspace])
+        cmd.extend(["-workspace", str(PROJECT_CONFIG.xcode_workspace)])
     elif PROJECT_CONFIG.xcode_project:
-        cmd.extend(["-project", PROJECT_CONFIG.xcode_project])
+        cmd.extend(["-project", str(PROJECT_CONFIG.xcode_project)])
     
-    print(f"\033[90mCommand: {' '.join(cmd)}\033[0m\n")
+    cmd_str = [str(c) for c in cmd]
+    print(f"\033[90mCommand: {' '.join(cmd_str)}\033[0m\n")
     try:
         proc = subprocess.Popen(
-            cmd,
+            cmd_str,
             cwd=str(ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
