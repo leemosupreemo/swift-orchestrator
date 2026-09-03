@@ -342,6 +342,12 @@ class CliTests(unittest.TestCase):
             self.assertIn("--provisioning-profile", setup_args)
             self.assertIn("Profile B", setup_args)
 
+    @patch("orchestrator.cli.run_script", return_value=0)
+    def test_distribute_command_dispatches_to_smoke_test_delivery(self, mock_run_script) -> None:
+        self.assertEqual(cli.main(["distribute", "--notes", "Quick test build"]), 0)
+        mock_run_script.assert_called_with("smoke_test_delivery.py", [])
+        self.assertEqual(os.environ.get("DISTRIBUTION_RELEASE_NOTES"), "Quick test build")
+
 
 if __name__ == "__main__":
     unittest.main()

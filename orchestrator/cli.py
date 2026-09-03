@@ -1292,6 +1292,10 @@ def _main(argv: list[str] | None = None) -> int:
     update_parser.add_argument("--fleet", action="store_true", help="Update all enabled remote workers in the fleet")
     update_parser.add_argument("--project", help="Recent project name or project root path (required for --fleet)")
 
+    distribute_parser = subparsers.add_parser("distribute", help="Quickly build and distribute current project to Firebase")
+    distribute_parser.add_argument("--project", help="Recent project name or project root path")
+    distribute_parser.add_argument("--notes", help="Release notes for this build")
+
     fix_parser = subparsers.add_parser("fix", help="Fast 1-line bug fix / feedback for active or new job")
     fix_parser.add_argument("feedback", help="Description of what is broken or what to fix")
     fix_parser.add_argument("--job", help="Specific job ID or job JSON file path")
@@ -1312,6 +1316,12 @@ def _main(argv: list[str] | None = None) -> int:
         if args.project and apply_project_env(args.project):
             return 1
         return run_script("dev_console.py", [])
+    if args.command == "distribute":
+        if args.project and apply_project_env(args.project):
+            return 1
+        if getattr(args, "notes", None):
+            os.environ["DISTRIBUTION_RELEASE_NOTES"] = args.notes
+        return run_script("smoke_test_delivery.py", [])
     if args.command == "fix":
         return fix_command(args)
     if args.command == "check":

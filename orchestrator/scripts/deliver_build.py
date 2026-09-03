@@ -76,10 +76,13 @@ def deliver_build(job_path: Path):
         print(f"\n   \033[1;92m✓ Branch Status:\033[0m \033[90mAlready on correct branch '{branch}'\033[0m", flush=True)
     
     # 2. Build Release Notes
+    build_number = job.get("build_number") or subprocess.check_output(['date', '+%Y%m%d%H%M%S']).decode('utf-8').strip()
+    built_at = subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').strip()
     release_notes = f"""AI Job: {job_id}
 Title: {title}
 Branch: {branch}
-Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').strip()}
+Build: {build_number}
+Built: {built_at}
 """
     
     # 3. Call the existing distribution script
@@ -124,6 +127,7 @@ Built: {subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode('utf-8').
             cmd.extend(["--scheme", PROJECT_CONFIG.scheme])
             
         cmd.extend(["--release-notes", release_notes])
+        cmd.extend(["--build-number", str(build_number)])
         
         provisioning_profile = getattr(PROJECT_CONFIG, "provisioning_profile_specifier", None)
         if provisioning_profile:

@@ -4440,6 +4440,90 @@ def check_essential_environment(session_allowed_machines: list[str]):
             print("\n    Check complete. You can run it again any time from the Configuration menu.")
             input("    \033[1;96mPress Enter to start the Orchestrator...\033[0m")
 
+def handle_quick_distribute(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
+    error_msg = ""
+    while True:
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
+
+            print_header("Quick Build & Distribution (Firebase)")
+
+            # Pre-flight check
+            dist_errors = PROJECT_CONFIG.validate_distribution_config()
+            if dist_errors:
+                print("\n  \033[1;91m⚠️ Distribution configuration is incomplete:\033[0m")
+                for err in dist_errors:
+                    print(f"    - {err}")
+                print("\n  Run '\033[1;96mC\033[0m' -> Configuration & Tools -> Firebase App Distro to configure.")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                return
+
+            current_branch = "unknown"
+            try:
+                current_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ROOT)).decode("utf-8").strip()
+            except:
+                pass
+
+            print_wrapped_description("Builds, archives, and uploads an IPA of the current working branch directly to Firebase App Distribution with automated version incrementing.", indent_size=2)
+            print()
+            print(f"  \033[1;36m• Project / Scheme:\033[0m   \033[97m{PROJECT_CONFIG.scheme or PROJECT_CONFIG.project_name or ROOT.name}\033[0m")
+            print(f"  \033[1;36m• Current Branch:\033[0m     \033[1;92m{current_branch}\033[0m")
+            print(f"  \033[1;36m• Delivery Method:\033[0m    \033[97m{PROJECT_CONFIG.delivery_method or 'ad-hoc'}\033[0m")
+            print(f"  \033[1;36m• Tester Groups:\033[0m      \033[97m{getattr(PROJECT_CONFIG, 'firebase_groups', None) or 'internal-testers'}\033[0m")
+            print()
+            print("  [\033[1;92mD\033[0m] Quick Distribute (Current Branch)")
+            print("  [\033[1;96mN\033[0m] Distribute with Custom Release Notes")
+            print("  [\033[1;91mB\033[0m] Back")
+
+            if error_msg:
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                error_msg = ""
+
+            prompt = get_choice_prompt("Choice:", "(D/N/B)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if choice == "b":
+                break
+            elif choice in ("d", "n"):
+                custom_notes = None
+                if choice == "n":
+                    clear_screen()
+                    status_bar.set_scroll_region()
+                    print_header("Custom Release Notes")
+                    try:
+                        custom_notes = prompt_input("Enter release notes for this build:", placeholder="e.g., Bug fix for login screen", field_below=True)
+                    except BackException:
+                        continue
+
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+                clear_screen()
+                print_header(f"Distributing Build: {current_branch}")
+                print("\033[90mArchiving and uploading to Firebase (estimated 2-5 minutes)...\033[0m\n")
+
+                prev_notes = os.environ.get("DISTRIBUTION_RELEASE_NOTES")
+                try:
+                    if custom_notes:
+                        os.environ["DISTRIBUTION_RELEASE_NOTES"] = custom_notes
+                    run_script("smoke_test_delivery.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                finally:
+                    if prev_notes is not None:
+                        os.environ["DISTRIBUTION_RELEASE_NOTES"] = prev_notes
+                    else:
+                        os.environ.pop("DISTRIBUTION_RELEASE_NOTES", None)
+
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                break
+            else:
+                error_msg = f"'{choice}'"
+
 def main_loop():
     # Sync with GitHub on launch
     clear_screen()
@@ -4505,6 +4589,7 @@ def main_loop():
                 print_header("Actions")
                 print("[\033[96mN\033[0m] New Job")
                 print("[\033[93mV\033[0m] Run your unit tests")
+                print("[\033[93mD\033[0m] Distribute build (Firebase)")
                 print("[\033[93mC\033[0m] Configuration & Tools")
                 print("[\033[93mR\033[0m] Refresh & Sync (GitHub)")
                 print("[\033[1;91mQ\033[0m] Quit")
@@ -4618,6 +4703,8 @@ def main_loop():
                         handle_new_job(session_allowed_models=session_allowed_models, session_allowed_machines=session_allowed_machines)
                     elif choice == "v":
                         handle_app_tests(session_allowed_machines, session_allowed_models)
+                    elif choice == "d":
+                        handle_quick_distribute(session_allowed_machines, session_allowed_models)
                     elif choice == "r":
                         print_header("Refreshing & Syncing with GitHub")
                         handle_cleanup_closed(silent=False, confirm=False)

@@ -92,14 +92,15 @@ def run_smoke_delivery():
 
     try:
         # 2. Create Mock Job JSON
+        title = os.environ.get("DISTRIBUTION_RELEASE_NOTES") or "Quick Console Delivery"
         job_data = {
             "job_id": test_id,
-            "title": "Smoke Test Delivery",
+            "title": title,
             "status": "review-needed",
             "branch": branch,
             "issue_number": 9999,
-            "builder": "gemini",
-            "reviewer": "gemini",
+            "builder": "console",
+            "reviewer": "console",
             "testers": os.environ.get("FIREBASE_TESTERS", ""),
             "groups": os.environ.get("FIREBASE_GROUPS", "")
         }
