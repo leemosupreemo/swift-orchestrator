@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
@@ -1921,10 +1921,12 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
     cov_out_dir.mkdir(parents=True, exist_ok=True)
     result_bundle = cov_out_dir / f"Coverage-{timestamp()}.xcresult"
     
+    destination = get_best_simulator_destination()
+    
     cmd = [
         "xcodebuild", "test",
         "-scheme", scheme,
-        "-destination", "generic/platform=iOS Simulator",
+        "-destination", destination,
         "-enableCodeCoverage", "YES",
         "-resultBundlePath", str(result_bundle),
         "-allowProvisioningUpdates"
@@ -1936,6 +1938,23 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
     
     cmd_str = [str(c) for c in cmd]
     print(f"\033[90mCommand: {' '.join(cmd_str)}\033[0m\n")
+
+    import shutil
+    has_xcbeautify = shutil.which("xcbeautify") is not None
+    formatter_proc = None
+    if has_xcbeautify:
+        try:
+            formatter_proc = subprocess.Popen(
+                ["xcbeautify"],
+                stdin=subprocess.PIPE,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                text=True,
+                bufsize=1
+            )
+        except Exception:
+            formatter_proc = None
+
     try:
         proc = subprocess.Popen(
             cmd_str,
@@ -1946,9 +1965,24 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
             bufsize=1
         )
         for line in proc.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            if formatter_proc and formatter_proc.stdin:
+                try:
+                    formatter_proc.stdin.write(line)
+                    formatter_proc.stdin.flush()
+                except Exception:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            else:
+                sys.stdout.write(line)
+                sys.stdout.flush()
         proc.wait()
+
+        if formatter_proc and formatter_proc.stdin:
+            try:
+                formatter_proc.stdin.close()
+                formatter_proc.wait()
+            except Exception:
+                pass
     except Exception as e:
         print(f"\n⚠️ Xcode test execution failed: {e}")
 
