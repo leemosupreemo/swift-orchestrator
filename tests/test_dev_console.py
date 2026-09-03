@@ -489,7 +489,7 @@ class DevConsoleTests(unittest.TestCase):
                     stack.enter_context(patch("dev_console.prompt_input", side_effect=["", "0"]))
                     mock_auto_logs = stack.enter_context(patch("dev_console.auto_link_latest_logs"))
                     stack.enter_context(patch("dev_console.prompt_autofix_iteration_settings", return_value=(None, 8)))
-                    mock_loading = stack.enter_context(patch("dev_console.run_with_loading_screen", return_value=(["Gemini"], {"Gemini": "gemini"}, {})))
+                    mock_loading = stack.enter_context(patch("dev_console.run_with_loading_screen", return_value=(["Gemini"], {"Gemini": "gemini"}, {}, [])))
                     mock_checkbox = stack.enter_context(patch("dev_console.prompt_checkbox", return_value=[]))
                     mock_subprocess_run = stack.enter_context(patch("dev_console.subprocess.run"))
                     mock_project_config = stack.enter_context(patch("dev_console.PROJECT_CONFIG"))
@@ -643,16 +643,16 @@ Option A: Headless Auto-Signing (Recommended)
         mock_which.side_effect = lambda name: f"/usr/bin/{name}" if name == "ollama" else None
         mock_run.return_value = MagicMock(returncode=0, stdout="NAME ID SIZE MODIFIED\n", stderr="")
 
-        options, _value_map, details_map = dev_console.get_model_selection_data()
+        options, _value_map, details_map, _summary = dev_console.get_model_selection_data()
 
         qwen_label = next(option for option in options if option.startswith("qwen-3.7-max"))
-        self.assertIn("[Not Enabled]", qwen_label)
+        self.assertIn("[Not Downloaded]", qwen_label)
         details = "\n".join(details_map[qwen_label])
         self.assertIn("Access:", details)
-        self.assertIn("Not enabled", details)
+        self.assertIn("Not downloaded", details)
         self.assertIn("Backend:", details)
         self.assertIn("ollama", details)
-        self.assertIn("Local model:", details)
+        self.assertIn("Ollama Model:", details)
         self.assertIn("missing", details)
         self.assertIn("ollama pull qwen-3.7-max", details)
 
@@ -676,14 +676,14 @@ Option A: Headless Auto-Signing (Recommended)
             stderr="",
         )
 
-        options, _value_map, details_map = dev_console.get_model_selection_data()
+        options, _value_map, details_map, _summary = dev_console.get_model_selection_data()
 
         qwen_label = next(option for option in options if option.startswith("qwen-3.7-max"))
         self.assertNotIn("[Not Enabled]", qwen_label)
         details = "\n".join(details_map[qwen_label])
         self.assertIn("Access:", details)
         self.assertIn("Ready", details)
-        self.assertIn("Local model:", details)
+        self.assertIn("Ollama Model:", details)
         self.assertIn("installed", details)
 
     def test_model_selection_defaults_skip_unavailable_labels(self):

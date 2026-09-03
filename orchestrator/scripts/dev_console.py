@@ -367,11 +367,8 @@ def get_model_selection_data() -> tuple[list[str], dict[str, str], dict[str, lis
         # Overall readiness
         is_ready = (cli_installed and cli_authed) or has_api_key
 
-        # Dynamically hide models/sections the user does not have access to
-        if not is_ready:
-            continue
-
-        enabled_families.add(eff_fam)
+        if is_ready:
+            enabled_families.add(eff_fam)
 
         if eff_fam != current_family:
             if current_family is not None:
