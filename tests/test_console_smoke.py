@@ -193,5 +193,15 @@ class OldAuthTests: XCTestCase {
         self.assertTrue(new_file.exists())
         self.assertIn("class NewAuthTests: XCTestCase", new_file.read_text())
 
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_test_frameworks_menu_smoke(self, _mock_status, _mock_clear, mock_get_key):
+        """Superficially run through Test Frameworks & Plugins menu."""
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["b"])
+        
+        dev_console.handle_test_frameworks_menu(["local"], ["gemini"])
+        self.assertTrue(True)
+
 if __name__ == "__main__":
     unittest.main()

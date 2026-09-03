@@ -2000,6 +2000,207 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
     return overall_pct
 
+def handle_test_frameworks_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
+    error_msg = ""
+    while True:
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
+
+            print_header("Recommended Test Frameworks & Plugins")
+
+            # 1. Detection
+            import shutil
+            has_xcbeautify = shutil.which("xcbeautify") is not None
+            xcbeautify_status = "\033[92mINSTALLED\033[0m (Output auto-formatted)" if has_xcbeautify else "\033[93mNOT INSTALLED\033[0m (Run: brew install xcbeautify)"
+
+            # Scan test files for imports
+            suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
+            all_test_content = ""
+            for s in suites:
+                try:
+                    all_test_content += s["path"].read_text(encoding="utf-8") + "\n"
+                except Exception:
+                    pass
+
+            has_swift_testing = "import Testing" in all_test_content or "@Test" in all_test_content
+            has_snapshot_testing = "import SnapshotTesting" in all_test_content or "assertSnapshot" in all_test_content
+            has_quick_nimble = "import Quick" in all_test_content or "import Nimble" in all_test_content
+
+            st_status = "\033[92mIN USE\033[0m" if has_swift_testing else "\033[96mAVAILABLE\033[0m (Native Xcode 16+)"
+            snap_status = "\033[92mIN USE\033[0m" if has_snapshot_testing else "\033[90mNOT DETECTED\033[0m (SPM: swift-snapshot-testing)"
+            qn_status = "\033[92mIN USE\033[0m" if has_quick_nimble else "\033[90mNOT DETECTED\033[0m (SPM: Quick/Nimble)"
+
+            print("  \033[1;90m--- FRAMEWORK STATUS IN PROJECT ---\033[0m")
+            print(f"  \033[1;36m• Swift Testing (Native):\033[0m        {st_status}")
+            print(f"  \033[1;36m• Point-Free SnapshotTesting:\033[0m    {snap_status}")
+            print(f"  \033[1;36m• Quick & Nimble (BDD):\033[0m          {qn_status}")
+            print(f"  \033[1;36m• xcbeautify (CLI Formatter):\033[0m    {xcbeautify_status}")
+            print()
+
+            print("  \033[1;90m--- GUIDES & ACTIONS ---\033[0m")
+            print("  [\033[1;96m1\033[0m] View Swift Testing Guide & Template (@Suite, @Test, #expect)")
+            print("  [\033[1;96m2\033[0m] View Point-Free SnapshotTesting Guide & Template (assertSnapshot)")
+            print("  [\033[1;96m3\033[0m] View Quick & Nimble BDD Guide & Template (describe/context/it)")
+            print("  [\033[1;96m4\033[0m] Generate Sample Swift Testing File for Your Project")
+            if not has_xcbeautify:
+                print("  [\033[1;92mI\033[0m] Install xcbeautify (via Homebrew)")
+            print("  [\033[1;91mB\033[0m] Back")
+
+            if error_msg:
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                error_msg = ""
+
+            prompt = get_choice_prompt("Choice:", "(1-4, I, B)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if choice == "b":
+                break
+            elif choice == "1":
+                clear_screen()
+                print_header("Swift Testing Framework (Apple Native)")
+                print("""\033[1;97mOverview:\033[0m
+  Swift Testing is Apple's modern testing framework introduced in Xcode 16.
+  It replaces XCTest with clean macros, parameterized tests, and structured traits.
+
+\033[1;97mStarter Template:\033[0m
+```swift
+import Testing
+@testable import MyApp
+
+@Suite("Authentication & Session Suite")
+struct AuthenticationTests {
+    @Test("Valid credentials authenticate successfully")
+    func loginSuccess() async throws {
+        let authService = AuthService()
+        let result = try await authService.login(email: "user@example.com", password: "secure")
+        #expect(result.isAuthenticated)
+        #expect(result.token != nil)
+    }
+
+    @Test("Input validation for malformed emails", arguments: ["", "bad-email", "@no-domain.com"])
+    func invalidEmails(email: String) {
+        #expect(Validator.isValid(email: email) == false)
+    }
+}
+```""")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            elif choice == "2":
+                clear_screen()
+                print_header("Point-Free SnapshotTesting")
+                print("""\033[1;97mOverview:\033[0m
+  SnapshotTesting automatically captures images or textual representations of your
+  SwiftUI views, ViewControllers, or data structures, catching visual regressions.
+
+\033[1;97mInstallation via SPM:\033[0m
+  URL: https://github.com/pointfreeco/swift-snapshot-testing
+  Branch/Tag: from 1.17.0
+
+\033[1;97mStarter Template:\033[0m
+```swift
+import XCTest
+import SnapshotTesting
+import SwiftUI
+@testable import MyApp
+
+final class ProfileViewSnapshotTests: XCTestCase {
+    func testProfileViewLightMode() {
+        let view = ProfileView(user: .mock)
+        let vc = UIHostingController(rootView: view)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852) // iPhone 16 Pro
+        
+        assertSnapshot(of: vc, as: .image)
+    }
+}
+```""")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            elif choice == "3":
+                clear_screen()
+                print_header("Quick & Nimble (Behavior-Driven Development)")
+                print("""\033[1;97mOverview:\033[0m
+  Quick provides a BDD DSL (describe/context/it) and Nimble provides expressive,
+  fluent matchers with asynchronous expectation support (toEventually).
+
+\033[1;97mInstallation via SPM:\033[0m
+  URLs: https://github.com/Quick/Quick and https://github.com/Quick/Nimble
+
+\033[1;97mStarter Template:\033[0m
+```swift
+import Quick
+import Nimble
+@testable import MyApp
+
+final class CartSpec: AsyncSpec {
+    override class func spec() {
+        describe("Shopping Cart") {
+            var cart: ShoppingCart!
+
+            beforeEach {
+                cart = ShoppingCart()
+            }
+
+            context("when an item is added") {
+                it("increases total price") {
+                    cart.add(item: Item(price: 19.99))
+                    expect(cart.total).to(equal(19.99))
+                }
+            }
+        }
+    }
+}
+```""")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            elif choice == "4":
+                clear_screen()
+                print_header("Generate Sample Test File")
+                tt = PROJECT_CONFIG.test_target or "AppTests"
+                tt_dir = ROOT / tt
+                tt_dir.mkdir(parents=True, exist_ok=True)
+                sample_file = tt_dir / "SampleSwiftTestingTests.swift"
+                sample_code = f"""import Testing
+@testable import {PROJECT_CONFIG.scheme or PROJECT_CONFIG.project_name or "App"}
+
+@Suite("Sample Orchestrator Suite")
+struct SampleSwiftTestingTests {{
+    @Test("Basic arithmetic validation")
+    func basicAssertion() {{
+        #expect(2 + 2 == 4)
+    }}
+
+    @Test("Parameterized calculation test", arguments: [
+        (2, 3, 5),
+        (10, 20, 30),
+        (-5, 5, 0)
+    ])
+    func parameterizedTest(a: Int, b: Int, expected: Int) {{
+        #expect(a + b == expected)
+    }}
+}}
+"""
+                if sample_file.exists():
+                    print(f"\n  \033[93mFile already exists: {sample_file.relative_to(ROOT)}\033[0m")
+                else:
+                    sample_file.write_text(sample_code, encoding="utf-8")
+                    print(f"\n  \033[1;92m✅ Created {sample_file.relative_to(ROOT)}\033[0m")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            elif choice == "i" and not has_xcbeautify:
+                clear_screen()
+                print_header("Installing xcbeautify via Homebrew")
+                res = subprocess.run(["brew", "install", "xcbeautify"])
+                if res.returncode == 0:
+                    print("\n\033[1;92m✅ Successfully installed xcbeautify!\033[0m")
+                else:
+                    print(f"\n\033[1;91m❌ Installation failed with code {res.returncode}.\033[0m")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            else:
+                error_msg = f"'{choice}'"
+
 def handle_manage_tests(session_allowed_machines: list[str], session_allowed_models: list[str]):
     error_msg = ""
     while True:
@@ -2062,6 +2263,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             print("  [\033[1;92mA\033[0m] Run All Unit Tests")
             print("  [\033[1;96mC\033[0m] Calculate / Refresh Code Coverage")
             print("  [\033[1;96mE\033[0m] Expand Unit Test Coverage (Create AI Coverage Job)")
+            print("  [\033[1;96mF\033[0m] Recommended Test Frameworks & Plugins (SnapshotTesting, etc.)")
             print("  [\033[1;96mR\033[0m] Rename a Test Suite / File")
             print("  [\033[1;96mV\033[0m] Simulator Visual Check (build, launch, screenshots)")
             print("  [\033[1;91mB\033[0m] Back")
@@ -2098,6 +2300,8 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                 status_bar.clear_footer()
                 status_bar.reset_scroll_region(force=True)
                 run_script("new_job.py", ["coverage", "--summary", summary], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+            elif choice == "f":
+                handle_test_frameworks_menu(session_allowed_machines, session_allowed_models)
             elif choice == "r":
                 if not suites:
                     print("\n  \033[90mNo test suites available to rename.\033[0m")

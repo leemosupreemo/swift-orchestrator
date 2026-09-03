@@ -5,7 +5,7 @@ USE YOUR TOOLS (read_file, grep_search, replace, write_file) to inspect the code
 Follow existing patterns and naming conventions.
 
 ### MANDATORY TEST-DRIVEN DEVELOPMENT (TDD)
-1. **Red:** Use your tools to implement a failing unit or integration test FIRST.
+1. **Red:** Use your tools to implement a failing unit or integration test FIRST. Match existing conventions (use modern `Swift Testing` `@Suite`/`@Test`/`#expect` or `XCTestCase`, or `SnapshotTesting` for SwiftUI views if present).
 2. **Green:** Implement the minimal production code to pass that test.
 3. **Refactor:** Clean up code, maintaining passing tests.
 

@@ -60,6 +60,23 @@ def stream_command(cmd: str, log_file: Path) -> bool:
     print(f"🚀 Executing: {cmd}", flush=True)
     print(f"📝 Logging to: {log_file.relative_to(ROOT)}", flush=True)
     
+    import shutil
+    has_xcbeautify = shutil.which("xcbeautify") is not None and "xcodebuild" in cmd
+
+    formatter_proc = None
+    if has_xcbeautify:
+        try:
+            formatter_proc = subprocess.Popen(
+                ["xcbeautify"],
+                stdin=subprocess.PIPE,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                text=True,
+                bufsize=1
+            )
+        except Exception:
+            formatter_proc = None
+
     with open(log_file, "w", encoding="utf-8") as f:
         process = subprocess.Popen(
             cmd,
@@ -73,12 +90,28 @@ def stream_command(cmd: str, log_file: Path) -> bool:
         )
         
         for line in process.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
             f.write(line)
             f.flush()
+            if formatter_proc and formatter_proc.stdin:
+                try:
+                    formatter_proc.stdin.write(line)
+                    formatter_proc.stdin.flush()
+                except Exception:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            else:
+                sys.stdout.write(line)
+                sys.stdout.flush()
             
         process.wait()
+
+        if formatter_proc and formatter_proc.stdin:
+            try:
+                formatter_proc.stdin.close()
+                formatter_proc.wait()
+            except Exception:
+                pass
+
         return process.returncode == 0
 
 def capture_logs(manual_out: Path) -> Path | None:
