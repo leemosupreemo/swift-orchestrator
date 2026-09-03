@@ -91,18 +91,20 @@ class ConsoleSmokeTests(unittest.TestCase):
         
         self.assertTrue(True)
 
+    @patch("dev_console.prompt_input")
     @patch("dev_console.get_key")
     @patch("dev_console.clear_screen")
     @patch("dev_console.StatusBar")
     @patch("dev_console.input")
-    def test_config_menu_smoke(self, mock_input, _mock_status, _mock_clear, mock_get_key):
+    def test_config_menu_smoke(self, mock_input, _mock_status, _mock_clear, mock_get_key, mock_prompt_input):
         """Superficially run through Configuration menu options."""
         # Traversal:
         # 'i' (Instructions) -> 'b' (Back)
-        # 's' (Setup Guide) -> Enter
+        # 's' (Docs) -> 'b' (Back)
         # 'b' (Back/Exit menu)
-        mock_get_key.side_effect = self._mock_get_key_side_effect(["i", "b", "s", "b", "b"])
-        mock_input.return_value = "" # For 's' setup guide exit
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["i", "b", "s", "b"])
+        mock_prompt_input.side_effect = ["b"]
+        mock_input.return_value = ""
         
         # Avoid running actual scripts during smoke test
         with patch("dev_console.run_script") as mock_run:
@@ -120,6 +122,20 @@ class ConsoleSmokeTests(unittest.TestCase):
         mock_get_key.side_effect = self._mock_get_key_side_effect(["b"])
         
         dev_console.handle_tooling_tests(["local"], ["gemini"])
+        self.assertTrue(True)
+
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("subprocess.check_output")
+    def test_github_menu_smoke(self, mock_check_output, _mock_status, _mock_clear, mock_get_key):
+        """Superficially run through GitHub & Source Control menu options."""
+        mock_check_output.return_value = b"main\n"
+        # Traversal:
+        # 'r' (Refresh) -> 'b' (Back/Exit menu)
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["r", "b"])
+        
+        dev_console.handle_github_menu(["local"], ["gemini"])
         self.assertTrue(True)
 
 if __name__ == "__main__":

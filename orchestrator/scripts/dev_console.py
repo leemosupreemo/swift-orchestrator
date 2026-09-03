@@ -4524,6 +4524,252 @@ def handle_quick_distribute(session_allowed_machines: list[str], session_allowed
             else:
                 error_msg = f"'{choice}'"
 
+def handle_github_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
+    error_msg = ""
+    while True:
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
+
+            print_header("GitHub & Source Control")
+
+            # 1. Check Git & GitHub Connection
+            import shutil
+            has_gh = shutil.which("gh") is not None
+            gh_cli_status = "\033[92mINSTALLED\033[0m" if has_gh else "\033[1;91mMISSING\033[0m (Run: brew install gh)"
+            
+            gh_auth_status = ""
+            gh_user = None
+            gh_ok = False
+            if has_gh:
+                try:
+                    auth_out = subprocess.check_output(["gh", "auth", "status"], stderr=subprocess.STDOUT, cwd=str(ROOT), timeout=5).decode("utf-8")
+                    gh_user_match = re.search(r"Logged in to [^\s]+ account ([^\s\(]+)", auth_out)
+                    gh_user = gh_user_match.group(1) if gh_user_match else "LOGGED IN"
+                    gh_auth_status = f"\033[92m{gh_user}\033[0m"
+                    gh_ok = True
+                except subprocess.CalledProcessError as e:
+                    err_out = e.output.decode("utf-8") if hasattr(e, "output") and e.output else ""
+                    if "Logged in to" in err_out:
+                        gh_user_match = re.search(r"Logged in to [^\s]+ account ([^\s\(]+)", err_out)
+                        gh_user = gh_user_match.group(1) if gh_user_match else "LOGGED IN"
+                        gh_auth_status = f"\033[92m{gh_user}\033[0m"
+                        gh_ok = True
+                    else:
+                        gh_auth_status = "\033[1;91mNOT LOGGED IN\033[0m (Run: gh auth login)"
+                        gh_ok = False
+                except Exception:
+                    gh_auth_status = "\033[1;91mNOT LOGGED IN\033[0m"
+                    gh_ok = False
+            else:
+                gh_auth_status = "\033[90mN/A\033[0m"
+
+            # 2. Check Remote Origin
+            git_remote_url = "NOT SET"
+            try:
+                git_remote_url = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+            except:
+                git_remote_url = PROJECT_CONFIG.git_remote or "NOT SET"
+
+            # 3. Check Current Branch & Working Tree
+            current_branch = "unknown"
+            try:
+                current_branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+            except:
+                pass
+
+            tree_status = "\033[90mUNKNOWN\033[0m"
+            uncommitted_count = 0
+            try:
+                status_porcelain = subprocess.check_output(["git", "status", "--porcelain"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                if not status_porcelain:
+                    tree_status = "\033[92mCLEAN\033[0m"
+                else:
+                    uncommitted_count = len(status_porcelain.splitlines())
+                    tree_status = f"\033[93m{uncommitted_count} uncommitted file(s)\033[0m"
+            except:
+                pass
+
+            tracking_display = "\033[90mUNKNOWN\033[0m"
+            try:
+                upstream_out = subprocess.check_output(["git", "status", "-sb"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                first_line = upstream_out.splitlines()[0] if upstream_out else ""
+                if "[" in first_line and "]" in first_line:
+                    tracking_info = first_line.split("[", 1)[1].split("]", 1)[0]
+                    tracking_display = f"\033[93m{tracking_info}\033[0m"
+                elif "..." in first_line:
+                    tracking_display = "\033[92mUp to date with remote\033[0m"
+                else:
+                    tracking_display = "\033[90mNo remote tracking branch\033[0m"
+            except:
+                pass
+
+            # 4. Fetch local branches
+            branches = []
+            try:
+                branch_out = subprocess.check_output(["git", "branch", "--sort=-committerdate"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8")
+                branches = [b.strip().replace("* ", "") for b in branch_out.splitlines() if b.strip()]
+            except:
+                pass
+
+            # Display Status Section
+            print("  \033[1;90m--- GITHUB CONNECTION & REPO STATUS ---\033[0m")
+            print(f"  \033[1;36m• GitHub CLI:\033[0m        {gh_cli_status}")
+            print(f"  \033[1;36m• GitHub Account:\033[0m    {gh_auth_status}")
+            print(f"  \033[1;36m• Remote Origin:\033[0m     \033[97m{git_remote_url}\033[0m")
+            print(f"  \033[1;36m• Current Branch:\033[0m    \033[1;92m{current_branch}\033[0m \033[90m({tracking_display})\033[0m")
+            print(f"  \033[1;36m• Working Tree:\033[0m      {tree_status}")
+
+            # Guidance Banner if GitHub is not hooked up properly
+            if not has_gh or not gh_ok or git_remote_url in ("NOT SET", ""):
+                print("\n  \033[1;93m╭───────────────────────────────────────────────────────────────╮\033[0m")
+                print("  \033[1;93m│ ⚠️  GitHub Configuration Needs Attention:                     │\033[0m")
+                if not has_gh:
+                    print("  \033[1;93m│\033[0m   1. Install GitHub CLI: \033[97mbrew install gh\033[0m                     \033[1;93m│\033[0m")
+                if has_gh and not gh_ok:
+                    print("  \033[1;93m│\033[0m   2. Authenticate: Press \033[1;96m[L]\033[0m or run \033[97mgh auth login\033[0m           \033[1;93m│\033[0m")
+                if git_remote_url in ("NOT SET", ""):
+                    print("  \033[1;93m│\033[0m   3. Set remote: \033[97mgit remote add origin <github-repo-url>\033[0m      \033[1;93m│\033[0m")
+                print("  \033[1;93m╰───────────────────────────────────────────────────────────────╯\033[0m")
+
+            # Display Branches List
+            if branches:
+                print("\n  \033[1;90m--- BRANCHES (Most Recent) ---\033[0m")
+                max_display = 6
+                for b in branches[:max_display]:
+                    if b == current_branch:
+                        print(f"    \033[1;92m* {b}\033[0m \033[90m(current)\033[0m")
+                    else:
+                        print(f"      \033[97m{b}\033[0m")
+                if len(branches) > max_display:
+                    print(f"      \033[90m... and {len(branches) - max_display} more local branch(es)\033[0m")
+
+            # Actions Menu
+            print("\n  \033[1;90m--- ACTIONS ---\033[0m")
+            print("    [\033[1;92mS\033[0m] Sync with GitHub (Archive closed issues / sync active jobs)")
+            print("    [\033[1;96mP\033[0m] Push Current Branch (git push)")
+            print("    [\033[1;96mU\033[0m] Pull Remote Updates (git pull)")
+            print("    [\033[1;96mC\033[0m] Checkout / Switch Branch")
+            print("    [\033[1;96mN\033[0m] Create & Switch to New Branch")
+            if has_gh:
+                print("    [\033[1;96mO\033[0m] Open Repo in Browser (GitHub)")
+                if not gh_ok:
+                    print("    [\033[1;92mL\033[0m] Login to GitHub (gh auth login)")
+                else:
+                    print("    [\033[1;96mL\033[0m] Re-authenticate GitHub (gh auth login)")
+            print("    [\033[1;96mR\033[0m] Refresh Status")
+            print("    [\033[1;91mB\033[0m] Back")
+
+            if error_msg:
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                error_msg = ""
+
+            prompt = get_choice_prompt("Choice:", "(letter)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if choice == "b":
+                break
+            elif choice == "r":
+                continue
+            elif choice == "s":
+                clear_screen()
+                print_header("Syncing with GitHub")
+                handle_cleanup_closed(silent=False, confirm=True)
+                continue
+            elif choice == "p":
+                clear_screen()
+                print_header(f"Pushing Branch: {current_branch}")
+                print(f"\033[90mRunning: git push origin {current_branch}...\033[0m\n")
+                res = subprocess.run(["git", "push", "-u", "origin", current_branch], cwd=str(ROOT))
+                if res.returncode == 0:
+                    print("\n\033[1;92m✅ Successfully pushed to remote origin.\033[0m")
+                else:
+                    print(f"\n\033[1;91m❌ Push failed (exit code {res.returncode}).\033[0m")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif choice == "u":
+                clear_screen()
+                print_header(f"Pulling Updates: {current_branch}")
+                print("\033[90mRunning: git pull...\033[0m\n")
+                res = subprocess.run(["git", "pull"], cwd=str(ROOT))
+                if res.returncode == 0:
+                    print("\n\033[1;92m✅ Successfully pulled remote updates.\033[0m")
+                else:
+                    print(f"\n\033[1;91m❌ Pull failed (exit code {res.returncode}).\033[0m")
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif choice == "c":
+                if not branches:
+                    print("\n  \033[90mNo branches available to switch.\033[0m")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                    continue
+                clear_screen()
+                print_header("Checkout / Switch Branch")
+                try:
+                    selected_branch = prompt_radio("Select branch to checkout:", branches, default=current_branch)
+                except BackException:
+                    continue
+                if selected_branch and selected_branch != current_branch:
+                    clear_screen()
+                    print_header(f"Switching Branch to {selected_branch}")
+                    res = subprocess.run(["git", "checkout", selected_branch], cwd=str(ROOT))
+                    if res.returncode == 0:
+                        print(f"\n\033[1;92m✅ Switched to branch '{selected_branch}'.\033[0m")
+                    else:
+                        print(f"\n\033[1;91m❌ Checkout failed (exit code {res.returncode}).\033[0m")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif choice == "n":
+                clear_screen()
+                status_bar.set_scroll_region()
+                print_header("Create New Branch")
+                try:
+                    new_branch = prompt_input("Enter new branch name:", placeholder="e.g. feature/auth-flow or ai/issue-10", field_below=True)
+                except BackException:
+                    continue
+                if new_branch:
+                    new_branch = new_branch.strip()
+                    clear_screen()
+                    print_header(f"Creating Branch: {new_branch}")
+                    res = subprocess.run(["git", "checkout", "-b", new_branch], cwd=str(ROOT))
+                    if res.returncode == 0:
+                        print(f"\n\033[1;92m✅ Created and switched to branch '{new_branch}'.\033[0m")
+                    else:
+                        print(f"\n\033[1;91m❌ Branch creation failed (exit code {res.returncode}).\033[0m")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif choice == "o" and has_gh:
+                clear_screen()
+                print_header("Opening Repository on GitHub")
+                try:
+                    subprocess.run(["gh", "repo", "view", "--web"], cwd=str(ROOT), check=False)
+                except Exception:
+                    # Fallback to opening URL via macOS open
+                    if git_remote_url and git_remote_url != "NOT SET":
+                        web_url = git_remote_url
+                        if web_url.startswith("git@github.com:"):
+                            web_url = "https://github.com/" + web_url.split("git@github.com:", 1)[1]
+                        if web_url.endswith(".git"):
+                            web_url = web_url[:-4]
+                        subprocess.run(["open", web_url], check=False)
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif choice == "l" and has_gh:
+                clear_screen()
+                print_header("GitHub CLI Authentication")
+                print("Launching 'gh auth login'...\n")
+                subprocess.run(["gh", "auth", "login"], cwd=str(ROOT))
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            else:
+                error_msg = f"'{choice}'"
+
 def main_loop():
     # Sync with GitHub on launch
     clear_screen()
@@ -4590,8 +4836,8 @@ def main_loop():
                 print("[\033[96mN\033[0m] New Job")
                 print("[\033[93mV\033[0m] Run your unit tests")
                 print("[\033[93mD\033[0m] Distribute build (Firebase)")
+                print("[\033[93mG\033[0m] GitHub & Source Control")
                 print("[\033[93mC\033[0m] Configuration & Tools")
-                print("[\033[93mR\033[0m] Refresh & Sync (GitHub)")
                 print("[\033[1;91mQ\033[0m] Quit")
                 print()
                 
@@ -4705,19 +4951,8 @@ def main_loop():
                         handle_app_tests(session_allowed_machines, session_allowed_models)
                     elif choice == "d":
                         handle_quick_distribute(session_allowed_machines, session_allowed_models)
-                    elif choice == "r":
-                        print_header("Refreshing & Syncing with GitHub")
-                        handle_cleanup_closed(silent=False, confirm=False)
-                        
-                        print("\n\033[93mRefreshing machine availability...\033[0m")
-                        machines_config = load_machines()
-                        refresh_fleet_status(machines_config)
-                        
-                        # Filter session_allowed_machines to only include those that are still online
-                        session_allowed_machines = [m for m in session_allowed_machines if FLEET_AVAILABILITY.get(m, False)]
-                        
-                        print("\n✅ Refresh and sync successful.")
-                        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                    elif choice in ("g", "r"):
+                        handle_github_menu(session_allowed_machines, session_allowed_models)
                         continue
                     else:
                         error_msg = f"'{choice}'"
