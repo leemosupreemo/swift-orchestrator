@@ -708,6 +708,214 @@ Option A: Headless Auto-Signing (Recommended)
 
         self.assertEqual(docs, [first, second])
 
+    def test_discover_test_suites_large_modular_project_1000_tests(self):
+        """Simulate discovering 1000+ tests across modular packages, Swift Testing, XCTest, and Quick/Nimble."""
+        # Module 1: Packages/Core/Tests/CoreTests - 300 tests (Swift Testing with tags/traits)
+        core_dir = self.temp_root / "Packages" / "Core" / "Tests" / "CoreTests"
+        core_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(10):
+            test_methods = "\n".join([
+                f"""    @Test("Core test case {j}", .tags(.critical))
+    @MainActor
+    func coreTest_{j}() async throws {{}}"""
+                for j in range(30)
+            ])
+            (core_dir / f"CoreTests_{i}.swift").write_text(f"""import Testing
+@Suite struct CoreTests_{i} {{
+{test_methods}
+}}
+""")
+
+        # Module 2: Modules/Auth/Tests - 300 tests (XCTest with custom base class)
+        auth_dir = self.temp_root / "Modules" / "Auth" / "Tests"
+        auth_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(10):
+            test_methods = "\n".join([
+                f"""    func testAuthScenario_{j}() {{}}"""
+                for j in range(30)
+            ])
+            (auth_dir / f"AuthTests_{i}.swift").write_text(f"""import XCTest
+class AuthTests_{i}: BaseAuthTestCase {{
+{test_methods}
+}}
+""")
+
+        # Module 3: Features/Checkout/Tests - 200 tests (Quick/Nimble BDD)
+        checkout_dir = self.temp_root / "Features" / "Checkout" / "Tests"
+        checkout_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(10):
+            spec_cases = "\n".join([
+                f"""            it("verifies checkout step {j}") {{}}"""
+                for j in range(20)
+            ])
+            (checkout_dir / f"CheckoutSpec_{i}.swift").write_text(f"""import Quick
+class CheckoutSpec_{i}: QuickSpec {{
+    override class func spec() {{
+        describe("Checkout") {{
+{spec_cases}
+        }}
+    }}
+}}
+""")
+
+        # Module 4: AppTests at root - 250 tests
+        app_dir = self.temp_root / "AppTests"
+        app_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(10):
+            test_methods = "\n".join([
+                f"""    func testAppFeature_{j}() {{}}"""
+                for j in range(25)
+            ])
+            (app_dir / f"AppFeatureTests_{i}.swift").write_text(f"""import XCTest
+class AppFeatureTests_{i}: XCTestCase {{
+{test_methods}
+}}
+""")
+
+        # Total created = 300 + 300 + 200 + 250 = 1050 tests across 40 test files
+        suites = dev_console.discover_test_suites(self.temp_root, "AppTests")
+        total_tests = sum(s["test_count"] for s in suites)
+        self.assertEqual(len(suites), 40)
+        self.assertEqual(total_tests, 1050)
+
+    def test_discover_app_source_files_identifies_untested_modules(self):
+        """Verify categorization of Swift source files and identification of untested ViewModels and Services."""
+        src_dir = self.temp_root / "Sources" / "App"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "AuthViewModel.swift").write_text("// Auth view model\nclass AuthViewModel: ObservableObject {}")
+        (src_dir / "SyncManager.swift").write_text("// Sync manager\nclass SyncManager {}")
+        (src_dir / "DocumentManager.swift").write_text("// Document manager\nclass DocumentManager {}")
+        (src_dir / "DateHelper.swift").write_text("// Date helper\nstruct DateHelper {}")
+
+        test_dir = self.temp_root / "Tests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        (test_dir / "DocumentManagerTests.swift").write_text("import XCTest\nclass DocumentManagerTests: XCTestCase { func testDoc() {} }")
+
+        suites = dev_console.discover_test_suites(self.temp_root)
+        app_files = dev_console.discover_app_source_files(self.temp_root, suites)
+
+        self.assertEqual(app_files["total_source_files"], 4)
+        self.assertEqual(len(app_files["view_models"]), 1)
+        self.assertEqual(len(app_files["untested_view_models"]), 1)
+        self.assertEqual(app_files["untested_view_models"][0]["stem"], "AuthViewModel")
+
+        self.assertEqual(len(app_files["services"]), 2)
+        # DocumentManager is tested by DocumentManagerTests, so untested_services should only contain SyncManager
+        self.assertEqual(len(app_files["untested_services"]), 1)
+        self.assertEqual(app_files["untested_services"][0]["stem"], "SyncManager")
+
+    @patch("dev_console.run_llm")
+    def test_analyze_coverage_gaps_with_llm(self, mock_run_llm):
+        """Verify that analyze_coverage_gaps parses structured AI recommendations when LLM is available."""
+        src_dir = self.temp_root / "App"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "AuthViewModel.swift").write_text("class AuthViewModel {}")
+
+        mock_llm_json = """[
+            {
+                "subsystem": "AuthViewModel / Session Management",
+                "priority": "HIGH",
+                "rationale": "Core auth state machine and token refresh have 0 unit tests.",
+                "target_files": ["AuthViewModel.swift"],
+                "suggested_focus": "Login state transitions and token expiration"
+            }
+        ]"""
+        mock_run_llm.return_value = (mock_llm_json, "gemini-3.1-pro-preview", "session-123")
+
+        suites = []
+        gaps = dev_console.analyze_coverage_gaps(self.temp_root, suites, ["gemini-3.1-pro-preview"])
+
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(gaps[0]["subsystem"], "AuthViewModel / Session Management")
+        self.assertEqual(gaps[0]["priority"], "HIGH")
+        self.assertEqual(gaps[0]["source"], "ai")
+
+    @patch("dev_console.run_llm")
+    def test_analyze_coverage_gaps_fallback_to_heuristic(self, mock_run_llm):
+        """Verify that analyze_coverage_gaps falls back to heuristic gap analysis when LLM fails."""
+        src_dir = self.temp_root / "App"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "PaymentViewModel.swift").write_text("class PaymentViewModel {}")
+        (src_dir / "NetworkClient.swift").write_text("class NetworkClient {}")
+
+        mock_run_llm.side_effect = RuntimeError("API key quota exceeded")
+
+        suites = []
+        gaps = dev_console.analyze_coverage_gaps(self.temp_root, suites, ["gemini-3.1-pro-preview"])
+
+        self.assertTrue(len(gaps) >= 2)
+        subsystems = [g["subsystem"] for g in gaps]
+        self.assertIn("PaymentViewModel", subsystems)
+        self.assertIn("NetworkClient", subsystems)
+        self.assertEqual(gaps[0]["source"], "heuristic")
+
+    @patch("dev_console.run_script")
+    @patch("dev_console.prompt_radio")
+    @patch("dev_console.analyze_coverage_gaps")
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_handle_manage_tests_expand_coverage_ai_selection(
+        self, _mock_status, _mock_clear, mock_get_key, mock_analyze_gaps, mock_prompt_radio, mock_run_script
+    ):
+        """Verify selecting an AI-identified gap in manage tests launches new_job.py coverage with the summary."""
+        mock_get_key.side_effect = ["e", "b"]
+        mock_analyze_gaps.return_value = [
+            {
+                "subsystem": "AuthViewModel / Session Management",
+                "priority": "HIGH",
+                "rationale": "Core auth state machine has 0 tests.",
+                "target_files": ["AuthViewModel.swift"],
+                "suggested_focus": "Login transitions",
+                "source": "ai"
+            }
+        ]
+        # User selects the first option (the AI gap)
+        mock_prompt_radio.return_value = "🎯 AuthViewModel / Session Management [HIGH] (Core auth state machine has 0 tests. - Targets: AuthViewModel.swift)"
+
+        dev_console.handle_manage_tests(["local"], ["gemini"])
+
+        mock_run_script.assert_called()
+        call_args = mock_run_script.call_args[0]
+        script_name = call_args[0]
+        script_cmd_args = call_args[1]
+
+        self.assertEqual(script_name, "new_job.py")
+        self.assertEqual(script_cmd_args[0], "coverage")
+        self.assertIn("--branch-mode", script_cmd_args)
+        self.assertEqual(script_cmd_args[script_cmd_args.index("--branch-mode") + 1], "current")
+        self.assertIn("--summary", script_cmd_args)
+        summary_val = script_cmd_args[script_cmd_args.index("--summary") + 1]
+        self.assertIn("AuthViewModel / Session Management", summary_val)
+
+    @patch("dev_console.run_script")
+    @patch("dev_console.prompt_confirm")
+    @patch("dev_console.prompt_radio")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_handle_new_job_skips_branch_prompt_for_coverage(
+        self, _mock_status, _mock_clear, mock_prompt_radio, mock_prompt_confirm, mock_run_script
+    ):
+        """Verify that creating a Test Coverage job from the new job menu bypasses the branch selection prompt."""
+        # 1. Job type prompt returns "Test Coverage Audit"
+        mock_prompt_radio.side_effect = ["🧪 Test Coverage Audit (Maintenance)"]
+        # 2. Confirm prompts for spec file, yolo, advanced options
+        mock_prompt_confirm.side_effect = [False, False, False]
+
+        dev_console.handle_new_job(["local"], ["gemini"])
+
+        # mock_prompt_radio should only have been called once for job type (NOT for branch selection)
+        self.assertEqual(mock_prompt_radio.call_count, 1)
+        self.assertEqual(mock_prompt_radio.call_args_list[0][0][0], "Select Job Type")
+
+        mock_run_script.assert_called()
+        call_args = mock_run_script.call_args[0]
+        script_args = call_args[1]
+        self.assertEqual(script_args[0], "coverage")
+        self.assertIn("--branch-mode", script_args)
+        self.assertEqual(script_args[script_args.index("--branch-mode") + 1], "current")
+
 
 if __name__ == "__main__":
     unittest.main()
+

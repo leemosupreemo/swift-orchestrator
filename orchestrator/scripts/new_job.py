@@ -345,6 +345,7 @@ def main(args_override: list[str] | None = None) -> None:
     parser.add_argument("--feedback", help="User feedback for design or plan revision")
     parser.add_argument("--update", help="Path to an existing job JSON to update/re-plan")
     parser.add_argument("--free", action="store_true", help="Restrict allowed models to free models only (cost_factor == 0.0)")
+    parser.add_argument("--summary", help="Summary or area of focus for the job (skips interactive input prompt if provided)")
     args = parser.parse_args(args_override)
 
     existing_job = None
@@ -459,12 +460,15 @@ def main(args_override: list[str] | None = None) -> None:
 
     branch_mode = args.branch_mode
     if not branch_mode:
-        labels = [
-            "new (creates a new branch automatically)",
-            "current (use existing branch + git pull)",
-            "manual (no git actions; skip checkout/pull)"
-        ]
-        branch_mode = prompt_radio("Branch selection:", labels, labels[0])
+        if args.job_type == "coverage":
+            branch_mode = "current"
+        else:
+            labels = [
+                "new (creates a new branch automatically)",
+                "current (use existing branch + git pull)",
+                "manual (no git actions; skip checkout/pull)"
+            ]
+            branch_mode = prompt_radio("Branch selection:", labels, labels[0])
     branch_mode = normalize_branch_mode(branch_mode)
 
     selected_branch = args.branch
@@ -518,8 +522,11 @@ def main(args_override: list[str] | None = None) -> None:
         print(f"   CREATING QUICK PROMPT JOB")
         print("="*40)
         
-        flush_stdin()
-        instructions = prompt_multiline("What would you like to change or improve?")
+        if args.summary:
+            instructions = args.summary
+        else:
+            flush_stdin()
+            instructions = prompt_multiline("What would you like to change or improve?")
         if not instructions.strip():
             raise ValueError("No input provided.")
             
@@ -551,12 +558,24 @@ def main(args_override: list[str] | None = None) -> None:
     else:
         if file_spec_content:
             print("\nSpec loaded successfully.")
-            flush_stdin()
-            additional = prompt_multiline("Additional Context / Overrides (optional):")
-            if additional.strip():
-                raw_input_text = f"{file_spec_content}\n\n### ADDITIONAL CONTEXT / OVERRIDES ###\n{additional}"
+            if args.summary:
+                raw_input_text = f"{file_spec_content}\n\n### ADDITIONAL CONTEXT / OVERRIDES ###\n{args.summary}"
             else:
-                raw_input_text = file_spec_content
+                flush_stdin()
+                additional = prompt_multiline("Additional Context / Overrides (optional):")
+                if additional.strip():
+                    raw_input_text = f"{file_spec_content}\n\n### ADDITIONAL CONTEXT / OVERRIDES ###\n{additional}"
+                else:
+                    raw_input_text = file_spec_content
+        elif args.summary:
+            if args.job_type == "bug":
+                raw_input_text = f"SUMMARY: {args.summary}\n\nREPRO STEPS:\n\nEXPECTED BEHAVIOR:"
+            elif args.job_type == "coverage":
+                raw_input_text = f"COVERAGE FOCUS: {args.summary}\n\nSUBSYSTEMS: {args.summary}"
+            elif args.stitch or args.job_type == "design":
+                raw_input_text = f"DESIGN VISION: {args.summary}\nPREFERRED VIBE: minimalist"
+            else:
+                raw_input_text = f"VISION: {args.summary}"
         else:
             flush_stdin()
             if args.job_type == "bug":

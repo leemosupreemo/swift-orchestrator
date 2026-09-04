@@ -231,7 +231,36 @@ class E2EWorkflowTests(unittest.TestCase):
         last_call_args = mock_gh_text.call_args_list[1][0]
         self.assertNotIn("source:manual", last_call_args)
 
+    @patch("orchestrator.scripts.new_job.run_llm")
+    @patch("orchestrator.scripts.new_job.create_issue")
+    def test_new_job_coverage_with_summary(self, mock_create_issue, mock_llm):
+        """Verify new_job supports --summary argument for coverage job creation."""
+        mock_create_issue.return_value = 130
+        mock_llm.return_value = (json.dumps({
+            "title": "Coverage: AuthViewModel",
+            "summary": "Expand Unit Test Coverage: AuthViewModel",
+            "assumptions": [],
+            "constraints": [],
+            "risks": [],
+            "tasks": [{"title": "Write AuthViewModel tests", "description": "Desc", "acceptance_criteria": ["100% coverage"], "likely_files": [], "tests": [], "complexity": "low"}]
+        }), "mock-model", "mock-session-id")
+
+        from orchestrator.scripts import new_job
+        args = ["coverage", "--summary", "Expand Unit Test Coverage: AuthViewModel", "--branch-mode", "manual", "--no-dispatch"]
+        with patch("orchestrator.scripts.new_job.ROOT", self.root):
+            with patch("orchestrator.scripts.new_job.make_job_paths", side_effect=self.make_job_paths):
+                new_job.main(args)
+
+        # Check job file creation
+        jobs_dir = self.root / ".orchestrator" / "jobs"
+        job_files = list(jobs_dir.glob("*coverage*.json"))
+        self.assertEqual(len(job_files), 1)
+        job_data = json.loads(job_files[0].read_text())
+        self.assertEqual(job_data["type"], "test-audit")
+        mock_create_issue.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

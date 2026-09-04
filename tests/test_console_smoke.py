@@ -243,5 +243,152 @@ class OldAuthTests: XCTestCase {
         dev_console.handle_xcode_cloud_menu(["local"], ["gemini"])
         self.assertTrue(True)
 
+    def test_strip_swift_comments(self):
+        code = """
+        // Single line comment
+        let a = 1
+        /* Multi-line
+           comment */
+        let b = 2 /* nested /* block */ comment */
+        let c = "string with // not a comment"
+        let d = \"\"\"
+        multiline string with /* not a comment */
+        \"\"\"
+        """
+        cleaned = dev_console.strip_swift_comments(code)
+        self.assertNotIn("Single line comment", cleaned)
+        self.assertNotIn("Multi-line", cleaned)
+        self.assertNotIn("nested", cleaned)
+        self.assertIn('let c = "string with // not a comment"', cleaned)
+        self.assertIn("multiline string with /* not a comment */", cleaned)
+
+    def test_discover_test_suites_swift_testing(self):
+        """Verify parsing of modern Swift Testing @Suite and @Test syntax."""
+        test_dir = self.temp_root / "Features" / "Auth" / "Tests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        test_file = test_dir / "AuthFeatureTests.swift"
+        test_file.write_text("""import Testing
+@testable import Auth
+
+@Suite("Authentication Feature Tests")
+struct AuthFeatureTests {
+    @Test
+    func simpleTest() {
+        #expect(true)
+    }
+
+    @Test("Custom display name")
+    @MainActor
+    func customDisplayTest() async throws {
+        #expect(true)
+    }
+
+    @Test(
+        "Multi-line test with traits",
+        .tags(.critical),
+        .enabled(if: true),
+        arguments: ["user1", "user2"]
+    )
+    mutating func parameterizedTest(user: String) {
+        #expect(!user.isEmpty)
+    }
+
+    @Test func `test with backticked name`() {
+    }
+
+    // @Test func commentedOutTest() {}
+}
+""")
+        suites = dev_console.discover_test_suites(self.temp_root)
+        self.assertEqual(len(suites), 1)
+        self.assertEqual(suites[0]["name"], "AuthFeatureTests")
+        self.assertEqual(suites[0]["test_count"], 4)
+        self.assertIn("simpleTest", suites[0]["test_funcs"])
+        self.assertIn("customDisplayTest", suites[0]["test_funcs"])
+        self.assertIn("parameterizedTest", suites[0]["test_funcs"])
+        self.assertIn("test with backticked name", suites[0]["test_funcs"])
+
+    def test_discover_test_suites_quick_nimble_and_base_class(self):
+        """Verify parsing of Quick/Nimble BDD specs and custom BaseTestCase inheritance."""
+        quick_dir = self.temp_root / "Packages" / "Cart" / "Tests" / "CartTests"
+        quick_dir.mkdir(parents=True, exist_ok=True)
+        spec_file = quick_dir / "CartSpec.swift"
+        spec_file.write_text("""import Quick
+import Nimble
+
+class CartSpec: QuickSpec {
+    override class func spec() {
+        describe("Cart") {
+            it("calculates total") {
+                expect(1).to(equal(1))
+            }
+            fit("focused calculation") {
+                expect(2).to(equal(2))
+            }
+            xit("pending calculation") {
+            }
+            itBehavesLike("persisted cart")
+        }
+    }
+}
+""")
+        base_dir = self.temp_root / "App" / "Tests"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        base_file = base_dir / "PaymentIntegrationTests.swift"
+        base_file.write_text("""import XCTest
+
+final class PaymentIntegrationTests: BaseIntegrationTestCase {
+    func testChargeCard() async throws {
+        XCTAssertTrue(true)
+    }
+    func testRefund() {
+        XCTAssertTrue(true)
+    }
+}
+""")
+        suites = dev_console.discover_test_suites(self.temp_root)
+        self.assertEqual(len(suites), 2)
+        suite_dict = {s["name"]: s for s in suites}
+        
+        self.assertIn("CartSpec", suite_dict)
+        self.assertEqual(suite_dict["CartSpec"]["test_count"], 4)
+        
+        self.assertIn("PaymentIntegrationTests", suite_dict)
+        self.assertEqual(suite_dict["PaymentIntegrationTests"]["test_count"], 2)
+
+    def test_discover_test_suites_no_double_counting(self):
+        """Verify @Test on func testFoo() is counted only once."""
+        test_dir = self.temp_root / "AppTests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        test_file = test_dir / "DualTests.swift"
+        test_file.write_text("""import Testing
+@Suite struct DualTests {
+    @Test func testExplicitName() {}
+    func testStandardXCTest() {}
+}
+""")
+        suites = dev_console.discover_test_suites(self.temp_root)
+        self.assertEqual(len(suites), 1)
+        self.assertEqual(suites[0]["test_count"], 2)
+
+    def test_generate_test_index(self):
+        """Verify generate_test_index discovers Swift and Python test targets."""
+        import generate_test_index
+        test_dir = self.temp_root / "AppTests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        (test_dir / "ProfileTests.swift").write_text("""import XCTest
+class ProfileTests: XCTestCase {
+    func testProfile() {}
+}
+""")
+        py_dir = self.temp_root / "tests"
+        py_dir.mkdir(parents=True, exist_ok=True)
+        (py_dir / "test_api.py").write_text("def test_dummy(): pass")
+
+        index = generate_test_index.generate_test_index(self.temp_root)
+        self.assertIn("ProfileTests", index)
+        self.assertIn("test_api.py", index)
+
 if __name__ == "__main__":
     unittest.main()
+

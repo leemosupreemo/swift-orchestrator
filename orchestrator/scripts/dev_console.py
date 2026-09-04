@@ -29,7 +29,8 @@ except:
     pass
 
 from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
-from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm
+from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
+from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
 from probe_machine import load_machines, probe_machine
 from orchestrator.project_config import PACKAGE_ROOT, PROJECT_CONFIG
@@ -1035,20 +1036,23 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
             description="Automatically dispatch the job after planning and continue through review steps without manual pauses.",
         )
         
-        branch_options = ["new (creates a new branch to work in)", "current-branch (git pull)", "manual (no git actions)"]
-        branch_choice = prompt_radio("Branch selection:", branch_options, branch_options[0])
-        
-        # Map friendly UI names back to what new_job.py expects
-        clean_branch_choice = "new"
-        if "current-branch" in branch_choice:
+        if job_type == "coverage":
             clean_branch_choice = "current"
-        elif "manual" in branch_choice:
-            clean_branch_choice = "manual"
-        elif "new (" in branch_choice:
-            clean_branch_choice = "new"
         else:
-            # Fallback to the first word if it's something unknown
-            clean_branch_choice = branch_choice.split(" ")[0].lower()
+            branch_options = ["new (creates a new branch to work in)", "current-branch (git pull)", "manual (no git actions)"]
+            branch_choice = prompt_radio("Branch selection:", branch_options, branch_options[0])
+            
+            # Map friendly UI names back to what new_job.py expects
+            clean_branch_choice = "new"
+            if "current-branch" in branch_choice:
+                clean_branch_choice = "current"
+            elif "manual" in branch_choice:
+                clean_branch_choice = "manual"
+            elif "new (" in branch_choice:
+                clean_branch_choice = "new"
+            else:
+                # Fallback to the first word if it's something unknown
+                clean_branch_choice = branch_choice.split(" ")[0].lower()
         
         advanced = False
         if job_type != "quick":
@@ -1790,72 +1794,475 @@ def save_coverage_data(data: dict[str, Any]) -> None:
     cov_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(cov_path, data)
 
+def strip_swift_comments(code: str) -> str:
+    """Removes single-line (//) and multi-line (/* ... */) comments from Swift source,
+    properly supporting Swift's nested block comments and preserving string literals and line breaks."""
+    result = []
+    i = 0
+    n = len(code)
+    comment_depth = 0
+    
+    while i < n:
+        if comment_depth == 0:
+            # Check multiline string """
+            if code.startswith('"""', i):
+                start = i
+                i += 3
+                while i < n and not code.startswith('"""', i):
+                    if code[i] == '\\' and i + 1 < n:
+                        i += 2
+                    else:
+                        i += 1
+                if i < n:
+                    i += 3
+                result.append(code[start:i])
+                continue
+            # Check single line string "
+            elif code[i] == '"':
+                start = i
+                i += 1
+                while i < n and code[i] != '"':
+                    if code[i] == '\\' and i + 1 < n:
+                        i += 2
+                    else:
+                        if code[i] == '\n':
+                            break
+                        i += 1
+                if i < n and code[i] == '"':
+                    i += 1
+                result.append(code[start:i])
+                continue
+            # Check raw string #"..."#
+            elif code.startswith('#"', i):
+                start = i
+                i += 2
+                while i < n and not code.startswith('"#', i):
+                    i += 1
+                if i < n:
+                    i += 2
+                result.append(code[start:i])
+                continue
+            # Single-line comment //
+            elif code.startswith('//', i):
+                i += 2
+                while i < n and code[i] != '\n':
+                    i += 1
+                continue
+            # Multi-line comment /*
+            elif code.startswith('/*', i):
+                comment_depth = 1
+                i += 2
+                continue
+            else:
+                result.append(code[i])
+                i += 1
+        else:
+            # Inside multi-line comment (supporting Swift nested comments /* /* */ */)
+            if code.startswith('/*', i):
+                comment_depth += 1
+                i += 2
+            elif code.startswith('*/', i):
+                comment_depth -= 1
+                i += 2
+            else:
+                if code[i] == '\n':
+                    result.append('\n')  # Keep newline so line counts stay identical
+                i += 1
+                
+    return "".join(result)
+
+def extract_swift_test_cases(cleaned_content: str) -> list[str]:
+    """Extracts test function names and spec descriptions from cleaned Swift source,
+    supporting Swift Testing (@Test), XCTest (func test...), and Quick/Nimble (it/fit/xit)."""
+    test_funcs: list[str] = []
+    claimed_func_positions: set[int] = set()
+
+    # 1. Swift Testing: @Test attributes
+    test_attr_pattern = re.compile(r'(?<![A-Za-z0-9_])@Test\b')
+    for match in test_attr_pattern.finditer(cleaned_content):
+        idx = match.end()
+        while idx < len(cleaned_content) and cleaned_content[idx].isspace():
+            idx += 1
+        
+        # If followed by '(' arguments, find the matching closing ')'
+        if idx < len(cleaned_content) and cleaned_content[idx] == '(':
+            depth = 0
+            in_str = False
+            str_char = None
+            while idx < len(cleaned_content):
+                c = cleaned_content[idx]
+                if in_str:
+                    if c == '\\' and idx + 1 < len(cleaned_content):
+                        idx += 2
+                        continue
+                    elif c == str_char:
+                        in_str = False
+                else:
+                    if c in ('"', "'"):
+                        in_str = True
+                        str_char = c
+                    elif c in ('(', '[', '{'):
+                        depth += 1
+                    elif c in (')', ']', '}'):
+                        depth -= 1
+                        if depth == 0:
+                            idx += 1
+                            break
+                idx += 1
+
+        # Scan forward from idx to find attached func declaration
+        remainder = cleaned_content[idx:]
+        func_match = re.search(
+            r'^(?:\s+|@[A-Za-z0-9_]+(?:\([^)]*\))?|\b(?:mutating|nonisolated|isolated|override|public|private|fileprivate|internal|static|final|consuming|borrowing|async|throws|rethrows)\b)*\bfunc\s+([A-Za-z0-9_]+|`[^`]+`)',
+            remainder,
+            re.DOTALL
+        )
+        if func_match:
+            raw_name = func_match.group(1).strip('`')
+            func_pos = idx + func_match.start(1)
+            claimed_func_positions.add(func_pos)
+            test_funcs.append(raw_name)
+
+    # 2. XCTest / Standard func test...() methods
+    xctest_pattern = re.compile(r'\bfunc\s+(test[A-Za-z0-9_]*|`test[^`]+`)\s*(?:<[^>]*>)?\s*\(', re.DOTALL)
+    for match in xctest_pattern.finditer(cleaned_content):
+        func_pos = match.start(1)
+        if func_pos not in claimed_func_positions:
+            raw_name = match.group(1).strip('`')
+            test_funcs.append(raw_name)
+            claimed_func_positions.add(func_pos)
+
+    # 3. Quick & Nimble / BDD: it("..."), fit("..."), xit("..."), itBehavesLike("...")
+    quick_pattern = re.compile(r'\b(?:it|fit|xit|itBehavesLike)\s*\(\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|\'([^\'\\]*(?:\\.[^\'\\]*)*)\'|`([^`]+)`)')
+    for match in quick_pattern.finditer(cleaned_content):
+        test_desc = match.group(1) or match.group(2) or match.group(3)
+        if test_desc:
+            test_funcs.append(test_desc)
+
+    return test_funcs
+
+def extract_suite_name(content: str, file_stem: str) -> str:
+    """Extracts the primary test suite/class/struct name from a Swift test file."""
+    # 1. Explicit @Suite struct/class/actor/enum Name
+    suite_attr_match = re.search(r'@Suite(?:\([^)]*\))?\s*(?:final\s+|public\s+|internal\s+)?(?:struct|class|actor|enum)\s+([A-Za-z0-9_]+)', content)
+    if suite_attr_match:
+        return suite_attr_match.group(1)
+
+    # 2. Class inheriting from XCTestCase, *TestCase, QuickSpec, *Spec, *Tests
+    class_match = re.search(r'(?:final\s+|public\s+|open\s+|internal\s+)?class\s+([A-Za-z0-9_]+)\s*:\s*(?:[A-Za-z0-9_,\s]*\b(?:XCTestCase|[A-Za-z0-9_]*TestCase|QuickSpec|[A-Za-z0-9_]*Spec|[A-Za-z0-9_]*Tests)\b)', content)
+    if class_match:
+        return class_match.group(1)
+
+    # 3. Class/struct matching file stem
+    stem_match = re.search(rf'\b(?:class|struct|enum|actor)\s+({re.escape(file_stem)})\b', content)
+    if stem_match:
+        return stem_match.group(1)
+
+    # 4. Any class or struct ending in Tests, Test, Spec, TestCase
+    general_match = re.search(r'\b(?:class|struct)\s+([A-Za-z0-9_]*(?:Tests|Test|Spec|TestCase))\b', content)
+    if general_match:
+        return general_match.group(1)
+
+    # 5. Fallback
+    return file_stem
+
 def discover_test_suites(root: Path, test_target: str | None = None) -> list[dict[str, Any]]:
-    """Discovers all test suite swift files, extracts test case counts, and parses class names."""
+    """Discovers all test suite swift files across the workspace, extracts test case counts,
+    and parses suite names for XCTest, Swift Testing, and Quick/Nimble specs."""
     suites = []
     seen_paths = set()
-    
-    search_dirs = []
-    if test_target:
-        tt_dir = root / test_target
-        if tt_dir.exists():
-            search_dirs.append(tt_dir)
-    
-    for d in root.glob("*Tests"):
-        if d.is_dir() and d not in search_dirs and not d.name.startswith("."):
-            search_dirs.append(d)
-    for d in root.glob("*UITests"):
-        if d.is_dir() and d not in search_dirs and not d.name.startswith("."):
-            search_dirs.append(d)
-    for d in root.glob("Tests/*"):
-        if d.is_dir() and d not in search_dirs and not d.name.startswith("."):
-            search_dirs.append(d)
 
-    if not search_dirs:
-        search_dirs = [root]
+    IGNORED_DIRS = {
+        ".git", ".build", ".orchestrator", ".swiftpm", ".cache", ".venv", ".tox",
+        "build", "DerivedData", "Pods", "Carthage", "node_modules", "vendor",
+        "xcuserdata", "fastlane", ".idea", ".vscode"
+    }
 
-    for s_dir in search_dirs:
-        for swift_file in sorted(s_dir.rglob("*.swift")):
-            if "/." in str(swift_file) or "/build/" in str(swift_file) or "/DerivedData/" in str(swift_file):
-                continue
-            if swift_file in seen_paths:
-                continue
-            
+    candidate_files: list[Path] = []
+    
+    # Walk the entire root directory to find all Swift test files across all packages and modules
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in IGNORED_DIRS
+            and not d.startswith(".")
+            and not d.endswith((".xcodeproj", ".xcworkspace", ".framework", ".xcassets", ".bundle", ".lproj"))
+        ]
+        
+        for file in filenames:
+            if file.endswith(".swift"):
+                candidate_files.append(Path(current_root) / file)
+
+    candidate_files.sort()
+
+    for swift_file in candidate_files:
+        if swift_file in seen_paths:
+            continue
+
+        try:
+            raw_content = swift_file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        rel_path_str = str(swift_file.relative_to(root)) if swift_file.is_relative_to(root) else str(swift_file)
+        
+        is_in_test_dir = bool(re.search(r'(?:^|[/\\])(?:[A-Za-z0-9_]*Test[A-Za-z0-9_]*|[A-Za-z0-9_]*Spec[A-Za-z0-9_]*|Tests|UITests|UnitTests|IntegrationTests|SnapshotTests|Specs)(?:[/\\]|$)', rel_path_str, re.IGNORECASE))
+        is_test_filename = bool(re.search(r'(?:Tests?|TestCase|Spec|Specs)\.swift$', swift_file.name, re.IGNORECASE))
+        has_test_imports = bool(re.search(r'\bimport\s+(?:XCTest|Testing|Quick|Nimble|SnapshotTesting)\b', raw_content))
+        has_test_markers = bool(re.search(r'\b(?:XCTestCase|@Suite|@Test|QuickSpec)\b', raw_content))
+
+        # If none of the indicators match, skip immediately
+        if not (is_in_test_dir or is_test_filename or has_test_imports or has_test_markers):
+            continue
+
+        cleaned_content = strip_swift_comments(raw_content)
+        test_funcs = extract_swift_test_cases(cleaned_content)
+        total_tests = len(test_funcs)
+
+        is_test_file = (
+            total_tests > 0
+            or "XCTestCase" in cleaned_content
+            or "@Suite" in cleaned_content
+            or "@Test" in cleaned_content
+            or "QuickSpec" in cleaned_content
+            or is_test_filename
+            or (is_in_test_dir and has_test_imports)
+        )
+
+        if is_test_file:
+            seen_paths.add(swift_file)
+            suite_name = extract_suite_name(cleaned_content, swift_file.stem)
+
             try:
-                content = swift_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
+                rel_path = swift_file.relative_to(root)
+            except ValueError:
+                rel_path = Path(swift_file.name)
 
-            test_funcs = re.findall(r"func\s+(test[A-Za-z0-9_]*)\s*\(", content)
-            swift_tests = re.findall(r"@Test\s*(?:\([^)]*\))?\s*func\s+([A-Za-z0-9_]+)", content)
-            total_tests = len(test_funcs) + len(swift_tests)
-            
-            is_test_file = total_tests > 0 or "XCTestCase" in content or "@Suite" in content or swift_file.name.endswith("Tests.swift")
-            
-            if is_test_file:
-                seen_paths.add(swift_file)
-                class_match = re.search(r"(?:final\s+)?class\s+([A-Za-z0-9_]+)\s*:\s*XCTestCase", content)
-                if not class_match:
-                    struct_match = re.search(r"(?:@Suite\s+)?struct\s+([A-Za-z0-9_]+)", content)
-                    suite_name = struct_match.group(1) if struct_match else swift_file.stem
-                else:
-                    suite_name = class_match.group(1)
-                
-                try:
-                    rel_path = swift_file.relative_to(root)
-                except ValueError:
-                    rel_path = swift_file.name
-
-                suites.append({
-                    "path": swift_file,
-                    "rel_path": rel_path,
-                    "name": suite_name,
-                    "file_stem": swift_file.stem,
-                    "test_count": total_tests,
-                    "test_funcs": test_funcs + swift_tests
-                })
+            suites.append({
+                "path": swift_file,
+                "rel_path": rel_path,
+                "name": suite_name,
+                "file_stem": swift_file.stem,
+                "test_count": total_tests,
+                "test_funcs": test_funcs
+            })
 
     return suites
+
+def discover_app_source_files(root: Path, test_suites: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Discovers application Swift source files (excluding tests, Pods, build artifacts)
+    and categorizes them into ViewModels, Services, Models, Utilities, and Other sources,
+    cross-referencing with discovered test suites to identify untested modules."""
+    IGNORED_DIRS = {
+        ".git", ".build", ".orchestrator", ".swiftpm", ".cache", ".venv", ".tox",
+        "build", "DerivedData", "Pods", "Carthage", "node_modules", "vendor",
+        "xcuserdata", "fastlane", ".idea", ".vscode"
+    }
+
+    test_stems = set()
+    if test_suites:
+        for s in test_suites:
+            test_stems.add(s.get("file_stem", "").lower())
+            test_stems.add(s.get("name", "").lower())
+
+    view_models: list[dict[str, Any]] = []
+    services: list[dict[str, Any]] = []
+    models: list[dict[str, Any]] = []
+    utilities: list[dict[str, Any]] = []
+    other_sources: list[dict[str, Any]] = []
+
+    untested_view_models: list[dict[str, Any]] = []
+    untested_services: list[dict[str, Any]] = []
+    untested_others: list[dict[str, Any]] = []
+
+    for current_root, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in IGNORED_DIRS
+            and not d.startswith(".")
+            and not d.endswith((".xcodeproj", ".xcworkspace", ".framework", ".xcassets", ".bundle", ".lproj"))
+        ]
+        
+        for file in filenames:
+            if not file.endswith(".swift"):
+                continue
+            
+            swift_path = Path(current_root) / file
+            try:
+                rel_path = swift_path.relative_to(root)
+            except ValueError:
+                rel_path = Path(file)
+            
+            rel_path_str = str(rel_path)
+            
+            # Skip test files, test directories, and auto-generated files
+            is_in_test_dir = bool(re.search(r'(?:^|[/\\])(?:[A-Za-z0-9_]*Test[A-Za-z0-9_]*|[A-Za-z0-9_]*Spec[A-Za-z0-9_]*|Tests|UITests|UnitTests|IntegrationTests|SnapshotTests|Specs)(?:[/\\]|$)', rel_path_str, re.IGNORECASE))
+            is_test_filename = bool(re.search(r'(?:Tests?|TestCase|Spec|Specs)\.swift$', file, re.IGNORECASE))
+            is_generated_file = bool(re.search(r'(?:\+CoreData(?:Class|Properties)|\.generated|Generated)\.swift$', file, re.IGNORECASE))
+            if is_in_test_dir or is_test_filename or is_generated_file:
+                continue
+
+            stem = swift_path.stem
+            stem_lower = stem.lower()
+            
+            # Check if there is a matching test suite
+            has_matching_test = (
+                f"{stem_lower}tests" in test_stems
+                or f"{stem_lower}test" in test_stems
+                or f"{stem_lower}spec" in test_stems
+                or f"{stem_lower}testcase" in test_stems
+                or stem_lower in test_stems
+                or any(stem_lower in ts for ts in test_stems if len(stem_lower) > 3)
+            )
+
+            file_info = {
+                "name": file,
+                "stem": stem,
+                "path": swift_path,
+                "rel_path": str(rel_path),
+                "has_matching_test": has_matching_test
+            }
+
+            if stem.endswith("ViewModel") or stem.endswith("VM"):
+                view_models.append(file_info)
+                if not has_matching_test:
+                    untested_view_models.append(file_info)
+            elif any(kw in stem for kw in ("Service", "Manager", "Client", "Repository", "Store", "API", "Engine", "Logic", "Controller", "Coordinator", "Handler", "Provider")):
+                services.append(file_info)
+                if not has_matching_test:
+                    untested_services.append(file_info)
+            elif any(kw in stem for kw in ("Model", "Entity", "DTO", "State", "Types")):
+                models.append(file_info)
+                if not has_matching_test:
+                    untested_others.append(file_info)
+            elif any(kw in stem for kw in ("Helper", "Utils", "Formatter", "Parser", "Extension")):
+                utilities.append(file_info)
+                if not has_matching_test:
+                    untested_others.append(file_info)
+            else:
+                other_sources.append(file_info)
+                if not has_matching_test and not (stem.endswith("View") or stem.endswith("App")):
+                    untested_others.append(file_info)
+
+    return {
+        "view_models": view_models,
+        "services": services,
+        "models": models,
+        "utilities": utilities,
+        "other_sources": other_sources,
+        "untested_view_models": untested_view_models,
+        "untested_services": untested_services,
+        "untested_others": untested_others,
+        "total_source_files": len(view_models) + len(services) + len(models) + len(utilities) + len(other_sources)
+    }
+
+def analyze_coverage_gaps(
+    root: Path,
+    test_suites: list[dict[str, Any]],
+    session_allowed_models: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Analyzes the codebase and existing test suites to identify the highest-priority coverage gaps.
+    Uses an LLM when available, falling back to heuristic architecture analysis."""
+    app_files = discover_app_source_files(root, test_suites)
+
+    # 1. Attempt LLM-powered gap analysis if any model is available or configured
+    candidate_models = session_allowed_models if session_allowed_models else get_prioritized_models()
+    if candidate_models and (app_files["untested_view_models"] or app_files["untested_services"] or app_files["untested_others"]):
+        model = candidate_models[0]
+        suites_summary = "\n".join([f"- {s['name']} ({s.get('test_count', 0)} tests) in {s.get('rel_path', '')}" for s in test_suites[:20]]) or "(No test suites detected)"
+        untested_vm_str = "\n".join([f"- {f['name']} ({f['rel_path']})" for f in app_files.get("untested_view_models", [])[:15]]) or "(None detected)"
+        untested_svc_str = "\n".join([f"- {f['name']} ({f['rel_path']})" for f in app_files.get("untested_services", [])[:15]]) or "(None detected)"
+        untested_other_str = "\n".join([f"- {f['name']} ({f['rel_path']})" for f in app_files.get("untested_others", [])[:10]]) or "(None detected)"
+
+        prompt = f"""You are an expert Swift/iOS test architect analyzing code coverage gaps for an autonomous test creation job.
+Analyze the codebase inventory and existing test suites below to identify the top 3 to 5 highest-value, highest-risk coverage gaps in the application.
+
+Codebase Overview:
+Total App Source Files: {app_files.get('total_source_files', 0)}
+Existing Test Suites ({len(test_suites)} suites):
+{suites_summary}
+
+Untested ViewModels ({len(app_files.get('untested_view_models', []))}):
+{untested_vm_str}
+
+Untested Services & Core Logic ({len(app_files.get('untested_services', []))}):
+{untested_svc_str}
+
+Untested Utilities & Data Models:
+{untested_other_str}
+
+Prioritize:
+1. Critical ViewModels & state machines with 0 tests.
+2. Core services (networking, data management, authentication, sync, parsing) that are untested.
+3. Complex business logic and edge cases where regressions would break core functionality.
+
+Respond ONLY with a JSON array of 3 to 5 objects with the following schema (no markdown fences, no extra text):
+[
+  {{
+    "subsystem": "Short Title (e.g. AuthViewModel / Session Management)",
+    "priority": "HIGH",
+    "rationale": "Clear 1-sentence reason why this is an essential test gap.",
+    "target_files": ["AuthViewModel.swift", "GoogleAuthService.swift"],
+    "suggested_focus": "Login state transitions, session restoration, and token expiration handling"
+  }}
+]
+"""
+        try:
+            output, actual_model, _ = run_llm(model, prompt, cwd=root, allowed_models=session_allowed_models, role=ModelRole.PLANNER, timeout=30)
+            raw_json = extract_json_block(output)
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                valid_gaps = []
+                for item in parsed:
+                    if isinstance(item, dict) and "subsystem" in item and "rationale" in item:
+                        targets = item.get("target_files", [])
+                        if isinstance(targets, str):
+                            targets = [targets]
+                        valid_gaps.append({
+                            "subsystem": str(item["subsystem"]).strip(),
+                            "priority": str(item.get("priority", "HIGH")).upper().strip(),
+                            "rationale": str(item["rationale"]).strip(),
+                            "target_files": [str(t).strip() for t in targets],
+                            "suggested_focus": str(item.get("suggested_focus", "")).strip(),
+                            "source": "ai"
+                        })
+                if valid_gaps:
+                    return valid_gaps
+        except Exception:
+            # Fall back to heuristic gap detection
+            pass
+
+    # 2. Heuristic Gap Analysis Fallback
+    heuristic_gaps: list[dict[str, Any]] = []
+    for vm in app_files.get("untested_view_models", [])[:3]:
+        heuristic_gaps.append({
+            "subsystem": f"{vm['stem']}",
+            "priority": "HIGH",
+            "rationale": "ViewModel has 0 detected unit tests; state transitions and business logic should be verified.",
+            "target_files": [vm["name"]],
+            "suggested_focus": f"State transitions, async data loading, and error handling for {vm['stem']}",
+            "source": "heuristic"
+        })
+    for svc in app_files.get("untested_services", [])[:3]:
+        heuristic_gaps.append({
+            "subsystem": f"{svc['stem']}",
+            "priority": "MEDIUM",
+            "rationale": "Core service logic has 0 detected unit tests; method outputs and edge cases should be tested.",
+            "target_files": [svc["name"]],
+            "suggested_focus": f"Method outputs, error handling, and mock integration for {svc['stem']}",
+            "source": "heuristic"
+        })
+    for other in app_files.get("untested_others", [])[:2]:
+        heuristic_gaps.append({
+            "subsystem": f"{other['stem']}",
+            "priority": "LOW",
+            "rationale": "Application logic component has 0 detected unit tests.",
+            "target_files": [other["name"]],
+            "suggested_focus": f"Core logic and edge cases for {other['stem']}",
+            "source": "heuristic"
+        })
+
+    return heuristic_gaps
 
 def rename_test_suite(suite: dict[str, Any], root: Path) -> bool:
     old_file = suite["path"]
@@ -1996,19 +2403,51 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
                 stderr=subprocess.DEVNULL
             ).decode("utf-8")
             cov_json = json.loads(xccov_out)
-            line_cov = cov_json.get("lineCoverage", 0.0)
-            overall_pct = round(line_cov * 100.0, 1)
+            raw_line_cov = cov_json.get("lineCoverage", 0.0)
+            overall_pct = round(raw_line_cov * 100.0, 1)
+            
+            app_targets = []
+            third_party_targets = []
             for t in cov_json.get("targets", []):
                 t_name = t.get("name", "")
                 t_cov = round(t.get("lineCoverage", 0.0) * 100.0, 1)
-                targets_cov.append({"name": t_name, "coverage_pct": t_cov})
+                
+                # Exclude test bundles themselves
+                if t_name.endswith((".xctest", "Tests", "UITests", "Tests.xctest")):
+                    continue
+                
+                # Check if target matches application/project name
+                is_app_target = t_name.replace(".app", "").lower() in [scheme.lower(), (PROJECT_CONFIG.project_name or "").lower()]
+                
+                is_third_party = not is_app_target and any(t_name.startswith(p) for p in [
+                    "Firebase", "Google", "GUL", "GTM", "FBL", "AppAuth", "gRPC", "abseil", "absl", "nanopb", 
+                    "leveldb", "Promises", "GTMSessionFetcher", "SnapshotTesting", "Quick", "Nimble", "Pods-", "openssl"
+                ])
+                entry = {"name": t_name, "coverage_pct": t_cov}
+                if is_app_target:
+                    app_targets.insert(0, entry)
+                elif is_third_party:
+                    third_party_targets.append(entry)
+                else:
+                    app_targets.append(entry)
+            
+            if app_targets:
+                # Prioritize project / scheme app target coverage
+                primary_target = app_targets[0]
+                overall_pct = primary_target["coverage_pct"]
+                targets_cov = app_targets + third_party_targets
+            else:
+                targets_cov = third_party_targets
         except Exception as e:
             print(f"\n⚠️ Could not parse .xcresult coverage: {e}")
 
+    # Discover total test suites and tests count in workspace
+    suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
+    total_tests = sum(s["test_count"] for s in suites)
+    total_suites = len(suites)
+
     # Fallback simulation/estimation if xcresult couldn't be parsed or was empty (e.g. test environment)
     if overall_pct is None:
-        suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
-        total_tests = sum(s["test_count"] for s in suites)
         if total_tests > 0:
             overall_pct = min(95.0, round(float(total_tests * 8.5), 1))
             targets_cov = [{"name": PROJECT_CONFIG.scheme or "App", "coverage_pct": overall_pct}]
@@ -2017,14 +2456,18 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
         cov_record = {
             "timestamp": now_iso(),
             "overall_coverage_pct": overall_pct,
-            "targets": targets_cov
+            "targets": targets_cov,
+            "total_tests": total_tests,
+            "total_suites": total_suites
         }
         save_coverage_data(cov_record)
         print(f"\n\033[1;92m======================================================================\033[0m")
         print(f"   \033[1;92m✅ Code Coverage Calculated: {overall_pct:.1f}%\033[0m")
+        print(f"   \033[1;36m• Total Tests Discovered:\033[0m    \033[97m{total_tests} test(s) ({total_suites} suite(s))\033[0m")
         if targets_cov:
+            print(f"   \033[1;36m• Target Breakdown:\033[0m")
             for t in targets_cov[:5]:
-                print(f"   \033[1;36m• {t.get('name')}:\033[0m \033[97m{t.get('coverage_pct')}%\033[0m")
+                print(f"     \033[90m- {t.get('name')}:\033[0m \033[97m{t.get('coverage_pct')}%\033[0m")
         print(f"\033[1;92m======================================================================\033[0m")
     else:
         diag = get_simulator_diagnostic()
@@ -2351,17 +2794,70 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                 run_calculate_coverage(session_allowed_machines, session_allowed_models)
             elif choice == "e":
                 clear_screen()
-                status_bar.set_scroll_region()
                 print_header("Expand Unit Test Coverage")
-                print("Create an autonomous AI job to inspect uncovered files and write comprehensive unit tests.\n")
-                try:
-                    focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", field_below=True)
-                except BackException:
-                    continue
-                summary = f"Expand Unit Test Coverage: {focus.strip()}" if focus and focus.strip() else "Comprehensive Unit Test Coverage"
+                print("  \033[90mAnalyzing codebase and existing test suites for coverage gaps...\033[0m\n")
+                gaps = analyze_coverage_gaps(ROOT, suites, session_allowed_models)
+                
+                summary = ""
+                if gaps:
+                    options = []
+                    for g in gaps:
+                        prio = g.get("priority", "HIGH")
+                        target_str = ", ".join(g.get("target_files", [])[:2])
+                        label = f"🎯 {g['subsystem']} [{prio}]"
+                        if target_str:
+                            desc = f"{g['rationale']} - Targets: {target_str}"
+                        else:
+                            desc = f"{g['rationale']}"
+                        options.append(f"{label} ({desc})")
+                    
+                    options.append("🌐 Comprehensive Coverage Audit (Full audit across all uncovered app subsystems)")
+                    options.append("✏️ Custom Subsystem / Focus (Manually enter a subsystem, ViewModel, or module)")
+                    
+                    clear_screen()
+                    print_header("Expand Unit Test Coverage - Select Focus")
+                    print("Select an AI-identified coverage gap, full audit, or custom target:\n")
+                    try:
+                        gap_choice = prompt_radio("Select Coverage Focus / Target Gap:", options, default=options[0])
+                        selected_idx = options.index(gap_choice)
+                    except (BackException, ValueError):
+                        continue
+                    
+                    if selected_idx < len(gaps):
+                        chosen_gap = gaps[selected_idx]
+                        summary = f"Expand Unit Test Coverage: {chosen_gap['subsystem']} - {chosen_gap['rationale']}"
+                        if chosen_gap.get("suggested_focus"):
+                            summary += f" Focus: {chosen_gap['suggested_focus']}."
+                        if chosen_gap.get("target_files"):
+                            summary += f" Target Files: {', '.join(chosen_gap['target_files'])}"
+                    elif selected_idx == len(gaps):
+                        summary = "Comprehensive Unit Test Coverage"
+                    else:
+                        clear_screen()
+                        print_header("Expand Unit Test Coverage - Custom Focus")
+                        try:
+                            focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", field_below=True)
+                        except BackException:
+                            continue
+                        summary = f"Expand Unit Test Coverage: {focus.strip()}" if focus and focus.strip() else "Comprehensive Unit Test Coverage"
+                else:
+                    clear_screen()
+                    print_header("Expand Unit Test Coverage")
+                    print("Create an autonomous AI job to inspect uncovered files and write comprehensive unit tests.\n")
+                    try:
+                        focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", field_below=True)
+                    except BackException:
+                        continue
+                    summary = f"Expand Unit Test Coverage: {focus.strip()}" if focus and focus.strip() else "Comprehensive Unit Test Coverage"
+
                 status_bar.clear_footer()
                 status_bar.reset_scroll_region(force=True)
-                run_script("new_job.py", ["coverage", "--summary", summary], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                job_args = ["coverage", "--branch-mode", "current", "--summary", summary]
+                if session_allowed_models:
+                    job_args.extend(["--allowed-models", ",".join(session_allowed_models)])
+                if session_allowed_machines:
+                    job_args.extend(["--allowed-machines", ",".join(session_allowed_machines)])
+                run_script("new_job.py", job_args, sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
             elif choice == "f":
                 handle_test_frameworks_menu(session_allowed_machines, session_allowed_models)
             elif choice == "r":
