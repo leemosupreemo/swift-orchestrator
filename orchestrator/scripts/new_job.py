@@ -845,9 +845,9 @@ def main(args_override: list[str] | None = None) -> None:
             sub_name = ', '.join(subsystems) if subsystems else 'core application modules'
             user_benefit = f"Eliminates regressions, ensures reliable error recovery, and prevents unexpected crashes across {sub_name}."
 
-        print("\n" + "\033[1;92m=" * 72 + "\033[0m")
+        print("\n" + "\033[1;92m=" * 58 + "\033[0m")
         print(f"   \033[1;92m🧪 TEST COVERAGE EXPANSION REPORT\033[0m")
-        print("\033[1;92m=" * 72 + "\033[0m")
+        print("\033[1;92m=" * 58 + "\033[0m")
         print(f"   \033[1;36m• Target Title:\033[0m          \033[1;97m{plan.get('title', title)}\033[0m")
         if subsystems:
             print(f"   \033[1;36m• Focus Subsystems:\033[0m      \033[97m{', '.join(subsystems)}\033[0m")
@@ -859,7 +859,7 @@ def main(args_override: list[str] | None = None) -> None:
         print(f"   \033[1;36m• Anticipated Tests:\033[0m     \033[1;92m{est_tests}\033[0m")
         print(f"   \033[1;36m• Estimated Coverage Δ:\033[0m  \033[1;95m{est_cov}\033[0m")
         print(f"   \033[1;36m• End-User Benefit:\033[0m      \033[97m{user_benefit}\033[0m")
-        print("\033[1;92m=" * 72 + "\033[0m\n")
+        print("\033[1;92m=" * 58 + "\033[0m\n")
 
     try:
         job_file_display = str(paths.job_file.relative_to(ROOT))

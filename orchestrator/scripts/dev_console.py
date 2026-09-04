@@ -2482,9 +2482,9 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
             color = "\033[1;92m" if tests_delta > 0 else "\033[1;91m"
             tests_delta_str = f" ({color}{sign}{tests_delta} test(s) added\033[0m)"
 
-        print(f"\n\033[1;92m" + "=" * 72 + "\033[0m")
+        print(f"\n\033[1;92m" + "=" * 58 + "\033[0m")
         print(f"   \033[1;92m🧪 CODE COVERAGE & TEST HEALTH REPORT\033[0m")
-        print(f"\033[1;92m" + "=" * 72 + "\033[0m")
+        print(f"\033[1;92m" + "=" * 58 + "\033[0m")
         print(f"   \033[1;36m• Overall Coverage:\033[0m      \033[1;97m{overall_pct:.1f}%\033[0m{cov_delta_str}")
         print(f"   \033[1;36m• Test Suite Breakdown:\033[0m  \033[97m{total_tests} test(s) across {total_suites} suite(s)\033[0m{tests_delta_str}")
         if suites:
@@ -2498,7 +2498,7 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
             for t in targets_cov[:4]:
                 print(f"     \033[90m- {t.get('name')}:\033[0m \033[1;95m{t.get('coverage_pct')}%\033[0m")
         print(f"   \033[1;36m• End-User Value:\033[0m        \033[97mVerifies critical user workflows, eliminates regression bugs, and ensures UI/data reliability.\033[0m")
-        print(f"\033[1;92m" + "=" * 72 + "\033[0m")
+        print(f"\033[1;92m" + "=" * 58 + "\033[0m")
     else:
         diag = get_simulator_diagnostic()
         print("\n\033[1;91m❌ Failed to calculate code coverage.\033[0m")
@@ -2739,7 +2739,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
 
             # 1. Code Coverage Status & Visual Progress Bar
             cov_data = get_coverage_data()
-            bar_width = 30
+            bar_width = 16
             if cov_data and cov_data.get("overall_coverage_pct") is not None:
                 cov_pct = cov_data["overall_coverage_pct"]
                 cov_ts = cov_data.get("timestamp", "")
@@ -2755,15 +2755,15 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                     cov_color = "\033[1;91m"
                 
                 bar_str = f"{cov_color}{'█' * filled}\033[90m{'░' * empty}\033[0m"
-                cov_display = f"{cov_color}{cov_pct:.1f}%\033[0m \033[90m(Calculated: {cov_ts_short})\033[0m"
+                cov_display = f"{cov_color}{cov_pct:.1f}%\033[0m \033[90m({cov_ts_short})\033[0m"
             else:
                 bar_str = f"\033[90m{'░' * bar_width}\033[0m"
-                cov_display = "\033[93mNot calculated yet\033[0m \033[90m(Press 'C' to calculate)\033[0m"
+                cov_display = "\033[93mNot calculated yet\033[0m \033[90m(Press 'C')\033[0m"
 
-            print("  \033[1;90m┌────────────────────────────────────────────────────────────────────────┐\033[0m")
+            print("  \033[1;90m┌─────────────────────────────────────────────────────────────┐\033[0m")
             print(f"  \033[1;90m│\033[0m \033[1;97mCODE COVERAGE:\033[0m [{bar_str}]  {cov_display}")
             print(f"  \033[1;90m│\033[0m \033[1;36mTest Target:\033[0m   \033[97m{PROJECT_CONFIG.test_target}\033[0m")
-            print("  \033[1;90m└────────────────────────────────────────────────────────────────────────┘\033[0m\n")
+            print("  \033[1;90m└─────────────────────────────────────────────────────────────┘\033[0m\n")
 
             # 2. Discover Test Suites
             suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
