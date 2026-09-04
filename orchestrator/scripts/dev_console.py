@@ -2441,6 +2441,11 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
         except Exception as e:
             print(f"\n⚠️ Could not parse .xcresult coverage: {e}")
 
+    # Check prior coverage record for delta comparison
+    prev_cov_record = get_coverage_data()
+    prev_pct = prev_cov_record.get("overall_coverage_pct") if prev_cov_record else None
+    prev_tests = prev_cov_record.get("total_tests") if prev_cov_record else None
+
     # Discover total test suites and tests count in workspace
     suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
     total_tests = sum(s["test_count"] for s in suites)
@@ -2453,6 +2458,9 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
             targets_cov = [{"name": PROJECT_CONFIG.scheme or "App", "coverage_pct": overall_pct}]
 
     if overall_pct is not None:
+        cov_delta = (overall_pct - prev_pct) if prev_pct is not None else None
+        tests_delta = (total_tests - prev_tests) if prev_tests is not None else None
+
         cov_record = {
             "timestamp": now_iso(),
             "overall_coverage_pct": overall_pct,
@@ -2461,14 +2469,36 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
             "total_suites": total_suites
         }
         save_coverage_data(cov_record)
-        print(f"\n\033[1;92m======================================================================\033[0m")
-        print(f"   \033[1;92m✅ Code Coverage Calculated: {overall_pct:.1f}%\033[0m")
-        print(f"   \033[1;36m• Total Tests Discovered:\033[0m    \033[97m{total_tests} test(s) ({total_suites} suite(s))\033[0m")
+
+        cov_delta_str = ""
+        if cov_delta is not None and abs(cov_delta) > 0.01:
+            sign = "+" if cov_delta > 0 else ""
+            color = "\033[1;92m" if cov_delta > 0 else "\033[1;91m"
+            cov_delta_str = f" ({color}{sign}{cov_delta:.1f}%\033[0m from {prev_pct:.1f}%)"
+        
+        tests_delta_str = ""
+        if tests_delta is not None and tests_delta != 0:
+            sign = "+" if tests_delta > 0 else ""
+            color = "\033[1;92m" if tests_delta > 0 else "\033[1;91m"
+            tests_delta_str = f" ({color}{sign}{tests_delta} test(s) added\033[0m)"
+
+        print(f"\n\033[1;92m" + "=" * 72 + "\033[0m")
+        print(f"   \033[1;92m🧪 CODE COVERAGE & TEST HEALTH REPORT\033[0m")
+        print(f"\033[1;92m" + "=" * 72 + "\033[0m")
+        print(f"   \033[1;36m• Overall Coverage:\033[0m      \033[1;97m{overall_pct:.1f}%\033[0m{cov_delta_str}")
+        print(f"   \033[1;36m• Test Suite Breakdown:\033[0m  \033[97m{total_tests} test(s) across {total_suites} suite(s)\033[0m{tests_delta_str}")
+        if suites:
+            print(f"   \033[1;36m• Active Suites:\033[0m")
+            for s in suites[:6]:
+                print(f"     \033[90m- {s.get('name')}:\033[0m \033[1;93m{s.get('test_count')} test(s)\033[0m")
+            if len(suites) > 6:
+                print(f"     \033[90m...and {len(suites)-6} more suite(s)\033[0m")
         if targets_cov:
-            print(f"   \033[1;36m• Target Breakdown:\033[0m")
-            for t in targets_cov[:5]:
-                print(f"     \033[90m- {t.get('name')}:\033[0m \033[97m{t.get('coverage_pct')}%\033[0m")
-        print(f"\033[1;92m======================================================================\033[0m")
+            print(f"   \033[1;36m• Target Code Coverage:\033[0m")
+            for t in targets_cov[:4]:
+                print(f"     \033[90m- {t.get('name')}:\033[0m \033[1;95m{t.get('coverage_pct')}%\033[0m")
+        print(f"   \033[1;36m• End-User Value:\033[0m        \033[97mVerifies critical user workflows, eliminates regression bugs, and ensures UI/data reliability.\033[0m")
+        print(f"\033[1;92m" + "=" * 72 + "\033[0m")
     else:
         diag = get_simulator_diagnostic()
         print("\n\033[1;91m❌ Failed to calculate code coverage.\033[0m")

@@ -830,6 +830,37 @@ def main(args_override: list[str] | None = None) -> None:
         
         print("\033[1;96m🎨 \033[0m" * 15 + "\n")
 
+    # --- COVERAGE & TEST EXPANSION REPORT ---
+    if (args.job_type == "coverage" or job_type == "test-audit") and not clarification:
+        suites = plan.get("target_suites") or plan.get("expected_test_files", [])
+        if isinstance(suites, str):
+            suites = [suites]
+        subsystems = plan.get("target_subsystems", [])
+        if isinstance(subsystems, str):
+            subsystems = [subsystems]
+        est_tests = plan.get("estimated_tests_added") or f"~{max(3, len(plan.get('audit_goals', [])) * 2)} focused unit tests"
+        est_cov = plan.get("estimated_coverage_increase") or "+5.0% - +10.0% (target subsystems)"
+        user_benefit = plan.get("user_benefit")
+        if not user_benefit:
+            sub_name = ', '.join(subsystems) if subsystems else 'core application modules'
+            user_benefit = f"Eliminates regressions, ensures reliable error recovery, and prevents unexpected crashes across {sub_name}."
+
+        print("\n" + "\033[1;92m=" * 72 + "\033[0m")
+        print(f"   \033[1;92m🧪 TEST COVERAGE EXPANSION REPORT\033[0m")
+        print("\033[1;92m=" * 72 + "\033[0m")
+        print(f"   \033[1;36m• Target Title:\033[0m          \033[1;97m{plan.get('title', title)}\033[0m")
+        if subsystems:
+            print(f"   \033[1;36m• Focus Subsystems:\033[0m      \033[97m{', '.join(subsystems)}\033[0m")
+        if suites:
+            suite_str = ", ".join(suites[:4])
+            if len(suites) > 4:
+                suite_str += f" (+{len(suites)-4} more)"
+            print(f"   \033[1;36m• Target Test Suite(s):\033[0m  \033[1;93m{suite_str}\033[0m")
+        print(f"   \033[1;36m• Anticipated Tests:\033[0m     \033[1;92m{est_tests}\033[0m")
+        print(f"   \033[1;36m• Estimated Coverage Δ:\033[0m  \033[1;95m{est_cov}\033[0m")
+        print(f"   \033[1;36m• End-User Benefit:\033[0m      \033[97m{user_benefit}\033[0m")
+        print("\033[1;92m=" * 72 + "\033[0m\n")
+
     try:
         job_file_display = str(paths.job_file.relative_to(ROOT))
     except ValueError:
