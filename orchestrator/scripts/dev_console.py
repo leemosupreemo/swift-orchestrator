@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -41,6 +41,7 @@ def input(prompt: str = "") -> str:
     """Wrapper around get_key that avoids termios raw/cooked mode input lockups during pauses."""
     import builtins
     if any(phrase in prompt for phrase in ["Tap Enter", "Press Enter", "to return", "to continue", "to go back"]):
+        flush_stdin()
         sys.stdout.write(prompt)
         sys.stdout.flush()
         try:
@@ -4354,7 +4355,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 print("\n  Tip: You can resume these in the Antigravity CLI using: antigravity --resume <ID>")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i" and "i" in actions:
-                print_header("AI Modified Files")
+                open_action_screen("AI Modified Files")
                 ai_modified = job.get("ai_modified_files", [])
                 ai_untracked = job.get("ai_untracked_files", [])
                 
