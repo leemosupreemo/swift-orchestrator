@@ -4601,9 +4601,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 sys.stdout.write("\r\033[K")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "v":
-                status_bar.clear_footer()
-                status_bar.reset_scroll_region(force=True)
-                clear_screen()
+                open_action_screen()
                 view_job_brief_summary(job)
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "s" and "s" in actions:
