@@ -1244,6 +1244,48 @@ class AppFeatureTests_{i}: XCTestCase {{
         banner2 = dev_console.format_job_header(job2)
         self.assertIn("===== [REPORT] FIX RISK TAB SELECTION =====", banner2)
 
+    @patch("dev_console.shutil.which", side_effect=lambda x: f"/usr/local/bin/{x}" if x == "opencode" else None)
+    @patch("dev_console.prompt_input", side_effect=["1", "b"])
+    @patch("dev_console.subprocess.run")
+    @patch("dev_console.clear_screen")
+    def test_handle_ask_ai_interactive_cli_launch(self, _mock_clear, mock_subproc, _mock_prompt_input, _mock_which):
+        job = {
+            "job_id": "test-job-123",
+            "issue_number": 123,
+            "title": "Fix risk tab",
+            "status": "review-needed",
+            "branch": "feature/test",
+            "base_branch": "main",
+        }
+        mock_subproc.return_value = MagicMock(return_value=0, stdout="", stderr="")
+
+        dev_console.handle_ask_ai(job, ["gemini"])
+
+        # Check that opencode was executed interactively with prompt
+        called_cmds = [call.args[0] for call in mock_subproc.call_args_list if call.args]
+        opencode_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "opencode"]
+        self.assertTrue(len(opencode_calls) > 0)
+        self.assertEqual(opencode_calls[0][1], "--prompt")
+
+    @patch("dev_console.shutil.which", return_value=None)
+    @patch("dev_console.prompt_input", side_effect=["q", "Why was this changed?", "", "b"])
+    @patch("dev_console.run_llm", return_value=("Because of a nil check error.", "gemini", "session-1"))
+    @patch("dev_console.clear_screen")
+    def test_handle_ask_ai_quick_question_mode(self, _mock_clear, mock_llm, _mock_prompt_input, _mock_which):
+        job = {
+            "job_id": "test-job-456",
+            "issue_number": 456,
+            "title": "Fix crash",
+            "status": "review-needed",
+        }
+
+        dev_console.handle_ask_ai(job, ["gemini"])
+
+        mock_llm.assert_called_once()
+        prompt_passed = mock_llm.call_args[0][1]
+        self.assertIn("Why was this changed?", prompt_passed)
+        self.assertEqual(job["llm_sessions"], [{"id": "session-1", "model": "gemini"}])
+
 
 if __name__ == "__main__":
     unittest.main()

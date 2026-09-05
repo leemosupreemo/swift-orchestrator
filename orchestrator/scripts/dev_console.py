@@ -4964,31 +4964,28 @@ def handle_tweak_revise(job: dict[str, Any]):
     return refresh_job(job)
 
 def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
-    """Opens a conversational interface to ask questions about job changes."""
+    """Opens a conversational interface or launches an interactive LLM CLI session."""
+    import shutil
     from reference_artifacts import reference_context
-
-    print_header("Ask AI: Change Context Inquiry")
-    print("\033[90mAsk questions about what was changed, why, or how it works.\033[0m")
-    print("\033[90mNo code changes will be made.\033[0m\n")
 
     # 1. Gather Context
     branch = job.get("branch")
     base = job.get("base_branch", "main")
     
-    # Try to get the total diff
     diff_text = "(No diff available)"
     if branch:
         try:
-            res = subprocess.run(["git", "diff", f"{base}...{branch}"], capture_output=True, text=True)
+            res = subprocess.run(["git", "diff", f"{base}...{branch}"], capture_output=True, text=True, cwd=str(ROOT))
             if res.returncode == 0:
                 diff_text = res.stdout
-                if len(diff_text) > 50000:
-                    diff_text = diff_text[:50000] + "\n... (diff truncated for length)"
+                if len(diff_text) > 80000:
+                    diff_text = diff_text[:80000] + "\n... (diff truncated for length)"
         except:
             pass
 
-    # Get brief and summary
-    brief_dir = OUTPUT_DIR / job["job_id"]
+    # Get brief, summary, and recent logs
+    job_id = job.get("job_id", "unknown")
+    brief_dir = OUTPUT_DIR / job_id
     brief_content = ""
     summary_content = ""
     
@@ -4997,61 +4994,130 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
     if (brief_dir / "builder_summary.md").exists():
         summary_content = (brief_dir / "builder_summary.md").read_text(encoding="utf-8")
 
-    context = f"""### JOB CONTEXT
-Title: {job.get('title')}
-Job ID: {job.get('job_id')}
-Status: {job.get('status')}
-Branch: {branch} (vs {base})
+    issue_num = job.get("issue_number", "")
+    title = job.get("title", "")
 
-### JOB BRIEF
-{brief_content}
+    context_bundle = f"""# Context for Job #{issue_num}: {title}
+**Job ID**: `{job_id}`
+**Branch**: `{branch}` (vs `{base}`)
+**Status**: `{job.get('status')}`
 
-### REFERENCE ARTIFACTS
+## Brief
+{brief_content or "No brief available."}
+
+## Reference Artifacts
 {reference_context(job) or "None"}
 
-### BUILDER SUMMARY (AI Implementation Notes)
-{summary_content}
+## Builder Summary
+{summary_content or "No builder summary available."}
 
-### TOTAL DIFF
+## Total Git Diff
 ```diff
 {diff_text}
 ```
 """
 
-    system_prompt = """You are an expert technical consultant. You are helping a developer understand changes made by an AI coding agent.
-Your goal is to answer questions about the code modifications, the rationale behind them, and how the new logic works.
-You MUST NOT propose or perform any code changes. Be concise, accurate, and focus on the provided diff and job context."""
+    # Write context bundle to file so CLIs can easily reference or read it
+    context_file = brief_dir / "chat_context.md"
+    try:
+        brief_dir.mkdir(parents=True, exist_ok=True)
+        context_file.write_text(context_bundle, encoding="utf-8")
+    except:
+        pass
+
+    # Detect installed CLIs
+    available_clis = []
+    if shutil.which("opencode"): available_clis.append(("opencode", "OpenCode CLI", "opencode"))
+    if shutil.which("agy"): available_clis.append(("agy", "Antigravity CLI (agy)", "agy"))
+    if shutil.which("claude"): available_clis.append(("claude", "Claude Code CLI", "claude"))
+    if shutil.which("gemini"): available_clis.append(("gemini", "Gemini CLI", "gemini"))
+    if shutil.which("codex"): available_clis.append(("codex", "Codex CLI", "codex"))
 
     while True:
-        question = prompt_input("Question:", placeholder="(or Enter to go back)", field_below=True)
-        if not question:
+        clear_screen()
+        print_header("Ask AI / Interactive Investigation")
+        print("\033[90mInspect code modifications, ask clarifying questions, and test hypotheses.\033[0m\n")
+
+        print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
+        if available_clis:
+            for idx, (cli_key, cli_label, _) in enumerate(available_clis, 1):
+                print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m (Interactive Multi-Turn Session)")
+        else:
+            print("  \033[90m(No local AI CLIs detected in PATH)\033[0m")
+
+        print("\n\033[1;95m💬 IN-CONSOLE MODE\033[0m")
+        print("  [\033[1;93mQ\033[0m] Quick Question in Console (Single Turn)")
+        print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
+
+        choice = prompt_input("Select Option:", placeholder="1, Q, or B", field_below=True).strip().lower()
+        if not choice or choice == "b":
             break
+
+        # Check if user picked an interactive CLI
+        if choice.isdigit() and 1 <= int(choice) <= len(available_clis):
+            cli_key, cli_label, bin_name = available_clis[int(choice) - 1]
+            clear_screen()
+            print_header(f"Launching {cli_label}")
+            display_ctx = context_file.name
+            try:
+                if context_file.is_relative_to(ROOT):
+                    display_ctx = str(context_file.relative_to(ROOT))
+            except:
+                pass
+            print(f"  • \033[1;36mJob:\033[0m        #{issue_num} ({title})")
+            print(f"  • \033[1;36mContext:\033[0m    {display_ctx}")
+            print(f"  • \033[1;36mReturn:\033[0m     Type \033[97m/exit\033[0m or press \033[97mCtrl-D\033[0m anytime to return to Orchestrator.\n")
+            print("-" * 70)
+
+            intro_prompt = f"I am reviewing Job #{issue_num}: {title}. Please inspect the diff, brief, and notes in {context_file} to help me understand what changes were made and answer any questions."
             
-        full_prompt = f"{system_prompt}\n\n{context}\n\n### USER QUESTION\n{question}"
-        
-        # Use the job's preferred builder or a fallback
-        model = job.get("builder", "gemini-3.1-pro-preview")
-        
-        try:
-            print_phase("agent_thinking")
-            # We don't pass a role so it doesn't try to parse JSON
-            output, actual_model, session_id = run_llm(model, full_prompt, allowed_models=session_allowed_models)
+            cmd = []
+            if cli_key == "opencode":
+                cmd = ["opencode", "--prompt", intro_prompt]
+            elif cli_key == "agy":
+                cmd = ["agy", "--prompt-interactive", intro_prompt]
+            elif cli_key == "gemini":
+                cmd = ["gemini", "-i", intro_prompt]
+            elif cli_key == "claude":
+                cmd = ["claude", intro_prompt]
+            elif cli_key == "codex":
+                cmd = ["codex"]
+            else:
+                cmd = [bin_name]
+
+            try:
+                subprocess.run(cmd, cwd=str(ROOT))
+            except Exception as e:
+                print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
+                input("\n\033[1;96mTap Enter to continue...\033[0m")
+            continue
+
+        elif choice == "q":
+            print_header("Quick Question (In-Console)")
+            print("\033[90mAsk a quick question without leaving the console.\033[0m\n")
+            system_prompt = """You are an expert technical consultant. You are helping a developer understand changes made by an AI coding agent.
+Your goal is to answer questions about the code modifications, the rationale behind them, and how the new logic works.
+You MUST NOT propose or perform any code changes. Be concise, accurate, and focus on the provided diff and job context."""
             
-            # Record session ID in job if present
-            if job:
-                if "llm_sessions" not in job:
-                    job["llm_sessions"] = []
-                job["llm_sessions"].append({"id": session_id, "model": actual_model})
-            
-            print(f"\n\033[1;97mAI Response ({actual_model}):\033[0m")
-            print("-" * 60)
-            print(output)
-            print("-" * 60)
-            
-        except Exception as e:
-            print(f"\n\033[1;91mError calling AI: {e}\033[0m")
-            
-    return
+            while True:
+                question = prompt_input("Question:", placeholder="(or Enter to go back)", field_below=True)
+                if not question:
+                    break
+                full_prompt = f"{system_prompt}\n\n{context_bundle}\n\n### USER QUESTION\n{question}"
+                model = job.get("builder", "gemini-3.1-pro-preview")
+                try:
+                    print_phase("agent_thinking")
+                    output, actual_model, session_id = run_llm(model, full_prompt, allowed_models=session_allowed_models)
+                    if job:
+                        if "llm_sessions" not in job:
+                            job["llm_sessions"] = []
+                        job["llm_sessions"].append({"id": session_id, "model": actual_model})
+                    print(f"\n\033[1;97mAI Response ({actual_model}):\033[0m")
+                    print("-" * 60)
+                    print(output)
+                    print("-" * 60)
+                except Exception as e:
+                    print(f"\n\033[1;91mError calling AI: {e}\033[0m")
 
 def handle_api_keys(session_allowed_machines, session_allowed_models):
     settings_path = CONFIG_DIR / "settings.json"
