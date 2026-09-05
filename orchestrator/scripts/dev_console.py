@@ -3395,7 +3395,7 @@ def auto_link_latest_logs(job: dict[str, Any]):
         job["last_manual_log_paths"] = log_paths
         save_job(job)
 
-def prompt_for_logs(job: dict[str, Any]) -> list[str]:
+def prompt_for_logs(job: dict[str, Any], status_bar: StatusBar | None = None) -> list[str]:
     print_header("Link Logs")
     print("\033[90mAttach logs or manual run output so the next AI action has concrete failure context.\033[0m")
     print("\033[90mYou can select recent logs, paste new logs, or enter a custom local path.\033[0m\n")
@@ -3482,7 +3482,16 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
         all_options.append("--- Recent Logs ---")
         all_options.extend(display_options)
 
-    selected = prompt_checkbox("Select logs to link for this job:", all_options, curr_labels)
+    created_status_bar = False
+    if status_bar is None:
+        status_bar = StatusBar(job, sub_menu=True)
+        created_status_bar = True
+
+    try:
+        selected = prompt_checkbox("Select logs to link for this job:", all_options, curr_labels, status_bar=status_bar)
+    finally:
+        if created_status_bar:
+            status_bar.reset_scroll_region(force=True)
 
     log_paths = []
     from manual_run import capture_logs
@@ -4336,17 +4345,20 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "l":
                 open_action_screen()
-                log_paths = prompt_for_logs(job)
-                
-                # Record choice in JSON
-                job = refresh_job(job)
-                job["last_manual_log_paths"] = log_paths
-                save_job(job)
-                job = refresh_job(job)
-                
-                if log_paths:
-                    print(f"\n✅ Linked {len(log_paths)} log entries.")
-                    # We skip the "Press Enter" so it returns immediately to the job menu redraw
+                try:
+                    log_paths = prompt_for_logs(job, status_bar=status_bar)
+                    
+                    # Record choice in JSON
+                    job = refresh_job(job)
+                    job["last_manual_log_paths"] = log_paths
+                    save_job(job)
+                    job = refresh_job(job)
+                    
+                    if log_paths:
+                        print(f"\n✅ Linked {len(log_paths)} log entries.")
+                        # We skip the "Press Enter" so it returns immediately to the job menu redraw
+                except BackException:
+                    pass
             elif choice == "k":
                 open_action_screen()
                 prompt_for_reference_artifact(job)
@@ -4595,7 +4607,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     
                     # 5) when choosing to re-run a job, ensure the linking prompt comes up.
                     try:
-                        log_paths = prompt_for_logs(job)
+                        log_paths = prompt_for_logs(job, status_bar=status_bar)
                         job["last_manual_log_paths"] = log_paths
                     except BackException:
                         print("      - No logs linked.")

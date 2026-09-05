@@ -516,7 +516,8 @@ class DevConsoleTests(unittest.TestCase):
                 elif key == "r":
                     mock_confirm.assert_called()
                 elif key == "l":
-                    mock_logs.assert_called_once_with(job)
+                    self.assertEqual(mock_logs.call_args[0][0], job)
+                    self.assertIsNotNone(mock_logs.call_args.kwargs.get("status_bar"))
                     mock_save.assert_called()
                     self.assertEqual(job["last_manual_log_paths"], ["build.log"])
                 elif key == "k":
@@ -1193,12 +1194,14 @@ class AppFeatureTests_{i}: XCTestCase {{
                 "last_manual_log_paths": [str(manual_dir.relative_to(self.temp_root))]
             }
 
-            def fake_prompt_checkbox(label, options, defaults):
+            def fake_prompt_checkbox(label, options, defaults, **kwargs):
                 self.assertEqual(options[0], "\033[1;96mPaste New Logs...\033[0m")
                 self.assertEqual(options[1], "\033[1;96mCustom Path...\033[0m")
                 self.assertEqual(options[2], "--- Recent Logs ---")
                 self.assertTrue(len(defaults) > 0)
                 self.assertTrue(any("2026-09-04" in d for d in defaults))
+                self.assertIsNotNone(kwargs.get("status_bar"))
+                self.assertTrue(kwargs["status_bar"].sub_menu)
                 return defaults
 
             mock_prompt_checkbox.side_effect = fake_prompt_checkbox
