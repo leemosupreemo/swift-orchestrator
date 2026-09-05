@@ -2539,7 +2539,6 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             # 1. Detection
             import shutil
             has_xcbeautify = shutil.which("xcbeautify") is not None
-            xcbeautify_status = "\033[92mINSTALLED\033[0m (Output auto-formatted)" if has_xcbeautify else "\033[93mNOT INSTALLED\033[0m (Run: brew install xcbeautify)"
 
             # Scan test files for imports
             suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
@@ -2554,35 +2553,38 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             has_snapshot_testing = "import SnapshotTesting" in all_test_content or "assertSnapshot" in all_test_content
             has_quick_nimble = "import Quick" in all_test_content or "import Nimble" in all_test_content
 
-            st_badge = "\033[1;92m[IN USE]\033[0m" if has_swift_testing else "\033[1;96m[AVAILABLE - Xcode 16+]\033[0m"
-            snap_badge = "\033[1;92m[IN USE]\033[0m" if has_snapshot_testing else "\033[90m[NOT DETECTED]\033[0m"
-            qn_badge = "\033[1;92m[IN USE]\033[0m" if has_quick_nimble else "\033[90m[NOT DETECTED]\033[0m"
-            print(f"  [\033[1;96m1\033[0m] \033[1;97mSwift Testing (Apple Native)\033[0m               {st_badge}")
-            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mCore business logic, ViewModels & async code (Replaces legacy XCTest)\033[0m")
-            print("      \033[90m• Pain Solved:\033[0m      \033[90mEliminates XCTestCase boilerplate, subclassing & manual async waiters\033[0m")
-            print("      \033[36m→ Select [1] to view macro cheat sheet (#expect, #require), traits & starter template\033[0m")
-            print()
-            print(f"  [\033[1;96m2\033[0m] \033[1;97mPoint-Free SnapshotTesting\033[0m                 {snap_badge}")
-            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mCatch silent visual bugs (clipped text, broken layouts, Dark Mode)\033[0m")
-            print("      \033[1;95m• Why Beyond Native:\033[0m \033[90mSwift Testing checks data in memory, NOT rendered pixels on screen\033[0m")
-            print("      \033[36m→ Select [2] to view visual regression guide, SPM setup & SwiftUI snapshot template\033[0m")
-            print()
-            print(f"  [\033[1;96m3\033[0m] \033[1;97mQuick & Nimble (BDD Testing)\033[0m               {qn_badge}")
-            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mMulti-step async workflows, state machines & specs with polling matchers\033[0m")
-            print("      \033[1;95m• Why Beyond Native:\033[0m \033[90mHierarchical before/after contexts & automatic toEventually async polling\033[0m")
-            print("      \033[36m→ Select [3] to view BDD specification patterns & async matcher template\033[0m")
-            print()
-            print("  [\033[1;96m4\033[0m] \033[1;97mGenerate Sample Swift Testing File\033[0m")
-            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mInstant canary test to verify Xcode 16+ toolchain & module linking\033[0m")
-            print(f"      \033[90m• Why Choose This:\033[0m  \033[90m1-click test file creation in \033[93m{PROJECT_CONFIG.test_target or 'AppTests'}\033[90m with zero manual setup\033[0m")
-            print("      \033[36m→ Select [4] to generate sample test file & test your build toolchain\033[0m")
-            print()
-            if not has_xcbeautify:
-                print(f"  [\033[1;92mI\033[0m] \033[1;97mInstall xcbeautify (CLI Formatter)\033[0m         {xcb_badge}")
-                print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mStrip 10,000+ lines of raw xcodebuild compiler spam into 1-line pass/fail\033[0m")
-                print("      \033[36m→ Select [I] to install via Homebrew (brew install xcbeautify)\033[0m")
-                print()
-            print("  [\033[1;91mB\033[0m] \033[1;97mBack to Manage Tests Menu\033[0m")
+            try:
+                cols, _ = os.get_terminal_size()
+            except Exception:
+                cols = 80
+
+            name_w = 26
+            status_w = 13
+            # Key (5) + ' | ' (3) + name_w (26) + ' | ' (3) + status_w (13) + ' | ' (3) = 53
+            desc_w = max(20, cols - 54)
+
+            header = f"Opt   | {'Framework / Tool':<{name_w}} | {'Status':<{status_w}} | {'Job To Be Done / Best For':<{desc_w}}"
+            print(header)
+            print("-" * min(len(header), cols - 2))
+
+            items = [
+                ("1", "Swift Testing (Native)", "IN USE" if has_swift_testing else "AVAILABLE", "\033[1;92m" if has_swift_testing else "\033[1;96m", "Core logic, ViewModels & async unit tests"),
+                ("2", "SnapshotTesting", "IN USE" if has_snapshot_testing else "NOT DETECTED", "\033[1;92m" if has_snapshot_testing else "\033[90m", "Visual regressions (SwiftUI pixels, Dark Mode)"),
+                ("3", "Quick & Nimble (BDD)", "IN USE" if has_quick_nimble else "NOT DETECTED", "\033[1;92m" if has_quick_nimble else "\033[90m", "Multi-step async state machines & polling specs"),
+                ("4", "Sample Canary Suite", "READY", "\033[1;93m", f"1-click test suite generation in {PROJECT_CONFIG.test_target or 'AppTests'}"),
+                ("I", "xcbeautify Formatter", "INSTALLED" if has_xcbeautify else "NOT INSTALLED", "\033[1;92m" if has_xcbeautify else "\033[1;93m", "Strip noisy xcodebuild output into 1-line logs")
+            ]
+
+            for key, name, status, color, desc in items:
+                display_desc = desc if len(desc) <= desc_w else desc[:max(0, desc_w - 2)] + ".."
+                key_col = f"[\033[1;96m{key}\033[0m] "
+                status_col = f"{color}{status:<{status_w}}\033[0m"
+                print(f"{key_col} | {name:<{name_w}} | {status_col} | \033[97m{display_desc:<{desc_w}}\033[0m")
+
+            print_header("Actions")
+            print("[\033[1;96m1-4\033[0m] View cheat sheets, guides & starter templates")
+            print("[\033[1;96mI\033[0m]   Install / inspect xcbeautify CLI formatter")
+            print("[\033[1;91mB\033[0m]   Back to Manage Tests Menu\n")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
@@ -2888,15 +2890,28 @@ struct SampleSwiftTestingTests {{
                     print(f"  \033[1;92m✅ Created {sample_file.relative_to(ROOT)}\033[0m")
                 print(f"\n  \033[90mRun this test anytime by pressing 'A' (Run All Unit Tests) in the Manage Tests menu.\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-            elif choice == "i" and not has_xcbeautify:
-                clear_screen()
-                print_header("Installing xcbeautify via Homebrew")
-                res = subprocess.run(["brew", "install", "xcbeautify"])
-                if res.returncode == 0:
-                    print("\n\033[1;92m✅ Successfully installed xcbeautify!\033[0m")
+            elif choice == "i":
+                if not has_xcbeautify:
+                    clear_screen()
+                    print_header("Installing xcbeautify via Homebrew")
+                    res = subprocess.run(["brew", "install", "xcbeautify"])
+                    if res.returncode == 0:
+                        print("\n\033[1;92m✅ Successfully installed xcbeautify!\033[0m")
+                    else:
+                        print(f"\n\033[1;91m❌ Installation failed with code {res.returncode}.\033[0m")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 else:
-                    print(f"\n\033[1;91m❌ Installation failed with code {res.returncode}.\033[0m")
-                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                    clear_screen()
+                    print_header("xcbeautify CLI Formatter")
+                    print("""  \033[1;92m======================================================================\033[0m
+  \033[1;97m📌 STATUS: INSTALLED & ACTIVE\033[0m
+  xcbeautify is installed on your system and automatically cleans up
+  xcodebuild test execution into colorized, 1-line pass/fail summaries.
+
+  \033[1;97m🔗 OFFICIAL REPOSITORY\033[0m
+  \033[1;36m• GitHub:\033[0m https://github.com/cpisciotta/xcbeautify
+  \033[1;92m======================================================================\033[0m""")
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             else:
                 error_msg = f"'{choice}'"
 
@@ -2970,14 +2985,14 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             else:
                 print("    \033[90mNo test suites found in " + PROJECT_CONFIG.test_target + ".\033[0m")
 
-            print("\n  \033[1;90m--- ACTIONS (JOBS TO BE DONE) ---\033[0m")
-            print("  [\033[1;92mA\033[0m] \033[1;97mRun All Unit Tests\033[0m                     \033[90m• Execute suite via xcodebuild & verify passes\033[0m")
-            print("  [\033[1;96mC\033[0m] \033[1;97mCalculate / Refresh Code Coverage\033[0m      \033[90m• Identify untested lines & generate delta report\033[0m")
-            print("  [\033[1;96mE\033[0m] \033[1;97mExpand Unit Test Coverage\033[0m              \033[90m• Autonomous AI agent writes tests for uncovered files\033[0m")
-            print("  [\033[1;96mF\033[0m] \033[1;97mTest Frameworks, Plugins & Canaries\033[0m    \033[90m• Swift Testing, SnapshotTesting, Quick/Nimble & sample file\033[0m")
-            print("  [\033[1;96mR\033[0m] \033[1;97mRename a Test Suite / File\033[0m             \033[90m• Clean up and organize test suite naming\033[0m")
-            print("  [\033[1;96mV\033[0m] \033[1;97mSimulator Visual Check\033[0m                 \033[90m• Build, launch in simulator & capture screenshots\033[0m")
-            print("  [\033[1;91mB\033[0m] \033[1;97mBack\033[0m")
+            print_header("Actions")
+            print("[\033[1;92mA\033[0m] Run All Unit Tests")
+            print("[\033[1;96mC\033[0m] Calculate / Refresh Code Coverage")
+            print("[\033[1;96mE\033[0m] Expand Unit Test Coverage (AI Job)")
+            print("[\033[1;96mF\033[0m] Test Frameworks & Canaries (Swift Testing, Snapshots, BDD)")
+            print("[\033[1;96mR\033[0m] Rename a Test Suite / File")
+            print("[\033[1;96mV\033[0m] Simulator Visual Check (Screenshots)")
+            print("[\033[1;91mB\033[0m] Back\n")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
