@@ -1211,9 +1211,25 @@ class AppFeatureTests_{i}: XCTestCase {{
         finally:
             dev_console.OUTPUT_DIR = old_out
 
+    def test_format_job_row_removes_numbers_from_title_and_shows_modified_date(self):
+        job = {
+            "job_id": "20260905-130559-bug-79",
+            "type": "bug",
+            "status": "review-needed",
+            "issue_number": 79,
+            "title": "#79 Fix risk tab not populating",
+            "updated_at": "2026-09-05T13:05:59",
+        }
+        row = dev_console.format_job_row(0, job, title_width=35)
+        
+        self.assertIn("Fix risk tab not populating", row)
+        self.assertNotIn("#79", row)
+        self.assertIn("09/05", row)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

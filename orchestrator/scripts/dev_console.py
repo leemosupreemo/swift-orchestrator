@@ -578,6 +578,28 @@ def save_job(job: dict[str, Any]):
     data.pop("_path", None)
     write_json(Path(path), data)
 
+def format_job_date(job: dict[str, Any]) -> str:
+    if job.get("_path"):
+        try:
+            p = Path(job["_path"])
+            if p.exists():
+                dt = datetime.fromtimestamp(p.stat().st_mtime)
+                return dt.strftime("%m/%d")
+        except Exception:
+            pass
+    val = job.get("updated_at") or job.get("created_at")
+    if isinstance(val, str) and len(val) >= 10:
+        try:
+            parts = val[:10].split("-")
+            if len(parts) == 3:
+                return f"{parts[1]}/{parts[2]}"
+        except Exception:
+            pass
+    job_id = str(job.get("job_id", ""))
+    if len(job_id) >= 8 and job_id[:8].isdigit():
+        return f"{job_id[4:6]}/{job_id[6:8]}"
+    return "--/--"
+
 def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
     status_map = {
         "planned": "plan",
@@ -603,10 +625,9 @@ def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
     color = status_colors.get(status_raw, reset)
     short_status = status_map.get(status_raw, status_raw[:6])
 
-    # Prepend issue number if available for uniqueness
-    issue_num = job.get("issue_number")
+    # Clean title without leading numbers for easier reading
     raw_title = job.get("title", "Untitled")
-    display_title = f"#{issue_num} {raw_title}" if issue_num else raw_title
+    display_title = re.sub(r"^#\d+\s*", "", raw_title)
 
     # Responsive title truncation
     title = display_title[:title_width]
@@ -624,15 +645,12 @@ def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
     else:
         type_str = f"\033[90m{job_type[:7]:7}\033[0m"
 
-    # Log indicator: checkmark or X
-    has_logs = job.get("last_manual_log_paths")
-    if has_logs:
-        log_display = "\033[92m✓\033[0m"
-    else:
-        log_display = "\033[90mx\033[0m"
+    # Month/day last modified indicator
+    date_str = format_job_date(job)
+    date_display = f"\033[90m{date_str:^8}\033[0m"
 
-    # New compact layout: [ID] | Type | Status | Title | Logs
-    return f"{format_index(f'{idx:2}')} | {type_str} | {color}{short_status:6}{reset} | {title:{title_width}} | {log_display}"
+    # Layout: [ID] | Type | Status | Title | Modified
+    return f"{format_index(f'{idx:2}')} | {type_str} | {color}{short_status:6}{reset} | {title:{title_width}} | {date_display}"
 
 def script_failure_summary(output_log: str) -> str | None:
     ansi_re = re.compile(r"\033\[[0-9;]*m")
@@ -6879,9 +6897,9 @@ def main_loop():
                         cols = 80
                     
                     # Columns and separators (visible characters):
-                    # [ID] (8) + | Type (10) + | Status (9) + | Logs (7) = 34
-                    title_width = max(10, cols - 35)
-                    header = f"ID   | Type    | Status | {'Title':<{title_width}} | Logs"
+                    # [ID] (5) + | Type (10) + | Status (9) + | Modified (11) = 35 (+ 3 for | Title) = 38
+                    title_width = max(10, cols - 38)
+                    header = f"ID   | Type    | Status | {'Title':<{title_width}} | Modified"
                     print(header)
                     print("-" * len(header))
                     for i, job in enumerate(jobs):
