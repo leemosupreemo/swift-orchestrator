@@ -688,14 +688,15 @@ class FollowupAndLogTests(unittest.TestCase):
 
     def test_format_file_link_terminal_hyperlink(self) -> None:
         p = Path("/tmp/export.zip")
+        resolved = p.resolve()
         with patch("sys.stdout.isatty", return_value=True):
             link = common.format_file_link(p)
-            self.assertIn("\033]8;;file:///tmp/export.zip\033\\", link)
-            self.assertIn("/tmp/export.zip\033]8;;\033\\", link)
+            self.assertIn(f"\033]8;;file://{resolved}\033\\", link)
+            self.assertIn(f"{resolved}\033]8;;\033\\", link)
 
         with patch("sys.stdout.isatty", return_value=False):
             plain = common.format_file_link(p)
-            self.assertEqual(plain, "/tmp/export.zip (file:///tmp/export.zip)")
+            self.assertEqual(plain, f"{resolved} (file://{resolved})")
 
 
 if __name__ == "__main__":
