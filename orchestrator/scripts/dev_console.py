@@ -2915,6 +2915,126 @@ struct SampleSwiftTestingTests {{
             else:
                 error_msg = f"'{choice}'"
 
+def handle_run_tests_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
+    error_msg = ""
+    while True:
+        clear_screen()
+        with StatusBar({
+            "allowed_machines": session_allowed_machines,
+            "online_machines": get_online_machines(session_allowed_machines),
+            "allowed_models": session_allowed_models
+        }, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
+
+            print_header("Run Unit Tests")
+
+            suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
+            total_tests = sum(s["test_count"] for s in suites)
+
+            test_plans_root = ROOT / PROJECT_CONFIG.test_target / "TestPlans"
+            test_plans = sorted(test_plans_root.glob("*.xctestplan")) if test_plans_root.exists() else []
+
+            try:
+                cols, _ = os.get_terminal_size()
+            except Exception:
+                cols = 80
+
+            name_w = 28
+            count_w = 12
+            desc_w = max(20, cols - 55)
+
+            header = f"Opt   | {'Test Target / Suite':<{name_w}} | {'Test Count':<{count_w}} | {'Scope / Location':<{desc_w}}"
+            print(header)
+            print("-" * min(len(header), cols - 2))
+
+            # Option 1: Run All Tests
+            target_name = PROJECT_CONFIG.test_target or "All Targets"
+            opt1_name = f"All Unit Tests ({target_name})"
+            if len(opt1_name) > name_w:
+                opt1_name = opt1_name[:name_w - 2] + ".."
+            opt1_count = f"{total_tests} test(s)" if total_tests > 0 else "All tests"
+            opt1_desc = "Runs entire test target via xcodebuild test"
+            display_desc = opt1_desc if len(opt1_desc) <= desc_w else opt1_desc[:max(0, desc_w - 2)] + ".."
+            print(f"[\033[1;92m1\033[0m]   | \033[1;97m{opt1_name:<{name_w}}\033[0m | \033[1;92m{opt1_count:<{count_w}}\033[0m | \033[97m{display_desc:<{desc_w}}\033[0m")
+
+            # Option map for dispatching
+            option_map: dict[str, dict[str, Any]] = {}
+            current_idx = 2
+
+            # List individual suites
+            for s in suites:
+                key = str(current_idx)
+                option_map[key] = {"type": "suite", "suite": s}
+                s_name = s["name"]
+                if len(s_name) > name_w:
+                    s_name = s_name[:name_w - 2] + ".."
+                s_count = f"{s['test_count']} test(s)"
+                s_rel = str(s["rel_path"])
+                display_rel = s_rel if len(s_rel) <= desc_w else s_rel[:max(0, desc_w - 2)] + ".."
+                key_str = f"[\033[1;96m{key}\033[0m]"
+                print(f"{key_str:<14} | {s_name:<{name_w}} | \033[93m{s_count:<{count_w}}\033[0m | \033[90m{display_rel:<{desc_w}}\033[0m")
+                current_idx += 1
+
+            # List test plans if any exist
+            if test_plans:
+                print(f"      | \033[1;90m--- XCODE TEST PLANS ---\033[0m")
+                for tp in test_plans:
+                    key = str(current_idx)
+                    option_map[key] = {"type": "plan", "plan": tp}
+                    tp_name = tp.stem
+                    if len(tp_name) > name_w:
+                        tp_name = tp_name[:name_w - 2] + ".."
+                    tp_rel = str(tp.relative_to(ROOT))
+                    display_rel = tp_rel if len(tp_rel) <= desc_w else tp_rel[:max(0, desc_w - 2)] + ".."
+                    key_str = f"[\033[1;96m{key}\033[0m]"
+                    print(f"{key_str:<14} | {tp_name:<{name_w}} | \033[95mTest Plan\033[0m    | \033[90m{display_rel:<{desc_w}}\033[0m")
+                    current_idx += 1
+
+            print_header("Actions")
+            print("[\033[1;92m1\033[0m]   Run all test suites in target")
+            if suites:
+                max_key = current_idx - 1
+                print(f"[\033[1;96m2-{max_key}\033[0m] Run specific individual test suite (-only-testing)")
+            print("[\033[1;91mB\033[0m]   Back to Manage Tests Menu\n")
+
+            if error_msg:
+                print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+                error_msg = ""
+
+            max_choice = current_idx - 1
+            prompt_range = f"(1-{max_choice}, B)" if max_choice > 1 else "(1, B)"
+            prompt = get_choice_prompt("Choice:", prompt_range)
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+            choice = get_key().strip().lower()
+            clear_choice_placeholder()
+
+            if choice == "b":
+                break
+            elif choice in ("1", "a"):
+                print_header(f"Running All Unit Tests ({target_name})")
+                run_script("manual_run.py", ["test"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            elif choice in option_map:
+                opt = option_map[choice]
+                if opt["type"] == "suite":
+                    selected_suite = opt["suite"]
+                    suite_name = selected_suite["name"]
+                    tt = PROJECT_CONFIG.test_target or ""
+                    testing_flag = f"-only-testing:{tt}/{suite_name}" if tt else f"-only-testing:{suite_name}"
+                    print_header(f"Running Test Suite: {suite_name}")
+                    print(f"  \033[90mExecuting {testing_flag}...\033[0m\n")
+                    run_script("manual_run.py", ["test", "--test-only", testing_flag], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                elif opt["type"] == "plan":
+                    tp = opt["plan"]
+                    flags = get_test_plan_flags(tp)
+                    print_header(f"Running Test Plan: {tp.stem}")
+                    print(f"  \033[90mExecuting {flags}...\033[0m\n")
+                    run_script("manual_run.py", ["test", "--test-only", flags], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                    input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            else:
+                error_msg = f"'{choice}'"
+
 def handle_manage_tests(session_allowed_machines: list[str], session_allowed_models: list[str]):
     error_msg = ""
     while True:
@@ -2986,7 +3106,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                 print("    \033[90mNo test suites found in " + PROJECT_CONFIG.test_target + ".\033[0m")
 
             print_header("Actions")
-            print("[\033[1;92mA\033[0m] Run All Unit Tests")
+            print("[\033[1;92mA\033[0m] Run Unit Tests (All or Specific Suites)")
             print("[\033[1;96mC\033[0m] Calculate / Refresh Code Coverage")
             print("[\033[1;96mE\033[0m] Expand Unit Test Coverage (AI Job)")
             print("[\033[1;96mF\033[0m] Test Frameworks & Canaries (Swift Testing, Snapshots, BDD)")
@@ -3009,8 +3129,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             if choice == "b":
                 break
             elif choice == "a":
-                print_header("Running All Unit Tests")
-                run_script("manual_run.py", ["test", "--test-only"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                handle_run_tests_menu(session_allowed_machines, session_allowed_models)
             elif choice == "c":
                 run_calculate_coverage(session_allowed_machines, session_allowed_models)
             elif choice == "e":

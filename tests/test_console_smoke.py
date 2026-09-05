@@ -150,6 +150,16 @@ class ConsoleSmokeTests(unittest.TestCase):
         dev_console.handle_manage_tests(["local"], ["gemini"])
         self.assertTrue(True)
 
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    def test_run_tests_menu_smoke(self, _mock_status, _mock_clear, mock_get_key):
+        """Superficially run through Run Unit Tests menu options."""
+        mock_get_key.side_effect = self._mock_get_key_side_effect(["b"])
+        
+        dev_console.handle_run_tests_menu(["local"], ["gemini"])
+        self.assertTrue(True)
+
     def test_discover_test_suites(self):
         """Verify discovery of Swift test suites and test count parsing."""
         test_dir = self.temp_root / "AppTests"
