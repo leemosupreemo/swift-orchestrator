@@ -596,6 +596,31 @@ def summarize_cli_error(output: str) -> str:
         return "CLI could not start (operation not permitted)"
     return lines[0]
 
+def get_ssl_context() -> ssl.SSLContext:
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        return ssl._create_unverified_context()
+
+def urlopen_with_ssl_fallback(req_or_url, timeout: int = 5):
+    import urllib.request
+    import urllib.error
+    import ssl
+    ctx = get_ssl_context()
+    try:
+        return urllib.request.urlopen(req_or_url, timeout=timeout, context=ctx)
+    except urllib.error.URLError as e:
+        if "CERTIFICATE_VERIFY_FAILED" in str(e) or "certificate verify failed" in str(e).lower():
+            unverified_ctx = ssl._create_unverified_context()
+            return urllib.request.urlopen(req_or_url, timeout=timeout, context=unverified_ctx)
+        raise
+
 def discover_from_sources_with_details() -> DiscoveryResult:
     """Pings various provider APIs and CLIs to find new models."""
     import urllib.request
@@ -610,7 +635,7 @@ def discover_from_sources_with_details() -> DiscoveryResult:
         try:
             req = urllib.request.Request("https://api.openai.com/v1/models", 
                                          headers={"Authorization": f"Bearer {openai_key}"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urlopen_with_ssl_fallback(req, timeout=5) as resp:
                 data = json.loads(resp.read())
                 exclude_prefixes = ("dall-e", "whisper", "tts", "text-embedding", "babbage", "davinci", "omni-moderation")
                 for m in data.get("data", []):
@@ -629,7 +654,7 @@ def discover_from_sources_with_details() -> DiscoveryResult:
         before = len(discovered)
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}"
-            with urllib.request.urlopen(url, timeout=5) as resp:
+            with urlopen_with_ssl_fallback(url, timeout=5) as resp:
                 data = json.loads(resp.read())
                 for m in data.get("models", []):
                     mid = m["name"].split("/")[-1]

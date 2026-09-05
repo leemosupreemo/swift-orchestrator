@@ -2988,7 +2988,7 @@ struct SampleSwiftTestingTests {{
                 else:
                     sample_file.write_text(sample_code, encoding="utf-8")
                     print(f"  \033[1;92m✅ Created {sample_file.relative_to(ROOT)}\033[0m")
-                print(f"\n  \033[90mRun this test anytime by pressing 'A' (Run All Unit Tests) in the Manage Tests menu.\033[0m")
+                print(f"\n  \033[90mRun this test anytime by pressing 'A' (Run All Unit Tests) in the Manage Test Coverage menu.\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i":
                 if not has_xcbeautify:
@@ -3095,7 +3095,7 @@ def handle_run_tests_menu(session_allowed_machines: list[str], session_allowed_m
             if suites:
                 max_key = current_idx - 1
                 print(f"[\033[1;96m2-{max_key}\033[0m] Run specific individual test suite (-only-testing)")
-            print("[\033[1;91mB\033[0m]   Back to Manage Tests Menu\n")
+            print("[\033[1;91mB\033[0m]   Back to Manage Test Coverage Menu\n")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
@@ -3146,7 +3146,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
         }, sub_menu=True) as status_bar:
             status_bar.set_scroll_region()
 
-            print_header("Manage Tests & Code Coverage")
+            print_header("Manage Test Coverage")
 
             # 1. Code Coverage Status & Visual Progress Bar
             cov_data = get_coverage_data()
@@ -6928,7 +6928,7 @@ def main_loop():
                 
                 print_header("Actions")
                 print("[\033[96mN\033[0m] New Job")
-                print("[\033[93mT\033[0m] Manage Tests & Coverage")
+                print("[\033[93mT\033[0m] Manage Test Coverage")
                 print("[\033[93mD\033[0m] Distribute build (Firebase)")
                 print("[\033[93mG\033[0m] GitHub & Source Control")
                 print("[\033[93mC\033[0m] Configuration & Tools")
