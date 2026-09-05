@@ -3410,13 +3410,21 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
     
     def add_log_option(full_path):
         try:
-            rel = str(full_path.relative_to(ROOT))
-        except:
+            p_obj = Path(full_path)
+            if p_obj.is_absolute():
+                try:
+                    rel = str(p_obj.relative_to(ROOT))
+                except ValueError:
+                    rel = str(p_obj)
+            else:
+                rel = str(full_path)
+        except Exception:
             rel = str(full_path)
         
         label = format_log_path(rel)
-        display_options.append(label)
-        option_to_path[label] = rel
+        if label not in option_to_path:
+            display_options.append(label)
+            option_to_path[label] = rel
 
     # 1. Job-specific timestamped logs (from previous runs)
     if job_out_base.exists():
@@ -3432,58 +3440,71 @@ def prompt_for_logs(job: dict[str, Any]) -> list[str]:
                          key=lambda x: x.name, reverse=True)[:3]
         for d in log_dirs:
             add_log_option(d)
-    
+
+    # 3. Existing attached logs
+    curr_logs = job.get("last_manual_log_paths", [])
+    if not curr_logs and job.get("last_manual_log_path"):
+        curr_logs = [job.get("last_manual_log_path")]
+
+    for p in curr_logs:
+        if p:
+            add_log_option(p)
+
+    curr_norm_set = set()
+    for p in curr_logs:
+        if not p:
+            continue
+        try:
+            p_obj = Path(p)
+            if p_obj.is_absolute():
+                try:
+                    rel = str(p_obj.relative_to(ROOT))
+                except ValueError:
+                    rel = str(p_obj)
+            else:
+                rel = str(p)
+        except Exception:
+            rel = str(p)
+        curr_norm_set.add(rel)
+        curr_norm_set.add(format_log_path(rel))
+        curr_norm_set.add(str(p))
+
+    curr_labels = [
+        label for label, rel in option_to_path.items()
+        if rel in curr_norm_set or label in curr_norm_set
+    ]
+
+    paste_opt = "\033[1;96mPaste New Logs...\033[0m"
+    custom_opt = "\033[1;96mCustom Path...\033[0m"
+
+    all_options = [paste_opt, custom_opt]
+    if display_options:
+        all_options.append("--- Recent Logs ---")
+        all_options.extend(display_options)
+
+    selected = prompt_checkbox("Select logs to link for this job:", all_options, curr_labels)
+
     log_paths = []
-    
-    if not display_options:
-        print("No recent log entries found for this job or in the manual folder.")
-        print("Select a custom log file path by pressing L.")
-        print("\n[\033[1;96mL\033[0m] Custom Log Path")
-        print("[\033[1;91mB\033[0m] Back")
-        print_choice_prompt("\nChoice:", "(action)")
-        sub_choice = get_key().strip().lower()
-        clear_choice_placeholder()
-        print(sub_choice)
-        if sub_choice == "l":
+    from manual_run import capture_logs
+    for s in selected:
+        if s.startswith("---"):
+            continue
+        if "Paste New Logs..." in s:
+            ts = now_iso().replace(":", "").replace("-", "")[:15]
+            manual_out = manual_base / ts
+            manual_out.mkdir(parents=True, exist_ok=True)
+            log_file = capture_logs(manual_out)
+            if log_file:
+                log_paths.append(str(manual_out.relative_to(ROOT)))
+        elif "Custom Path..." in s:
             print("\n    (Enter path to a log file or directory, or Enter to cancel; e.g. logs/build.log or /var/log)")
             path = prompt_input("Custom log path:", placeholder="logs/build.log or /path/to/logs", field_below=True)
-            if not path:
-                raise BackException()
-            log_paths.append(path)
+            if path:
+                log_paths.append(path)
         else:
-            raise BackException()
-    else:
-        paste_opt = "Paste New Logs..."
-        custom_opt = "Custom Path..."
-        
-        # Determine defaults (currently linked)
-        curr_logs = job.get("last_manual_log_paths", [])
-        if not curr_logs and job.get("last_manual_log_path"):
-            curr_logs = [job.get("last_manual_log_path")]
-            
-        # Convert curr_logs to formatted labels for the checkbox defaults
-        curr_labels = [format_log_path(l) for l in curr_logs]
+            # Map back to actual path if it's in our mapping, otherwise use the label
+            log_paths.append(option_to_path.get(s, s))
 
-        all_options = [paste_opt, custom_opt] + display_options
-        selected = prompt_checkbox("Select logs to link for this job:", all_options, curr_labels)
-        
-        from manual_run import capture_logs
-        for s in selected:
-            if s == paste_opt:
-                ts = now_iso().replace(":", "").replace("-", "")[:15]
-                manual_out = manual_base / ts
-                manual_out.mkdir(parents=True, exist_ok=True)
-                log_file = capture_logs(manual_out)
-                if log_file:
-                    log_paths.append(str(manual_out.relative_to(ROOT)))
-            elif s == custom_opt:
-                print("\n    (Enter path to a log file or directory, or Enter to cancel; e.g. logs/build.log or /var/log)")
-                path = prompt_input("Custom log path:", placeholder="logs/build.log or /path/to/logs", field_below=True)
-                if path: log_paths.append(path)
-            else:
-                # Map back to actual path if it's in our mapping, otherwise use the label
-                log_paths.append(option_to_path.get(s, s))
-                
     return log_paths
 
 def prompt_for_reference_artifact(job: dict[str, Any]) -> bool:
