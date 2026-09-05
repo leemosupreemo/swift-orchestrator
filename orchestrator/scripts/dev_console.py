@@ -3017,7 +3017,9 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                 clear_screen()
                 print_header("Expand Unit Test Coverage")
                 print("  \033[90mAnalyzing codebase and existing test suites for coverage gaps...\033[0m\n")
-                gaps = analyze_coverage_gaps(ROOT, suites, session_allowed_models)
+                
+                with ProgressIndicator(label="Scanning codebase for coverage gaps", hint="Ctrl-C to cancel"):
+                    gaps = analyze_coverage_gaps(ROOT, suites, session_allowed_models)
                 
                 summary = ""
                 if gaps:
@@ -3034,12 +3036,15 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                     
                     options.append("🌐 Comprehensive Coverage Audit (Full audit across all uncovered app subsystems)")
                     options.append("✏️ Custom Subsystem / Focus (Manually enter a subsystem, ViewModel, or module)")
+                    options.append("↩️ Back to Manage Tests Menu")
                     
                     clear_screen()
                     print_header("Expand Unit Test Coverage - Select Focus")
                     print("Select an AI-identified coverage gap, full audit, or custom target:\n")
                     try:
                         gap_choice = prompt_radio("Select Coverage Focus / Target Gap:", options, default=options[0])
+                        if gap_choice == "↩️ Back to Manage Tests Menu":
+                            continue
                         selected_idx = options.index(gap_choice)
                     except (BackException, ValueError):
                         continue
@@ -3053,21 +3058,30 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                             summary += f" Target Files: {', '.join(chosen_gap['target_files'])}"
                     elif selected_idx == len(gaps):
                         summary = "Comprehensive Unit Test Coverage"
-                    else:
+                    elif selected_idx == len(gaps) + 1:
                         clear_screen()
                         print_header("Expand Unit Test Coverage - Custom Focus")
+                        print("  \033[90mEnter a subsystem, ViewModel, or service name to focus on.\033[0m")
+                        print("  \033[90mLeave blank for comprehensive audit, or type 'b' / press Esc to cancel.\033[0m\n")
                         try:
-                            focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", field_below=True)
+                            focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", allow_back=True, field_below=True)
                         except BackException:
                             continue
+                        if focus.strip().lower() == "b":
+                            continue
                         summary = f"Expand Unit Test Coverage: {focus.strip()}" if focus and focus.strip() else "Comprehensive Unit Test Coverage"
+                    else:
+                        continue
                 else:
                     clear_screen()
                     print_header("Expand Unit Test Coverage")
                     print("Create an autonomous AI job to inspect uncovered files and write comprehensive unit tests.\n")
+                    print("  \033[90mType 'b' or press Esc to return to menu.\033[0m\n")
                     try:
-                        focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", field_below=True)
+                        focus = prompt_input("Coverage focus or subsystem (Enter for comprehensive):", placeholder="e.g. AuthViewModel, DataManager, NetworkClient", allow_back=True, field_below=True)
                     except BackException:
+                        continue
+                    if focus.strip().lower() == "b":
                         continue
                     summary = f"Expand Unit Test Coverage: {focus.strip()}" if focus and focus.strip() else "Comprehensive Unit Test Coverage"
 

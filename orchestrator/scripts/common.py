@@ -1311,6 +1311,9 @@ def get_test_plan_flags(plan_path: Path) -> str:
         # Fallback to just using the name if parsing fails
         return f"-testPlan {plan_path.stem}"
 
+_STATUS_BAR_NESTING = 0
+_ACTIVE_STATUS_BAR = None
+
 class ProgressIndicator:
     def __init__(self, label: str = "Thinking", hint: str = "Ctrl-C to abort"):
         self.label = label
@@ -1380,9 +1383,10 @@ class ProgressIndicator:
         now = time.monotonic()
         if not force and now - self.last_render_time < 0.1: return
         
-        # If a status bar is active, we don't draw directly.
-        # The parent loop will call StatusBar.render(activity=indicator)
-        if _STATUS_BAR_NESTING == 0:
+        global _STATUS_BAR_NESTING, _ACTIVE_STATUS_BAR
+        if _STATUS_BAR_NESTING > 0 and _ACTIVE_STATUS_BAR:
+            _ACTIVE_STATUS_BAR.render(at_bottom=True, activity=self, force=force)
+        else:
             self.hide_cursor()
             sys.stdout.write(f"\0337\r\033[K{self.get_line(last_activity_time)}\0338")
             sys.stdout.flush()
@@ -1390,7 +1394,11 @@ class ProgressIndicator:
 
     def clear(self):
         if self.is_silent or not sys.stdout.isatty(): return
-        if _STATUS_BAR_NESTING == 0:
+        global _STATUS_BAR_NESTING, _ACTIVE_STATUS_BAR
+        if _STATUS_BAR_NESTING > 0 and _ACTIVE_STATUS_BAR:
+            _ACTIVE_STATUS_BAR.activity_indicator = None
+            _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True)
+        else:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
         self.restore_cursor()
@@ -1402,9 +1410,6 @@ class ProgressIndicator:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.clear()
-
-_STATUS_BAR_NESTING = 0
-_ACTIVE_STATUS_BAR = None
 
 class StatusBar:
     def __init__(self, job: dict[str, Any] | None = None, is_processing: bool = False, sub_menu: bool = False):
