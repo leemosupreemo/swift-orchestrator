@@ -12,6 +12,7 @@ from common import (
     LOGS_DIR,
     ROOT,
     print_phase,
+    format_file_link,
 )
 from reference_artifacts import reference_context
 
@@ -67,7 +68,8 @@ def export_job(job_path_str: str, output_zip: str | None = None):
         zipf.writestr(f"{job_id}/manifest.txt", "\n".join(manifest))
         print(f"  + Added manifest.txt")
 
-    print(f"\n✅ Export complete: {output_path}")
+    clickable_path = format_file_link(output_path, label=str(output_path))
+    print(f"\n✅ Export complete: \033[4;96m{clickable_path}\033[0m")
     return output_path
 
 def main():

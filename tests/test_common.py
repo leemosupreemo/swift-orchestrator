@@ -686,6 +686,17 @@ class FollowupAndLogTests(unittest.TestCase):
             self.assertEqual(saved_job["debug_history"][0]["implementation_plan"], "Save button missing loading indicator")
             mock_debug_iter.assert_called_once_with(job_path)
 
+    def test_format_file_link_terminal_hyperlink(self) -> None:
+        p = Path("/tmp/export.zip")
+        with patch("sys.stdout.isatty", return_value=True):
+            link = common.format_file_link(p)
+            self.assertIn("\033]8;;file:///tmp/export.zip\033\\", link)
+            self.assertIn("/tmp/export.zip\033]8;;\033\\", link)
+
+        with patch("sys.stdout.isatty", return_value=False):
+            plain = common.format_file_link(p)
+            self.assertEqual(plain, "/tmp/export.zip (file:///tmp/export.zip)")
+
 
 if __name__ == "__main__":
     unittest.main()

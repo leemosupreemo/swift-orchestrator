@@ -215,6 +215,17 @@ def find_latest_runtime_log(job_id: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def format_file_link(path: Path | str, label: str | None = None) -> str:
+    """Formats a local file path as a clickable terminal hyperlink (OSC 8) when supported."""
+    path_obj = Path(path).resolve()
+    display_text = label if label is not None else str(path_obj)
+    abs_uri = f"file://{path_obj}"
+
+    if sys.stdout.isatty():
+        return f"\033]8;;{abs_uri}\033\\{display_text}\033]8;;\033\\"
+    return f"{display_text} ({abs_uri})"
+
+
 def append_log(name: str, content: str) -> Path:
     path = LOGS_DIR / f"{timestamp()}-{name}.log"
     write_text(path, content)
@@ -1580,10 +1591,11 @@ class StatusBar:
         if self.anchor_to_bottom or force:
             if self._scroll_region_set or force:
                 _, lines = self._get_size()
-                # \033[r: reset scroll region
+                # \0337: save cursor position
+                # \033[r: reset scroll region to full screen
                 # \033[?25h: show cursor
-                # \033[{lines};1H\n: move cursor to bottom line and print newline to avoid overwriting content
-                sys.stdout.write(f"\033[r\033[?25h\033[{lines};1H\n")
+                # \0338: restore cursor position so output doesn't jump to the bottom of the screen
+                sys.stdout.write(f"\0337\033[r\033[?25h\0338")
                 sys.stdout.flush()
                 self._scroll_region_set = False
                 self._cursor_hidden = False

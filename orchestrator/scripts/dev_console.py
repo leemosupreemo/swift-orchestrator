@@ -4587,8 +4587,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     run_script("schedule_job.py", [str(job_path)], job=job, session_machines=session_allowed_machines, session_models=session_allowed_models)
                     job = refresh_job({"_path": job_path})
             elif choice == "y" and "y" in actions:
+                open_action_screen("Export Context")
                 run_script("export_job.py", [str(job["_path"])], sub_menu=True)
-                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "g":
                 if job.get("pr_number"):
                     print(f"Opening PR #{job['pr_number']} in browser...")
