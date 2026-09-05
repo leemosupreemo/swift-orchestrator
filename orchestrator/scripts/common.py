@@ -160,6 +160,61 @@ def format_log_path(path_str: str) -> str:
 def now_iso() -> str:
     return datetime.now().isoformat()
 
+
+def record_clarification(job: dict[str, Any], question: str, answer: str) -> dict[str, Any]:
+    """Records a clarification Q&A entry into the job's persistent history and clears the active question."""
+    if not isinstance(job, dict):
+        return job
+    entry = {
+        "question": question.strip() if isinstance(question, str) else str(question),
+        "answer": answer.strip() if isinstance(answer, str) else str(answer),
+        "timestamp": now_iso(),
+    }
+    history = job.setdefault("clarification_history", [])
+    history.append(entry)
+    job["human_clarification_question"] = None
+    job["last_error"] = None
+    job["updated_at"] = now_iso()
+    return job
+
+
+def format_clarification_history(history: list[dict[str, Any]]) -> str:
+    """Formats clarification history as markdown for injecting into LLM prompts."""
+    if not history:
+        return ""
+    lines = ["### User Clarifications & Technical Decisions"]
+    for idx, item in enumerate(history, 1):
+        q = item.get("question", "")
+        a = item.get("answer", "")
+        lines.append(f"{idx}. **Question**: {q}")
+        lines.append(f"   **Answer / Decision**: {a}")
+    return "\n".join(lines)
+
+
+def find_latest_runtime_log(job_id: Optional[str] = None) -> Optional[str]:
+    """Finds the most recent log file from output/job_id, logs/, or output/manual."""
+    search_dirs = []
+    if job_id:
+        search_dirs.append(OUTPUT_DIR / job_id)
+    search_dirs.extend([ROOT / "logs", OUTPUT_DIR / "manual"])
+    
+    candidates = []
+    for d in search_dirs:
+        if d.exists() and d.is_dir():
+            for p in d.rglob("*"):
+                if p.is_file() and p.suffix in {".log", ".txt"} and p.name != "batch_test_results.log":
+                    candidates.append(p)
+                    
+    if candidates:
+        candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        recent_log = candidates[0]
+        try:
+            return str(recent_log.relative_to(ROOT))
+        except ValueError:
+            return str(recent_log)
+    return None
+
+
 def append_log(name: str, content: str) -> Path:
     path = LOGS_DIR / f"{timestamp()}-{name}.log"
     write_text(path, content)
@@ -466,6 +521,9 @@ def prompt_radio(label: str, options: list[str], default: str | None = None, cle
                     continue
                 output.append(render_radio_option(opt, i, idx))
 
+            output.append("")
+            output.append("  [\033[1;91mB\033[0m] Back")
+
             # Print current choice placeholder at the bottom
             try:
                 cols, _ = os.get_terminal_size()
@@ -702,14 +760,14 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
 
-def prompt_input(label: str, placeholder: str = "", default: str = "", allow_back: bool = False, field_below: bool = False) -> str:
+def prompt_input(label: str, placeholder: str = "", default: str = "", allow_back: bool = False, field_below: bool = False, q_msg: str | None = None) -> str:
     """Interactive text input with styling, backspace handling, and back-out support."""
     if not sys.stdin.isatty():
         return default
 
     if _ACTIVE_STATUS_BAR:
-        q_msg = "Enter to confirm" if default else "Enter to cancel"
-        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg=q_msg)
+        status_hint = q_msg if q_msg is not None else ("Enter to confirm" if default else "Enter to submit | Ctrl-C to exit")
+        _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg=status_hint)
 
     def visible_width() -> int:
         try:
@@ -1364,19 +1422,51 @@ class ProgressIndicator:
             cols, _ = os.get_terminal_size()
         except Exception:
             cols = 80
-        cols = max(cols, 40)
             
-        static_len = 17 + len(self.hint) + len(timer_str) + len(activity_str)
-        available = cols - static_len
-        
-        label_text = self.label
-        if len(label_text) > available:
-            if available > 10:
-                label_text = label_text[:available - 3] + "..."
-            else:
-                label_text = label_text[:10] + "..."
-                
-        return f"\033[1;96m{spinner}\033[0m {label_text}... \033[90m({self.hint}, {timer_str}{activity_str})\033[0m"
+        max_width = max(15, cols - 2)
+
+        label_text = self.label.strip() if self.label else "Thinking"
+        if not label_text.endswith("...") and not label_text.endswith(":") and not label_text.endswith("."):
+            label_text = f"{label_text}..."
+
+        hint = self.hint.strip() if self.hint else ""
+        short_hint = "Ctrl-C" if "ctrl-c" in hint.lower() else hint
+
+        # Determine meta candidate strings in descending order of verbosity
+        meta_candidates: list[str] = []
+        if hint:
+            meta_candidates.append(f"{hint}, {timer_str}{activity_str}")
+            if short_hint != hint:
+                meta_candidates.append(f"{short_hint}, {timer_str}{activity_str}")
+        if activity_str:
+            meta_candidates.append(f"{timer_str}{activity_str}")
+        meta_candidates.append(timer_str)
+        meta_candidates.append("")
+
+        chosen_meta = ""
+        final_label = label_text
+
+        # Try fitting the label and meta candidates
+        for meta in meta_candidates:
+            meta_len = (len(meta) + 3) if meta else 0  # +3 for " (" and ")"
+            avail = max_width - 2 - meta_len
+            if avail >= len(label_text):
+                chosen_meta = meta
+                final_label = label_text
+                break
+            elif avail >= 10:
+                chosen_meta = meta
+                final_label = label_text[:avail - 3] + "..."
+                break
+        else:
+            chosen_meta = ""
+            avail = max(4, max_width - 2)
+            final_label = label_text[:avail - 3] + "..." if len(label_text) > avail else label_text
+
+        if chosen_meta:
+            return f"\033[1;96m{spinner}\033[0m {final_label} \033[90m({chosen_meta})\033[0m"
+        else:
+            return f"\033[1;96m{spinner}\033[0m {final_label}"
 
     def render(self, force: bool = False, last_activity_time: float | None = None):
         if self.is_silent or not sys.stdout.isatty(): return
@@ -1388,7 +1478,7 @@ class ProgressIndicator:
             _ACTIVE_STATUS_BAR.render(at_bottom=True, activity=self, force=force)
         else:
             self.hide_cursor()
-            sys.stdout.write(f"\0337\r\033[K{self.get_line(last_activity_time)}\0338")
+            sys.stdout.write(f"\r\033[K{self.get_line(last_activity_time)}")
             sys.stdout.flush()
         self.last_render_time = now
 
@@ -1748,6 +1838,134 @@ def print_phase(phase: str, subtext: str | None = None):
 
 def get_phase_name(phase: str) -> str:
     return phase.replace("-", " ").capitalize()
+
+
+def extract_step_from_line(line: str) -> str | None:
+    """Parses step, phase, or sub-task description from stdout lines and returns a clean, user-friendly step label."""
+    if not line:
+        return None
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    clean = ansi_escape.sub('', line).strip()
+    if not clean:
+        return None
+
+    # 1. Match print_phase style: "=== 🧠 PLANNING ===" or "=== ⚙️ SUB-TASK 1/3: ADD AUTH SERVICE ==="
+    if clean.startswith("==") and clean.endswith("=="):
+        inner = clean.strip("= ")
+        # Remove emojis at start
+        inner = re.sub(r'^[^\w\s:]+\s*', '', inner).strip()
+        
+        # Sub-tasks: "SUB-TASK 1/3: ADD AUTH SERVICE" -> "Task 1/3: Add Auth Service"
+        subtask_match = re.match(r'sub[- ]?task\s+(\d+/\d+)(?::\s*(.+))?', inner, re.IGNORECASE)
+        if subtask_match:
+            fraction = subtask_match.group(1)
+            title = subtask_match.group(2)
+            if title:
+                clean_title = title.strip().title()
+                return f"Task {fraction}: {clean_title}"
+            return f"Working on Task {fraction}"
+
+        # Debug loop: "DEBUG_LOOP: ITERATION 1 (PHASE: PROPOSE)" or "DEBUG 1/8: DIAGNOSING ERRORS"
+        debug_match = re.match(r'debug(?:_loop)?(?:\s+(\d+/\d+))?(?::\s*(.+))?', inner, re.IGNORECASE)
+        if debug_match:
+            fraction = debug_match.group(1)
+            sub = debug_match.group(2)
+            if sub:
+                sub_clean = sub.strip().replace("PHASE:", "").strip().title()
+                if fraction:
+                    return f"Debugging ({fraction}): {sub_clean}"
+                return f"Debugging: {sub_clean}"
+            return f"Debugging ({fraction})" if fraction else "Debugging issue"
+
+        phase_lower = inner.lower()
+        if "planning" in phase_lower:
+            return "Planning feature"
+        elif "scheduling" in phase_lower:
+            if "syncing" in phase_lower:
+                return "Syncing code to worker"
+            return "Scheduling worker"
+        elif "git_prep" in phase_lower or "git prep" in phase_lower:
+            return "Preparing git branch"
+        elif "status_update" in phase_lower or "status update" in phase_lower:
+            return "Updating job status"
+        elif "investigation" in phase_lower:
+            return "Investigating issue"
+        elif "agent_thinking" in phase_lower:
+            if ":" in inner:
+                sub = inner.split(":", 1)[1].strip().title()
+                return f"AI Thinking: {sub}"
+            return "AI reasoning in progress"
+        elif "implementation" in phase_lower:
+            return "Generating code changes"
+        elif "building" in phase_lower:
+            return "Building project (xcodebuild)"
+        elif "testing" in phase_lower:
+            return "Running test suite"
+        elif "review" in phase_lower:
+            return "Reviewing changes"
+        elif "pull_request" in phase_lower or "pull request" in phase_lower:
+            return "Creating pull request"
+        elif "delivery" in phase_lower:
+            return "Distributing build (Firebase)"
+        elif "exporting" in phase_lower:
+            return "Exporting job package"
+        elif "execution" in phase_lower:
+            return "Executing workflow"
+        else:
+            clean_name = inner.split(":", 1)[0].replace("_", " ").title()
+            return clean_name
+
+    # 2. Match bracketed steps: "[1/4] Preparing git branch: ai/issue-123..."
+    bracket_match = re.match(r'^\[(\d+/\d+)\]\s*(.+)', clean)
+    if bracket_match:
+        step_num = bracket_match.group(1)
+        rest = bracket_match.group(2).strip()
+        # Remove parenthesized flags e.g. "(Stitch AI Mode: Off)" or "(Stitch AI Mode: Enabled)"
+        rest = re.sub(r'\(.*?\)', '', rest).strip()
+        # Remove "using model-name..." at end
+        rest = re.sub(r'\s+using\s+[\w\-.]+', '', rest).strip()
+        # Remove trailing colon detail
+        rest = re.sub(r':\s*.*$', '', rest).strip()
+        # Remove trailing dots
+        rest = rest.rstrip('.').strip()
+        if rest:
+            return f"[{step_num}] {rest}"
+
+    # 3. Match compiler, test, tool, and progress lines
+    if clean.startswith("CompileSwift") or clean.startswith("Compiling "):
+        return "Compiling Swift sources"
+    elif clean.startswith("Ld ") or clean.startswith("Linking "):
+        return "Linking binaries"
+    elif "** TEST EXECUTE **" in clean or ("Test Suite" in clean and "started" in clean):
+        return "Running test suite"
+    elif "** TEST SUCCEEDED **" in clean or ("Test Suite" in clean and "passed" in clean):
+        return "Tests succeeded"
+    elif "** BUILD SUCCEEDED **" in clean:
+        return "Build succeeded"
+    elif "Generating (" in clean or ("received" in clean and "lines of response" in clean):
+        return "Generating code"
+    elif clean.startswith("Consulting "):
+        return "Consulting AI model"
+    elif clean.startswith("Creating GitHub issue"):
+        return "Creating GitHub issue"
+    elif "Archiving project" in clean or clean.startswith("Archiving "):
+        return "Archiving project"
+    elif "Exporting IPA" in clean or "Exporting " in clean:
+        return "Exporting app package"
+    elif "Uploading to Firebase" in clean or "Uploading " in clean:
+        return "Uploading to Firebase"
+    elif "Committing " in clean:
+        return "Committing changes"
+    elif "Syncing code to " in clean or "syncing code to" in clean.lower():
+        return "Syncing code to worker"
+    elif "Running build:" in clean:
+        return "Building project"
+    elif "Running tests:" in clean:
+        return "Running test suite"
+    elif "Analyzing errors" in clean:
+        return "Analyzing build/test errors"
+
+    return None
 
 
 def format_inline_markdown(text: str) -> str:

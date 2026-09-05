@@ -871,7 +871,7 @@ class AppFeatureTests_{i}: XCTestCase {{
             }
         ]
         # User selects the first option (the AI gap)
-        mock_prompt_radio.return_value = "🎯 AuthViewModel / Session Management [HIGH] (Core auth state machine has 0 tests. - Targets: AuthViewModel.swift)"
+        mock_prompt_radio.return_value = "🎯 AuthViewModel / Session Management \033[1;91m[HIGH]\033[0m (Core auth state machine has 0 tests. - Targets: AuthViewModel.swift)"
 
         dev_console.handle_manage_tests(["local"], ["gemini"])
 
@@ -893,29 +893,289 @@ class AppFeatureTests_{i}: XCTestCase {{
     @patch("dev_console.prompt_radio")
     @patch("dev_console.clear_screen")
     @patch("dev_console.StatusBar")
-    def test_handle_new_job_skips_branch_prompt_for_coverage(
+    def test_handle_new_job_branch_selection(
         self, _mock_status, _mock_clear, mock_prompt_radio, mock_prompt_confirm, mock_run_script
     ):
-        """Verify that creating a Test Coverage job from the new job menu bypasses the branch selection prompt."""
-        # 1. Job type prompt returns "Test Coverage Audit"
-        mock_prompt_radio.side_effect = ["🧪 Test Coverage Audit (Maintenance)"]
+        """Verify that creating a job from the new job menu prompts for branch selection."""
+        # 1. Job type prompt returns "Bug Fix", then branch selection returns "new"
+        mock_prompt_radio.side_effect = ["🐞 Bug Fix (Identify + Fix)", "new (creates a new branch to work in)"]
         # 2. Confirm prompts for spec file, yolo, advanced options
         mock_prompt_confirm.side_effect = [False, False, False]
 
         dev_console.handle_new_job(["local"], ["gemini"])
 
-        # mock_prompt_radio should only have been called once for job type (NOT for branch selection)
-        self.assertEqual(mock_prompt_radio.call_count, 1)
+        self.assertEqual(mock_prompt_radio.call_count, 2)
         self.assertEqual(mock_prompt_radio.call_args_list[0][0][0], "Select Job Type")
+        job_options = mock_prompt_radio.call_args_list[0][0][1]
+        self.assertNotIn("🧪 Test Coverage Audit (Maintenance)", job_options)
 
         mock_run_script.assert_called()
         call_args = mock_run_script.call_args[0]
         script_args = call_args[1]
-        self.assertEqual(script_args[0], "coverage")
+        self.assertEqual(script_args[0], "bug")
         self.assertIn("--branch-mode", script_args)
-        self.assertEqual(script_args[script_args.index("--branch-mode") + 1], "current")
+        self.assertEqual(script_args[script_args.index("--branch-mode") + 1], "new")
+
+
+    @patch("shutil.which")
+    @patch("subprocess.check_output")
+    def test_get_github_auth_info_single_account(self, mock_check_output, mock_which):
+        mock_which.return_value = "/usr/local/bin/gh"
+        mock_check_output.return_value = (
+            b"github.com\n"
+            b"  \xe2\x9c\x93 Logged in to github.com account devuser (/path/hosts.yml)\n"
+            b"  - Active account: true\n"
+            b"  - Git operations protocol: ssh\n"
+            b"  - Token scopes: 'repo', 'read:org'\n"
+        )
+        has_gh, accounts, active_user = dev_console.get_github_auth_info()
+        self.assertTrue(has_gh)
+        self.assertEqual(len(accounts), 1)
+        self.assertEqual(accounts[0]["user"], "devuser")
+        self.assertEqual(accounts[0]["host"], "github.com")
+        self.assertTrue(accounts[0]["active"])
+        self.assertEqual(active_user, "devuser")
+
+    @patch("shutil.which")
+    @patch("subprocess.check_output")
+    def test_get_github_auth_info_multiple_accounts(self, mock_check_output, mock_which):
+        mock_which.return_value = "/usr/local/bin/gh"
+        mock_check_output.return_value = (
+            b"github.com\n"
+            b"  \xe2\x9c\x93 Logged in to github.com account primary_user (/path/hosts.yml)\n"
+            b"  - Active account: true\n"
+            b"  \xe2\x9c\x93 Logged in to github.com account secondary_user (/path/hosts.yml)\n"
+            b"  - Active account: false\n"
+        )
+        has_gh, accounts, active_user = dev_console.get_github_auth_info()
+        self.assertTrue(has_gh)
+        self.assertEqual(len(accounts), 2)
+        self.assertEqual(accounts[0]["user"], "primary_user")
+        self.assertTrue(accounts[0]["active"])
+        self.assertEqual(accounts[1]["user"], "secondary_user")
+        self.assertFalse(accounts[1]["active"])
+        self.assertEqual(active_user, "primary_user")
+
+    @patch("shutil.which")
+    def test_get_github_auth_info_not_installed(self, mock_which):
+        mock_which.return_value = None
+        has_gh, accounts, active_user = dev_console.get_github_auth_info()
+        self.assertFalse(has_gh)
+        self.assertEqual(accounts, [])
+        self.assertIsNone(active_user)
+
+    @patch("subprocess.run")
+    @patch("dev_console.input")
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.get_github_auth_info")
+    def test_handle_github_menu_view_status(self, mock_auth_info, _mock_status, _mock_clear, mock_get_key, _mock_input, mock_run):
+        mock_auth_info.return_value = (True, [{"host": "github.com", "user": "devuser", "active": True}], "devuser")
+        mock_get_key.side_effect = ["v", "b"]
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "github.com logged in"
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        dev_console.handle_github_menu(["local"], ["gemini"])
+
+        called_cmds = [c[0][0] for c in mock_run.call_args_list]
+        self.assertIn(["gh", "auth", "status"], called_cmds)
+
+    @patch("subprocess.run")
+    @patch("dev_console.input")
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.get_github_auth_info")
+    def test_handle_github_menu_add_account(self, mock_auth_info, _mock_status, _mock_clear, mock_get_key, _mock_input, mock_run):
+        mock_auth_info.return_value = (True, [{"host": "github.com", "user": "devuser", "active": True}], "devuser")
+        mock_get_key.side_effect = ["a", "1", "b"]
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_run.return_value = mock_proc
+
+        dev_console.handle_github_menu(["local"], ["gemini"])
+
+        called_cmds = [c[0][0] for c in mock_run.call_args_list]
+        self.assertTrue(any(cmd[:3] == ["gh", "auth", "login"] and "--web" in cmd for cmd in called_cmds))
+
+    @patch("subprocess.run")
+    @patch("dev_console.prompt_radio")
+    @patch("dev_console.input")
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.get_github_auth_info")
+    def test_handle_github_menu_switch_account_multiple(self, mock_auth_info, _mock_status, _mock_clear, mock_get_key, _mock_input, mock_prompt_radio, mock_run):
+        mock_auth_info.return_value = (
+            True,
+            [
+                {"host": "github.com", "user": "user1", "active": True},
+                {"host": "github.com", "user": "user2", "active": False}
+            ],
+            "user1"
+        )
+        mock_get_key.side_effect = ["w", "b"]
+        mock_prompt_radio.return_value = "user2 (github.com)"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_run.return_value = mock_proc
+
+        dev_console.handle_github_menu(["local"], ["gemini"])
+
+        called_cmds = [c[0][0] for c in mock_run.call_args_list]
+        self.assertIn(["gh", "auth", "switch", "--hostname", "github.com", "--user", "user2"], called_cmds)
+
+    @patch("subprocess.run")
+    @patch("dev_console.prompt_confirm")
+    @patch("dev_console.input")
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.get_github_auth_info")
+    def test_handle_github_menu_switch_account_single_prompts_add(self, mock_auth_info, _mock_status, _mock_clear, mock_get_key, _mock_input, mock_confirm, mock_run):
+        mock_auth_info.return_value = (
+            True,
+            [{"host": "github.com", "user": "user1", "active": True}],
+            "user1"
+        )
+        mock_get_key.side_effect = ["w", "b", "b"]
+        mock_confirm.return_value = True
+
+        dev_console.handle_github_menu(["local"], ["gemini"])
+
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.subprocess.Popen")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.ProgressIndicator")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.sys.stdout.isatty", return_value=True)
+    def test_run_calculate_coverage_uses_thinking_loader(self, _mock_isatty, mock_status_bar, mock_progress_indicator, _mock_clear, mock_popen, _mock_input):
+        mock_proc = MagicMock()
+        mock_proc.stdout = ["Test Suite 'AuthTests' started\n", "Test Case '-[AuthTests testLogin]' started\n", "Passed\n"]
+        mock_proc.wait.return_value = 0
+        mock_popen.return_value = mock_proc
+
+        indicator_instance = MagicMock()
+        mock_progress_indicator.return_value = indicator_instance
+
+        status_bar_instance = MagicMock()
+        status_bar_context = MagicMock()
+        status_bar_context.__enter__.return_value = status_bar_instance
+        mock_status_bar.return_value = status_bar_context
+
+        pct = dev_console.run_calculate_coverage(["local"], ["gemini"])
+
+        mock_progress_indicator.assert_called_once()
+        self.assertIn("Thinking", mock_progress_indicator.call_args[1].get("label", ""))
+        self.assertTrue(status_bar_instance.set_scroll_region.called)
+        self.assertTrue(status_bar_instance.render.called)
+        self.assertTrue(indicator_instance.clear.called)
+
+    @patch("dev_console.run_script")
+    @patch("dev_console.get_key")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.PROJECT_CONFIG")
+    def test_handle_quick_distribute_flow(self, mock_project_config, mock_status_bar, _mock_clear, mock_get_key, mock_run_script):
+        mock_project_config.validate_distribution_config.return_value = []
+        mock_project_config.scheme = "MyApp"
+        mock_project_config.project_name = "MyApp"
+        mock_project_config.delivery_method = "ad-hoc"
+        mock_project_config.firebase_groups = "internal-testers"
+        
+        status_bar_instance = MagicMock()
+        status_bar_context = MagicMock()
+        status_bar_context.__enter__.return_value = status_bar_instance
+        mock_status_bar.return_value = status_bar_context
+
+        # Choose 'd' to distribute, then 'b' to back
+        mock_get_key.side_effect = ["d", "b"]
+
+        dev_console.handle_quick_distribute(["local"], ["gemini"])
+
+        mock_run_script.assert_called_once_with(
+            "smoke_test_delivery.py",
+            [],
+            sub_menu=True,
+            session_machines=["local"],
+            session_models=["gemini"]
+        )
+
+    @patch("dev_console.get_key", return_value="b")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.get_coverage_data")
+    @patch("dev_console.discover_test_suites")
+    @patch("builtins.print")
+    def test_handle_manage_tests_menu_coverage_box_date_on_newline(self, mock_print, mock_suites, mock_cov, mock_status_bar, _mock_clear, _mock_get_key):
+        mock_cov.return_value = {
+            "overall_coverage_pct": 75.5,
+            "timestamp": "2026-09-04T20:30:49.123456"
+        }
+        mock_suites.return_value = [
+            {"name": "AuthTests", "test_count": 5, "rel_path": "AppTests/AuthTests.swift"}
+        ]
+        status_bar_instance = MagicMock()
+        status_bar_context = MagicMock()
+        status_bar_context.__enter__.return_value = status_bar_instance
+        mock_status_bar.return_value = status_bar_context
+
+        dev_console.handle_manage_tests(["local"], ["gemini"])
+
+        printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+        # Verify coverage line has percentage but NOT the timestamp attached
+        cov_lines = [l for l in printed_lines if "CODE COVERAGE:" in str(l)]
+        self.assertTrue(len(cov_lines) > 0)
+        self.assertIn("75.5%", cov_lines[0])
+        self.assertNotIn("2026-09-04", cov_lines[0])
+
+        # Verify timestamp is printed on its own Last Audited line
+        audited_lines = [l for l in printed_lines if "Last Audited:" in str(l)]
+        self.assertTrue(len(audited_lines) > 0)
+        self.assertIn("2026-09-04 20:30:49", audited_lines[0])
+
+        # Verify test suites printed with clean bullet format
+        suite_lines = [l for l in printed_lines if "AuthTests" in str(l)]
+        self.assertTrue(len(suite_lines) > 0)
+        self.assertIn("• AuthTests", suite_lines[0])
+        self.assertIn("5 test(s)", suite_lines[0])
+
+    @patch("dev_console.get_key", return_value="b")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.discover_test_suites", return_value=[])
+    @patch("builtins.print")
+    def test_handle_test_frameworks_menu_table_layout(self, mock_print, _mock_suites, mock_status_bar, _mock_clear, _mock_get_key):
+        status_bar_instance = MagicMock()
+        status_bar_context = MagicMock()
+        status_bar_context.__enter__.return_value = status_bar_instance
+        mock_status_bar.return_value = status_bar_context
+
+        dev_console.handle_test_frameworks_menu(["local"], ["gemini"])
+
+        printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+        
+        # Verify framework items are rendered in a proper box table
+        table_header_lines = [l for l in printed_lines if "Test Framework / Plugin" in str(l)]
+        self.assertTrue(len(table_header_lines) > 0)
+        self.assertIn("Opt", table_header_lines[0])
+        self.assertIn("Status", table_header_lines[0])
+
+        swift_testing_lines = [l for l in printed_lines if "Swift Testing" in str(l)]
+        self.assertTrue(len(swift_testing_lines) > 0)
+        self.assertIn("Swift Testing (Native)", swift_testing_lines[0])
+        self.assertIn("Available", swift_testing_lines[0])
+
+        # Verify box borders are present
+        box_borders = [l for l in printed_lines if "┌" in str(l) or "└" in str(l)]
+        self.assertTrue(len(box_borders) >= 2)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 

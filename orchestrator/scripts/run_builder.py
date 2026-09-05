@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from common import OUTPUT_DIR, PROMPTS_DIR, ROOT, read_json, write_text, print_phase, StatusBar
+from common import OUTPUT_DIR, PROMPTS_DIR, ROOT, read_json, write_text, print_phase, StatusBar, format_clarification_history
 from llm import run_llm, extract_json_block
 from model_router import ModelRole
 from run_build_and_tests import run_build_and_tests
@@ -22,6 +22,11 @@ def make_brief(job: dict) -> str:
     verification = job.get("verification")
     references = reference_context(job)
     
+    clarification_text = ""
+    history = job.get("clarification_history", [])
+    if history:
+        clarification_text = f"\n---\n{format_clarification_history(history)}\n"
+
     verification_text = ""
     if verification:
         verification_text = f'''
@@ -44,6 +49,7 @@ Title: {job["title"]}
 
 Summary:
 {plan.get("summary", "No summary provided.")}
+{clarification_text}
 {verification_text}
 Repro steps:
 ''' + "\n".join(f'- {x}' for x in plan.get("repro_steps", [])) + f'''
@@ -67,6 +73,7 @@ Title: {job["title"]}
 
 Summary:
 {plan.get("summary", "No summary provided.")}
+{clarification_text}
 
 Acceptance criteria:
 ''' + "\n".join(f'- {x}' for x in plan.get("acceptance_criteria", [])) + f'''
@@ -84,6 +91,7 @@ Instructions:
 
 Summary:
 {plan.get("summary", "No summary provided.")}
+{clarification_text}
 
 Acceptance criteria:
 ''' + "\n".join(f'- {x}' for x in plan.get("acceptance_criteria", [])) + f"\n{references}\n"
@@ -95,6 +103,7 @@ Title: {job["title"]}
 
 Summary:
 {plan.get("summary", "No summary provided.")}
+{clarification_text}
 {verification_text}
 {references}
 '''
@@ -247,6 +256,7 @@ Brief:
     job["updated_at"] = now_iso()
 
     import json
+    parsed_output = {}
     try:
         json_output = extract_json_block(output)
         parsed_output = json.loads(json_output)
@@ -266,6 +276,11 @@ Brief:
         if "test_command" in parsed_output:
             job["test_command_override"] = parsed_output["test_command"]
             print(f"      - LLM selected specific tests: {job['test_command_override']}")
+
+        if "summary" in parsed_output and parsed_output["summary"]:
+            job["builder_summary"] = parsed_output["summary"]
+        if "hypothesis" in parsed_output and parsed_output["hypothesis"]:
+            job["builder_hypothesis"] = parsed_output["hypothesis"]
     except json.JSONDecodeError:
         if not resume: # Only warn if we just generated it
             print("      - Warning: LLM output was not valid JSON, using default test suite.")
@@ -277,11 +292,8 @@ Brief:
 
     build_ok, test_ok = run_build_and_tests(job, summary_file)
     
-    # Try to return the parsed output so caller can see if work was done
-    try:
-        final_parsed = json.loads(output)
-    except:
-        final_parsed = {}
+    # Return parsed output dictionary so callers can inspect what was built
+    final_parsed = parsed_output if isinstance(parsed_output, dict) else {}
         
     return build_ok, test_ok, summary_file, final_parsed
 

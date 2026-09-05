@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import os
@@ -308,6 +309,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cli.main(["worker-install"]), 0)
         mock_run_script.assert_called_with("worker_tools.py", ["install"])
 
+    @patch("orchestrator.scripts.dev_console.get_github_auth_info", return_value=(False, [], None))
     @patch("orchestrator.scripts.discover_machines.get_local_ssh_hosts", return_value=[])
     @patch("orchestrator.cli.prompt_text")
     @patch("orchestrator.cli.prompt_yes_no")
@@ -315,13 +317,23 @@ class CliTests(unittest.TestCase):
     @patch("orchestrator.cli.run_script", return_value=0)
     @patch("orchestrator.scripts.setup_distribution.installed_provisioning_profile_names", return_value={"Profile A", "Profile B"})
     @patch("orchestrator.cli.prompt_password")
-    def test_wizard_interactive_profile_selection(self, mock_prompt_password, mock_installed_profiles, mock_run_script, mock_prompt_radio, mock_prompt_yes_no, mock_prompt_text, mock_get_local_ssh_hosts) -> None:
+    def test_wizard_interactive_profile_selection(self, mock_prompt_password, mock_installed_profiles, mock_run_script, mock_prompt_radio, mock_prompt_yes_no, mock_prompt_text, mock_get_local_ssh_hosts, _mock_gh) -> None:
         with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-") as temp_dir:
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
-            mock_prompt_yes_no.side_effect = [False, False, True, False, False, False, False]
-            mock_prompt_text.side_effect = ["SampleApp/GoogleService-Info.plist", "ABC123DEFG", "ad-hoc"]
+            # prompt_yes_no sequence:
+            # 1: Copy prompts (False)
+            # 2: Scan fleet (False)
+            # 3: Configure Firebase distribution (True)
+            # 4: ASC keys (False)
+            # 5: Keychain (False)
+            # 6: Smoke test (False)
+            mock_prompt_yes_no.side_effect = [False, False, True, False, False, False]
+            mock_prompt_text.side_effect = [
+                "SampleApp", "SampleApp", "SampleAppTests", "main",  # Project & Xcode settings
+                "SampleApp/GoogleService-Info.plist", "ABC123DEFG", "ad-hoc"  # Distribution settings
+            ]
             mock_prompt_radio.return_value = "Profile B"
 
             result = cli.main([
@@ -342,12 +354,163 @@ class CliTests(unittest.TestCase):
             self.assertIn("--provisioning-profile", setup_args)
             self.assertIn("Profile B", setup_args)
 
+    @patch("orchestrator.scripts.dev_console.get_github_auth_info", return_value=(True, [{"user": "devuser", "host": "github.com", "active": True}], "devuser"))
+    @patch("orchestrator.cli.run_script", return_value=0)
+    @patch("orchestrator.cli.prompt_text", side_effect=lambda label, default="", **kwargs: default)
+    @patch("orchestrator.cli.prompt_yes_no", return_value=False)
+    def test_wizard_confirms_existing_settings_without_changes(self, mock_prompt_yes_no, mock_prompt_text, mock_run_script, _mock_gh) -> None:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-confirm-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "ExistingApp.xcodeproj").mkdir()
+
+            # Pre-populate project configuration
+            cli.init_project(argparse.Namespace(
+                root=str(root),
+                project=None,
+                project_name="ExistingApp",
+                scheme="CustomScheme",
+                test_target="CustomTests",
+                base_branch="develop",
+                force=True,
+                with_starter_docs=True,
+                with_helper_script=True,
+            ))
+
+            runtime = root / ".orchestrator"
+            project_p = runtime / "project.json"
+            p_data = json.loads(project_p.read_text(encoding="utf-8"))
+            p_data["firebase_distribution"] = True
+            p_data["development_team"] = "TEAM12345"
+            p_data["delivery_method"] = "ad-hoc"
+            p_data["firebase_plist_path"] = "ExistingApp/GoogleService-Info.plist"
+            project_p.write_text(json.dumps(p_data, indent=2) + "\n", encoding="utf-8")
+
+            # Run wizard with existing config
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--models",
+                "codex,claude",
+            ])
+
+            self.assertEqual(result, 0)
+            # Verify project config was preserved exactly as initialized
+            final_p_data = json.loads(project_p.read_text(encoding="utf-8"))
+            self.assertEqual(final_p_data["project_name"], "ExistingApp")
+            self.assertEqual(final_p_data["scheme"], "CustomScheme")
+            self.assertEqual(final_p_data["test_target"], "CustomTests")
+            self.assertEqual(final_p_data["base_branch"], "develop")
+            self.assertEqual(final_p_data["development_team"], "TEAM12345")
+            self.assertEqual(final_p_data["firebase_distribution"], True)
+
+    @patch("orchestrator.scripts.dev_console.get_github_auth_info", return_value=(False, [], None))
+    @patch("orchestrator.cli.run_script", return_value=0)
+    @patch("orchestrator.cli.prompt_text")
+    @patch("orchestrator.cli.prompt_yes_no")
+    def test_wizard_modifies_existing_settings_when_user_requests_change(self, mock_prompt_yes_no, mock_prompt_text, mock_run_script, _mock_gh) -> None:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-wizard-modify-") as temp_dir:
+            root = Path(temp_dir)
+            (root / "OldApp.xcodeproj").mkdir()
+
+            cli.init_project(argparse.Namespace(
+                root=str(root),
+                project=None,
+                project_name="OldApp",
+                scheme="OldScheme",
+                test_target="OldTests",
+                base_branch="main",
+                force=True,
+                with_starter_docs=True,
+                with_helper_script=True,
+            ))
+
+            # Prompt responses:
+            # prompt_yes_no:
+            # 1. Overwrite prompts? -> False
+            # 2. Scan fleet? -> False
+            # 3. Modify distribution? -> False
+            # 4. Smoke test? -> False
+            mock_prompt_yes_no.side_effect = [False, False, False, False]
+            # prompt_text:
+            # Project & Xcode fields sequentially
+            mock_prompt_text.side_effect = ["NewApp", "NewScheme", "NewTests", "release"]
+
+            result = cli.main([
+                "wizard",
+                "--root",
+                str(root),
+                "--models",
+                "codex",
+            ])
+
+            self.assertEqual(result, 0)
+            final_p = json.loads((root / ".orchestrator" / "project.json").read_text(encoding="utf-8"))
+            self.assertEqual(final_p["project_name"], "NewApp")
+            self.assertEqual(final_p["scheme"], "NewScheme")
+            self.assertEqual(final_p["test_target"], "NewTests")
+            self.assertEqual(final_p["base_branch"], "release")
+
     @patch("orchestrator.cli.run_script", return_value=0)
     def test_distribute_command_dispatches_to_smoke_test_delivery(self, mock_run_script) -> None:
         self.assertEqual(cli.main(["distribute", "--notes", "Quick test build"]), 0)
         mock_run_script.assert_called_with("smoke_test_delivery.py", [])
         self.assertEqual(os.environ.get("DISTRIBUTION_RELEASE_NOTES"), "Quick test build")
 
+    def test_audit_project_setup_detects_all_pillars_and_gaps(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-audit-") as temp_dir:
+            root = Path(temp_dir)
+            # Empty directory: should detect gaps for project.json, grounding docs, git, machines.json
+            audit = cli.audit_project_setup(root)
+            self.assertIn("Project & Xcode", audit["categories"])
+            self.assertIn("Grounding & Documentation", audit["categories"])
+            self.assertIn("AI Providers & Models", audit["categories"])
+            self.assertIn("GitHub Source Control", audit["categories"])
+            self.assertIn("Worker Fleet", audit["categories"])
+            self.assertIn("Distribution & Signing", audit["categories"])
+
+            self.assertGreater(audit["gap_count"], 0)
+            self.assertTrue(any("project.json" in gap.lower() for gap in audit["gaps"]))
+
+            # Verify audit report prints without error
+            output = io.StringIO()
+            with redirect_stdout(output):
+                cli.print_setup_audit_report(audit)
+            self.assertIn("Setup Status & Gaps Audit", output.getvalue())
+
+    def test_audit_project_setup_complete_project(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="orchestrator-audit-complete-") as temp_dir:
+            root = Path(temp_dir)
+            (root / ".git").mkdir()
+            (root / "TestApp.xcodeproj").mkdir()
+
+            # Initialize project with starter docs
+            cli.init_project(argparse.Namespace(
+                root=str(root),
+                project=None,
+                project_name="TestApp",
+                scheme="TestApp",
+                test_target="TestAppTests",
+                base_branch="main",
+                force=True,
+                with_starter_docs=True,
+                with_helper_script=True
+            ))
+
+            audit = cli.audit_project_setup(root)
+            # Verify project & grounding items are now passing
+            proj_items = {item["name"]: item["status"] for item in audit["categories"]["Project & Xcode"]}
+            doc_items = {item["name"]: item["status"] for item in audit["categories"]["Grounding & Documentation"]}
+
+            self.assertEqual(proj_items["Git Repository"], "ok")
+            self.assertEqual(proj_items["Project Config"], "ok")
+            self.assertEqual(doc_items["AGENTS.md"], "ok")
+            self.assertEqual(doc_items["Build Commands"], "ok")
+            self.assertEqual(doc_items["Architecture"], "ok")
+            self.assertEqual(doc_items["Coding Standards"], "ok")
+            self.assertEqual(doc_items["AI Workflow"], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -675,37 +675,6 @@ def script_failure_summary(output_log: str) -> str | None:
         return "\n".join(error_lines[:5])
     return None
 
-def extract_step_from_line(line: str) -> str | None:
-    """Parses step, phase, or sub-task description from stdout lines."""
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    clean = ansi_escape.sub('', line).strip()
-    if not clean:
-        return None
-        
-    # Match print_phase style: "=== 🧠 PLANNING ==="
-    if clean.startswith("==") and clean.endswith("=="):
-        inner = clean.strip("= ")
-        # Remove emojis/non-alphanumeric at start
-        inner = re.sub(r'^[^\w\s:]+\s*', '', inner)
-        if len(inner) > 50:
-            inner = inner[:47] + "..."
-        return inner
-        
-    # Match bracketed steps: "[1/4] Preparing git branch..."
-    if clean.startswith("[") and "]" in clean:
-        idx = clean.find("]")
-        step_num = clean[:idx+1]
-        rest = clean[idx+1:].strip()
-        # Take up to the first comma, period, colon, or newline
-        rest = re.split(r'[,.\n]', rest)[0].strip()
-        if rest:
-            candidate = f"{step_num} {rest}"
-            if len(candidate) > 50:
-                candidate = candidate[:47] + "..."
-            return candidate
-            
-    return None
-
 def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None) -> tuple[int, str]:
     if job:
         job["online_machines"] = get_online_machines(job.get("allowed_machines", []))
@@ -720,7 +689,10 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
     show_status_bar = sys.stdout.isatty()
     last_render = 0.0
     last_output_time = time.monotonic()
-    indicator = ProgressIndicator(label="Thinking", hint="Ctrl-C to abort")
+    initial_label = "Executing workflow"
+    if job and job.get("title"):
+        initial_label = f"Working on {job.get('title')}"
+    indicator = ProgressIndicator(label=initial_label, hint="Ctrl-C to abort")
     output_chunks = []
 
     with StatusBar(job, is_processing=True, sub_menu=sub_menu) as status_bar:
@@ -751,15 +723,14 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
             if not show_status_bar:
                 return
             now = time.monotonic()
-            if force or now - last_render >= 0.5:
+            if force or now - last_render >= 0.1:
                 status_bar.render(at_bottom=True, force=force, activity=indicator)
                 last_render = now
-
 
         try:
             render_status_bar(force=True)
             while process.poll() is None:
-                # Update UI (throttled to 0.5s inside render_status_bar)
+                # Update UI (throttled to 0.1s inside render_status_bar)
                 render_status_bar()
 
                 # Check for direct key interrupts (non-blocking)
@@ -793,7 +764,8 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                             for line in reversed(data.splitlines()):
                                 step = extract_step_from_line(line)
                                 if step:
-                                    indicator.label = f"Thinking: {step}"
+                                    indicator.label = step
+                                    render_status_bar(force=True)
                                     break
                                     
                             # Print directly to stdout and flush immediately
@@ -947,7 +919,8 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
         sys.stdout.flush()
     
     # Use provided prompt or a descriptive default
-    final_prompt = prompt if prompt is not None else "\n\033[1;96mTap Enter to return to main menu...\033[0m"
+    default_prompt = "\n\033[1;96mTap Enter to return to menu...\033[0m" if sub_menu else "\n\033[1;96mTap Enter to return to main menu...\033[0m"
+    final_prompt = prompt if prompt is not None else default_prompt
     if final_prompt:
         try:
             input(final_prompt)
@@ -981,8 +954,7 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
             "✨ Brand New Feature (Design-First)",
             "🛠️ Iterating / Small Refactor (Plan or Quick Mode)",
             "🐞 Bug Fix (Identify + Fix)",
-            "🎨 Design Prototype (Can promote to Implementation)",
-            "🧪 Test Coverage Audit (Maintenance)"
+            "🎨 Design Prototype (Can promote to Implementation)"
         ]
         
         import textwrap
@@ -1016,9 +988,6 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
         elif "Design Prototype" in choice:
             job_type = "design"
             stitch_mode = True
-        elif "Test Coverage" in choice:
-            job_type = "coverage"
-            stitch_mode = False
 
         spec_file = None
         if job_type != "quick":
@@ -1036,23 +1005,20 @@ def handle_new_job(session_allowed_models: list[str] | None = None, session_allo
             description="Automatically dispatch the job after planning and continue through review steps without manual pauses.",
         )
         
-        if job_type == "coverage":
+        branch_options = ["new (creates a new branch to work in)", "current-branch (git pull)", "manual (no git actions)"]
+        branch_choice = prompt_radio("Branch selection:", branch_options, branch_options[0])
+        
+        # Map friendly UI names back to what new_job.py expects
+        clean_branch_choice = "new"
+        if "current-branch" in branch_choice:
             clean_branch_choice = "current"
-        else:
-            branch_options = ["new (creates a new branch to work in)", "current-branch (git pull)", "manual (no git actions)"]
-            branch_choice = prompt_radio("Branch selection:", branch_options, branch_options[0])
-            
-            # Map friendly UI names back to what new_job.py expects
+        elif "manual" in branch_choice:
+            clean_branch_choice = "manual"
+        elif "new (" in branch_choice:
             clean_branch_choice = "new"
-            if "current-branch" in branch_choice:
-                clean_branch_choice = "current"
-            elif "manual" in branch_choice:
-                clean_branch_choice = "manual"
-            elif "new (" in branch_choice:
-                clean_branch_choice = "new"
-            else:
-                # Fallback to the first word if it's something unknown
-                clean_branch_choice = branch_choice.split(" ")[0].lower()
+        else:
+            # Fallback to the first word if it's something unknown
+            clean_branch_choice = branch_choice.split(" ")[0].lower()
         
         advanced = False
         if job_type != "quick":
@@ -2362,94 +2328,155 @@ def run_calculate_coverage(session_allowed_machines: list[str], session_allowed_
         except Exception:
             formatter_proc = None
 
-    try:
-        proc = subprocess.Popen(
-            cmd_str,
-            cwd=str(ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-        for line in proc.stdout:
+    job_context = {
+        "allowed_machines": session_allowed_machines,
+        "online_machines": get_online_machines(session_allowed_machines),
+        "allowed_models": session_allowed_models
+    }
+
+    show_status_bar = sys.stdout.isatty()
+    indicator = ProgressIndicator(label="Thinking: Running test suite with code coverage", hint="Ctrl-C to abort")
+
+    with StatusBar(job_context, is_processing=True, sub_menu=True) as status_bar:
+        if show_status_bar:
+            status_bar.set_scroll_region()
+            status_bar.render(at_bottom=True, force=True, activity=indicator)
+
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd_str,
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            if proc.stdout:
+                for line in proc.stdout:
+                    if show_status_bar:
+                        line_clean = line.strip()
+                        if "Test Suite '" in line_clean and "started" in line_clean:
+                            suite_m = re.search(r"Test Suite '([^']+)' started", line_clean)
+                            if suite_m:
+                                indicator.label = f"Thinking: {suite_m.group(1)}"
+                        elif "Test Case '" in line_clean and "started" in line_clean:
+                            case_m = re.search(r"Test Case '-\[([^ ]+ [^\]]+)\]'", line_clean)
+                            if case_m:
+                                indicator.label = f"Thinking: {case_m.group(1)}"
+                        elif "Building " in line_clean or "Compiling " in line_clean:
+                            indicator.label = "Thinking: Compiling test targets"
+                        status_bar.render(at_bottom=True, activity=indicator)
+
+                    if formatter_proc and formatter_proc.stdin:
+                        try:
+                            formatter_proc.stdin.write(line)
+                            formatter_proc.stdin.flush()
+                        except Exception:
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
+                    else:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+            if proc:
+                proc.wait()
+
             if formatter_proc and formatter_proc.stdin:
                 try:
-                    formatter_proc.stdin.write(line)
-                    formatter_proc.stdin.flush()
+                    formatter_proc.stdin.close()
+                    formatter_proc.wait()
                 except Exception:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-            else:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-        proc.wait()
-
-        if formatter_proc and formatter_proc.stdin:
-            try:
-                formatter_proc.stdin.close()
-                formatter_proc.wait()
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"\n⚠️ Xcode test execution failed: {e}")
-
-    # Extract coverage using xcrun xccov
-    overall_pct = None
-    targets_cov = []
-    if result_bundle.exists():
-        try:
-            xccov_out = subprocess.check_output(
-                ["xcrun", "xccov", "view", "--report", "--json", str(result_bundle)],
-                stderr=subprocess.DEVNULL
-            ).decode("utf-8")
-            cov_json = json.loads(xccov_out)
-            raw_line_cov = cov_json.get("lineCoverage", 0.0)
-            overall_pct = round(raw_line_cov * 100.0, 1)
-            
-            app_targets = []
-            third_party_targets = []
-            for t in cov_json.get("targets", []):
-                t_name = t.get("name", "")
-                t_cov = round(t.get("lineCoverage", 0.0) * 100.0, 1)
-                
-                # Exclude test bundles themselves
-                if t_name.endswith((".xctest", "Tests", "UITests", "Tests.xctest")):
-                    continue
-                
-                # Check if target matches application/project name
-                is_app_target = t_name.replace(".app", "").lower() in [scheme.lower(), (PROJECT_CONFIG.project_name or "").lower()]
-                
-                is_third_party = not is_app_target and any(t_name.startswith(p) for p in [
-                    "Firebase", "Google", "GUL", "GTM", "FBL", "AppAuth", "gRPC", "abseil", "absl", "nanopb", 
-                    "leveldb", "Promises", "GTMSessionFetcher", "SnapshotTesting", "Quick", "Nimble", "Pods-", "openssl"
-                ])
-                entry = {"name": t_name, "coverage_pct": t_cov}
-                if is_app_target:
-                    app_targets.insert(0, entry)
-                elif is_third_party:
-                    third_party_targets.append(entry)
-                else:
-                    app_targets.append(entry)
-            
-            if app_targets:
-                # Prioritize project / scheme app target coverage
-                primary_target = app_targets[0]
-                overall_pct = primary_target["coverage_pct"]
-                targets_cov = app_targets + third_party_targets
-            else:
-                targets_cov = third_party_targets
+                    pass
+        except KeyboardInterrupt:
+            if proc:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except Exception:
+                    proc.kill()
+            if formatter_proc and formatter_proc.stdin:
+                try:
+                    formatter_proc.stdin.close()
+                    formatter_proc.terminate()
+                except Exception:
+                    pass
+            if show_status_bar:
+                indicator.clear()
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region()
+            print("\n\033[1;91mCoverage calculation cancelled by user.\033[0m")
+            return None
         except Exception as e:
-            print(f"\n⚠️ Could not parse .xcresult coverage: {e}")
+            print(f"\n⚠️ Xcode test execution failed: {e}")
 
-    # Check prior coverage record for delta comparison
-    prev_cov_record = get_coverage_data()
-    prev_pct = prev_cov_record.get("overall_coverage_pct") if prev_cov_record else None
-    prev_tests = prev_cov_record.get("total_tests") if prev_cov_record else None
+        # Extract coverage using xcrun xccov
+        overall_pct = None
+        targets_cov = []
+        if result_bundle.exists():
+            if show_status_bar:
+                indicator.label = "Thinking: Extracting code coverage (.xcresult)"
+                status_bar.render(at_bottom=True, force=True, activity=indicator)
+            try:
+                xccov_out = subprocess.check_output(
+                    ["xcrun", "xccov", "view", "--report", "--json", str(result_bundle)],
+                    stderr=subprocess.DEVNULL
+                ).decode("utf-8")
+                cov_json = json.loads(xccov_out)
+                raw_line_cov = cov_json.get("lineCoverage", 0.0)
+                overall_pct = round(raw_line_cov * 100.0, 1)
 
-    # Discover total test suites and tests count in workspace
-    suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
-    total_tests = sum(s["test_count"] for s in suites)
-    total_suites = len(suites)
+                app_targets = []
+                third_party_targets = []
+                for t in cov_json.get("targets", []):
+                    t_name = t.get("name", "")
+                    t_cov = round(t.get("lineCoverage", 0.0) * 100.0, 1)
+
+                    # Exclude test bundles themselves
+                    if t_name.endswith((".xctest", "Tests", "UITests", "Tests.xctest")):
+                        continue
+
+                    # Check if target matches application/project name
+                    is_app_target = t_name.replace(".app", "").lower() in [scheme.lower(), (PROJECT_CONFIG.project_name or "").lower()]
+
+                    is_third_party = not is_app_target and any(t_name.startswith(p) for p in [
+                        "Firebase", "Google", "GUL", "GTM", "FBL", "AppAuth", "gRPC", "abseil", "absl", "nanopb",
+                        "leveldb", "Promises", "GTMSessionFetcher", "SnapshotTesting", "Quick", "Nimble", "Pods-", "openssl"
+                    ])
+                    entry = {"name": t_name, "coverage_pct": t_cov}
+                    if is_app_target:
+                        app_targets.insert(0, entry)
+                    elif is_third_party:
+                        third_party_targets.append(entry)
+                    else:
+                        app_targets.append(entry)
+
+                if app_targets:
+                    # Prioritize project / scheme app target coverage
+                    primary_target = app_targets[0]
+                    overall_pct = primary_target["coverage_pct"]
+                    targets_cov = app_targets + third_party_targets
+                else:
+                    targets_cov = third_party_targets
+            except Exception as e:
+                print(f"\n⚠️ Could not parse .xcresult coverage: {e}")
+
+        # Check prior coverage record for delta comparison
+        prev_cov_record = get_coverage_data()
+        prev_pct = prev_cov_record.get("overall_coverage_pct") if prev_cov_record else None
+        prev_tests = prev_cov_record.get("total_tests") if prev_cov_record else None
+
+        # Discover total test suites and tests count in workspace
+        if show_status_bar:
+            indicator.label = "Thinking: Analyzing test suite health"
+            status_bar.render(at_bottom=True, force=True, activity=indicator)
+        suites = discover_test_suites(ROOT, PROJECT_CONFIG.test_target)
+        total_tests = sum(s["test_count"] for s in suites)
+        total_suites = len(suites)
+
+        if show_status_bar:
+            indicator.clear()
+            status_bar.clear_footer()
+            status_bar.reset_scroll_region()
 
     # Fallback simulation/estimation if xcresult couldn't be parsed or was empty (e.g. test environment)
     if overall_pct is None:
@@ -2553,38 +2580,58 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             has_snapshot_testing = "import SnapshotTesting" in all_test_content or "assertSnapshot" in all_test_content
             has_quick_nimble = "import Quick" in all_test_content or "import Nimble" in all_test_content
 
+            tt = PROJECT_CONFIG.test_target or "AppTests"
+            sample_canary_exists = (ROOT / tt / "SampleSwiftTestingTests.swift").exists()
+
+            # Simplified status scheme: Installed vs Available
+            items = [
+                ("1", "Swift Testing (Native)", "Installed" if has_swift_testing else "Available", "\033[1;92m" if has_swift_testing else "\033[90m", "Core logic, ViewModels & async unit tests"),
+                ("2", "SnapshotTesting", "Installed" if has_snapshot_testing else "Available", "\033[1;92m" if has_snapshot_testing else "\033[90m", "Visual regressions (SwiftUI pixels, Dark Mode)"),
+                ("3", "Quick & Nimble (BDD)", "Installed" if has_quick_nimble else "Available", "\033[1;92m" if has_quick_nimble else "\033[90m", "Multi-step async state machines & polling specs"),
+                ("4", "Sample Canary Suite", "Installed" if sample_canary_exists else "Available", "\033[1;92m" if sample_canary_exists else "\033[90m", f"1-click test suite generation in {tt}"),
+                ("I", "xcbeautify Formatter", "Installed" if has_xcbeautify else "Available", "\033[1;92m" if has_xcbeautify else "\033[90m", "Strip noisy xcodebuild output into 1-line logs")
+            ]
+
+            print_wrapped_description("Explore modern Swift testing frameworks, snapshot visual tooling, BDD specifications, and build log formatters.", indent_size=2)
+            print()
+
             try:
                 cols, _ = os.get_terminal_size()
             except Exception:
                 cols = 80
+            cols = max(cols, 40)
 
+            opt_w = 5
             name_w = 26
-            status_w = 13
-            # Key (5) + ' | ' (3) + name_w (26) + ' | ' (3) + status_w (13) + ' | ' (3) = 53
-            desc_w = max(20, cols - 54)
+            status_w = 11
 
-            header = f"Opt   | {'Framework / Tool':<{name_w}} | {'Status':<{status_w}} | {'Job To Be Done / Best For':<{desc_w}}"
-            print(header)
-            print("-" * min(len(header), cols - 2))
+            if cols >= 80:
+                desc_w = max(24, cols - 48)
+                print(f"  \033[1;90m┌{'─'*opt_w}┬{'─'*name_w}┬{'─'*status_w}┬{'─'*desc_w}┐\033[0m")
+                print(f"  \033[1;90m│\033[0m \033[1;97m{'Opt':^{opt_w-2}}\033[0m \033[1;90m│\033[0m \033[1;97m{'Test Framework / Plugin':<{name_w-2}}\033[0m \033[1;90m│\033[0m \033[1;97m{'Status':<{status_w-2}}\033[0m \033[1;90m│\033[0m \033[1;97m{'Purpose & Focus':<{desc_w-2}}\033[0m \033[1;90m│\033[0m")
+                print(f"  \033[1;90m├{'─'*opt_w}┼{'─'*name_w}┼{'─'*status_w}┼{'─'*desc_w}┤\033[0m")
+                for key, name, status, color, desc in items:
+                    p_name = name if len(name) <= name_w - 2 else name[:name_w - 4] + ".."
+                    p_desc = desc if len(desc) <= desc_w - 2 else desc[:desc_w - 4] + ".."
+                    status_str = f"{color}{status:<{status_w-2}}\033[0m"
+                    print(f"  \033[1;90m│\033[0m  \033[1;96m{key:<{opt_w-3}}\033[0m\033[1;90m│\033[0m \033[1;97m{p_name:<{name_w-2}}\033[0m \033[1;90m│\033[0m {status_str} \033[1;90m│\033[0m \033[90m{p_desc:<{desc_w-2}}\033[0m \033[1;90m│\033[0m")
+                print(f"  \033[1;90m└{'─'*opt_w}┴{'─'*name_w}┴{'─'*status_w}┴{'─'*desc_w}┘\033[0m\n")
+            else:
+                # Compact table for mobile/phone terminals (fits in 46 cols without line bleeding)
+                print(f"  \033[1;90m┌{'─'*opt_w}┬{'─'*name_w}┬{'─'*status_w}┐\033[0m")
+                print(f"  \033[1;90m│\033[0m \033[1;97m{'Opt':^{opt_w-2}}\033[0m \033[1;90m│\033[0m \033[1;97m{'Test Framework / Plugin':<{name_w-2}}\033[0m \033[1;90m│\033[0m \033[1;97m{'Status':<{status_w-2}}\033[0m \033[1;90m│\033[0m")
+                print(f"  \033[1;90m├{'─'*opt_w}┼{'─'*name_w}┼{'─'*status_w}┤\033[0m")
+                for key, name, status, color, desc in items:
+                    p_name = name if len(name) <= name_w - 2 else name[:name_w - 4] + ".."
+                    status_str = f"{color}{status:<{status_w-2}}\033[0m"
+                    print(f"  \033[1;90m│\033[0m  \033[1;96m{key:<{opt_w-3}}\033[0m\033[1;90m│\033[0m \033[1;97m{p_name:<{name_w-2}}\033[0m \033[1;90m│\033[0m {status_str} \033[1;90m│\033[0m")
+                print(f"  \033[1;90m└{'─'*opt_w}┴{'─'*name_w}┴{'─'*status_w}┘\033[0m")
+                print()
+                for key, name, status, color, desc in items:
+                    print_wrapped_kv(f"  • [\033[1;96m{key}\033[0m] \033[1;97m{name}\033[0m: ", desc)
+                print()
 
-            items = [
-                ("1", "Swift Testing (Native)", "IN USE" if has_swift_testing else "AVAILABLE", "\033[1;92m" if has_swift_testing else "\033[1;96m", "Core logic, ViewModels & async unit tests"),
-                ("2", "SnapshotTesting", "IN USE" if has_snapshot_testing else "NOT DETECTED", "\033[1;92m" if has_snapshot_testing else "\033[90m", "Visual regressions (SwiftUI pixels, Dark Mode)"),
-                ("3", "Quick & Nimble (BDD)", "IN USE" if has_quick_nimble else "NOT DETECTED", "\033[1;92m" if has_quick_nimble else "\033[90m", "Multi-step async state machines & polling specs"),
-                ("4", "Sample Canary Suite", "READY", "\033[1;93m", f"1-click test suite generation in {PROJECT_CONFIG.test_target or 'AppTests'}"),
-                ("I", "xcbeautify Formatter", "INSTALLED" if has_xcbeautify else "NOT INSTALLED", "\033[1;92m" if has_xcbeautify else "\033[1;93m", "Strip noisy xcodebuild output into 1-line logs")
-            ]
-
-            for key, name, status, color, desc in items:
-                display_desc = desc if len(desc) <= desc_w else desc[:max(0, desc_w - 2)] + ".."
-                key_col = f"[\033[1;96m{key}\033[0m] "
-                status_col = f"{color}{status:<{status_w}}\033[0m"
-                print(f"{key_col} | {name:<{name_w}} | {status_col} | \033[97m{display_desc:<{desc_w}}\033[0m")
-
-            print_header("Actions")
-            print("[\033[1;96m1-4\033[0m] View cheat sheets, guides & starter templates")
-            print("[\033[1;96mI\033[0m]   Install / inspect xcbeautify CLI formatter")
-            print("[\033[1;91mB\033[0m]   Back to Manage Tests Menu\n")
+            print("  [\033[1;91mB\033[0m] Back\n")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
@@ -2600,43 +2647,43 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             elif choice == "1":
                 clear_screen()
                 print_header("Swift Testing Framework (Apple Native)")
-                print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m
-  Swift Testing is Apple's next-generation testing framework introduced in Xcode 16.
-  Built with Swift macros, it replaces XCTest with expressive syntax, declarative
-  traits, parameterized arguments, and structured concurrency support.
-
-  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m
-  • No more inheriting from XCTestCase classes or managing reference cycle leaks.
-  • Rich runtime diagnostics: #expect shows exact left vs right values on failure.
-  • Safe early exit: #require unwraps optionals or aborts without guard boilerplate.
-  • Parameterized testing: Test dozens of inputs in 1 test function (arguments: [...]).
-  • Native async/await support without XCTestExpectation waiters.
-
-  \033[1;97m🔗 DOCUMENTATION & OFFICIAL RESOURCES\033[0m
-  \033[1;36m• Apple Developer Docs:\033[0m  https://developer.apple.com/documentation/testing
-  \033[1;36m• Open Source Repo:\033[0m      https://github.com/swiftlang/swift-testing
-  \033[1;36m• WWDC 2024 Sessions:\033[0m    "Meet Swift Testing" & "Go further with Swift Testing"
-
-  \033[1;97m⚡ KEY CONCEPTS & MACROS CHEAT SHEET\033[0m
-  \033[1;93m@Suite\033[0m              Groups related tests inside structs, actors, or enums (no inheritance!).
-  \033[1;93m@Test("...")\033[0m        Marks test functions with human-readable titles and traits.
-  \033[1;93m#expect(...)\033[0m        Evaluates conditions with rich diagnostics (continues on failure).
-  \033[1;93m#require(...)\033[0m       Unwraps optionals or aborts test immediately if precondition fails.
-  \033[1;93marguments:\033[0m          Runs a parameterized test across collections or zip pairs.
-  \033[1;93m.serialized\033[0m         Trait to run tests sequentially instead of in parallel.
-  \033[1;93m.tags(...)\033[0m          Tag tests for filtering (e.g. .tags(.critical, .networking)).
-  \033[1;93m.enabled(if:)\033[0m       Conditional execution based on runtime state or feature flags.
-
-  \033[1;97m💡 BEST PRACTICES\033[0m
-  1. Prefer \033[1;97mstruct\033[0m test suites with value semantics over classes.
-  2. Use \033[1;97m#require(try await ...)\033[0m for critical dependencies, and \033[1;97m#expect\033[0m for assertions.
-  3. Use descriptive `@Test("...")` titles describing expected user behavior.
-  4. Test async code naturally with \033[1;97masync throws\033[0m without expectation waiters.
-
-  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m
-  \033[90m----------------------------------------------------------------------\033[0m
-\033[97mimport Testing
+                div = "=" * min(cols - 4, 68)
+                sub_div = "-" * min(cols - 4, 68)
+                print(f"  \033[1;92m{div}\033[0m")
+                print("  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m")
+                print_wrapped_description("Swift Testing is Apple's next-generation testing framework introduced in Xcode 16. Built with Swift macros, it replaces XCTest with expressive syntax, declarative traits, parameterized arguments, and structured concurrency support.", indent_size=2)
+                print()
+                print("  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m")
+                print_wrapped_kv("  • ", "No more inheriting from XCTestCase classes or managing reference cycle leaks.", indent_size=4)
+                print_wrapped_kv("  • ", "Rich runtime diagnostics: #expect shows exact left vs right values on failure.", indent_size=4)
+                print_wrapped_kv("  • ", "Safe early exit: #require unwraps optionals or aborts without guard boilerplate.", indent_size=4)
+                print_wrapped_kv("  • ", "Parameterized testing: Test dozens of inputs in 1 test function (arguments: [...]).", indent_size=4)
+                print_wrapped_kv("  • ", "Native async/await support without XCTestExpectation waiters.", indent_size=4)
+                print()
+                print("  \033[1;97m🔗 DOCUMENTATION & OFFICIAL RESOURCES\033[0m")
+                print_wrapped_kv("  \033[1;36m• Apple Developer Docs:\033[0m ", "https://developer.apple.com/documentation/testing", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• Open Source Repo:\033[0m     ", "https://github.com/swiftlang/swift-testing", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• WWDC 2024 Sessions:\033[0m   ", '"Meet Swift Testing" & "Go further with Swift Testing"', indent_size=4)
+                print()
+                print("  \033[1;97m⚡ KEY CONCEPTS & MACROS CHEAT SHEET\033[0m")
+                print_wrapped_kv("  \033[1;93m@Suite\033[0m              ", "Groups related tests inside structs, actors, or enums (no inheritance!).", indent_size=24)
+                print_wrapped_kv("  \033[1;93m@Test(\"...\")\033[0m        ", "Marks test functions with human-readable titles and traits.", indent_size=24)
+                print_wrapped_kv("  \033[1;93m#expect(...)\033[0m        ", "Evaluates conditions with rich diagnostics (continues on failure).", indent_size=24)
+                print_wrapped_kv("  \033[1;93m#require(...)\033[0m       ", "Unwraps optionals or aborts test immediately if precondition fails.", indent_size=24)
+                print_wrapped_kv("  \033[1;93marguments:\033[0m          ", "Runs a parameterized test across collections or zip pairs.", indent_size=24)
+                print_wrapped_kv("  \033[1;93m.serialized\033[0m         ", "Trait to run tests sequentially instead of in parallel.", indent_size=24)
+                print_wrapped_kv("  \033[1;93m.tags(...)\033[0m          ", "Tag tests for filtering (e.g. .tags(.critical, .networking)).", indent_size=24)
+                print_wrapped_kv("  \033[1;93m.enabled(if:)\033[0m       ", "Conditional execution based on runtime state or feature flags.", indent_size=24)
+                print()
+                print("  \033[1;97m💡 BEST PRACTICES\033[0m")
+                print_wrapped_kv("  1. ", "Prefer struct test suites with value semantics over classes.", indent_size=5)
+                print_wrapped_kv("  2. ", "Use #require(try await ...) for critical dependencies, and #expect for assertions.", indent_size=5)
+                print_wrapped_kv("  3. ", "Use descriptive @Test(\"...\") titles describing expected user behavior.", indent_size=5)
+                print_wrapped_kv("  4. ", "Test async code naturally with async throws without expectation waiters.", indent_size=5)
+                print()
+                print("  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m")
+                print(f"  \033[90m{sub_div}\033[0m")
+                print("""\033[97mimport Testing
 @testable import MyApp
 
 @Suite("Authentication & Session Pipeline")
@@ -2665,52 +2712,51 @@ struct AuthenticationTests {
         let session = try await SessionManager.shared.refreshToken()
         #expect(session.isExpired == false)
     }
-}\033[0m
-  \033[90m----------------------------------------------------------------------\033[0m
-  \033[1;92m======================================================================\033[0m""")
+}\033[0m""")
+                print(f"  \033[90m{sub_div}\033[0m")
+                print(f"  \033[1;92m{div}\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "2":
                 clear_screen()
                 print_header("Point-Free SnapshotTesting (Visual & Data Regression)")
-                print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m
-  SnapshotTesting automatically captures pixel-accurate visual snapshots (images) or
-  structured data representations (JSON, text dump) of your SwiftUI views, view
-  controllers, and models, instantly catching visual or architectural regressions.
-
-  \033[1;97m💡 WHY GO BEYOND NATIVE TESTING?\033[0m
-  • Native Swift Testing and XCTest only inspect variables in memory (e.g. state == .loaded).
-  • They CANNOT detect clipped text, missing padding, Dynamic Type (accessibility sizes)
-    overflows, or invisible text in Dark Mode.
-  • SnapshotTesting renders actual views offscreen and diffs them against baseline images.
-
-  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m
-  • Eliminates tedious manual visual QA across dozens of screens and iOS devices.
-  • Prevents unintended layout breakage when refactoring design systems or shared styles.
-  • Automates visual verification directly in CI pull requests.
-
-  \033[1;97m🔗 DOCUMENTATION & SPM PACKAGE\033[0m
-  \033[1;36m• GitHub Repository:\033[0m  https://github.com/pointfreeco/swift-snapshot-testing
-  \033[1;36m• Documentation:\033[0m      https://pointfreeco.github.io/swift-snapshot-testing/
-  \033[1;36m• SPM Package URL:\033[0m    https://github.com/pointfreeco/swift-snapshot-testing.git
-  \033[1;36m• Dependency Version:\033[0m from: "1.17.0"
-
-  \033[1;97m⚡ KEY STRATEGIES & CONCEPTS\033[0m
-  \033[1;93m.image\033[0m              Renders exact pixel image of UIViewController or SwiftUI view.
-  \033[1;93m.image(on:)\033[0m         Renders view on specific device configurations (e.g. .iPhone13Pro).
-  \033[1;93m.dump / .json\033[0m       Dumps data models/states to detect property or payload changes.
-  \033[1;93mrecord: true\033[0m        Generates new reference snapshots (run once to save images).
-  \033[1;93misRecording = true\033[0m  Class-level flag to record all tests in the file.
-
-  \033[1;97m💡 BEST PRACTICES\033[0m
-  1. Fix simulator dimensions using \033[1;97mViewImageConfig.iPhone16Pro\033[0m for deterministic rendering.
-  2. Snapshot both \033[1;97mLight\033[0m and \033[1;97mDark\033[0m modes for all primary user views.
-  3. Test with accessibility / dynamic type sizes (e.g. \033[1;97m.extraExtraExtraLarge\033[0m).
-  4. Ensure animations are disabled via \033[1;97mUIView.setAnimationsEnabled(false)\033[0m.
-
-  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m
-  \033[90m----------------------------------------------------------------------\033[0m
-\033[97mimport XCTest
+                div = "=" * min(cols - 4, 68)
+                sub_div = "-" * min(cols - 4, 68)
+                print(f"  \033[1;92m{div}\033[0m")
+                print("  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m")
+                print_wrapped_description("SnapshotTesting automatically captures pixel-accurate visual snapshots (images) or structured data representations (JSON, text dump) of your SwiftUI views, view controllers, and models, instantly catching visual or architectural regressions.", indent_size=2)
+                print()
+                print("  \033[1;97m💡 WHY GO BEYOND NATIVE TESTING?\033[0m")
+                print_wrapped_kv("  • ", "Native Swift Testing/XCTest only inspect variables in memory (e.g. state == .loaded).", indent_size=4)
+                print_wrapped_kv("  • ", "They CANNOT detect clipped text, missing padding, Dynamic Type overflows, or Dark Mode issues.", indent_size=4)
+                print_wrapped_kv("  • ", "SnapshotTesting renders actual views offscreen and diffs them against baseline images.", indent_size=4)
+                print()
+                print("  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m")
+                print_wrapped_kv("  • ", "Eliminates tedious manual visual QA across dozens of screens and iOS devices.", indent_size=4)
+                print_wrapped_kv("  • ", "Prevents unintended layout breakage when refactoring design systems or shared styles.", indent_size=4)
+                print_wrapped_kv("  • ", "Automates visual verification directly in CI pull requests.", indent_size=4)
+                print()
+                print("  \033[1;97m🔗 DOCUMENTATION & SPM PACKAGE\033[0m")
+                print_wrapped_kv("  \033[1;36m• GitHub Repo:\033[0m      ", "https://github.com/pointfreeco/swift-snapshot-testing", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• Documentation:\033[0m    ", "https://pointfreeco.github.io/swift-snapshot-testing/", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• SPM Package URL:\033[0m  ", "https://github.com/pointfreeco/swift-snapshot-testing.git", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• Version:\033[0m          ", 'from: "1.17.0"', indent_size=4)
+                print()
+                print("  \033[1;97m⚡ KEY STRATEGIES & CONCEPTS\033[0m")
+                print_wrapped_kv("  \033[1;93m.image\033[0m              ", "Renders exact pixel image of UIViewController or SwiftUI view.", indent_size=24)
+                print_wrapped_kv("  \033[1;93m.image(on:)\033[0m         ", "Renders view on specific device configurations (e.g. .iPhone13Pro).", indent_size=24)
+                print_wrapped_kv("  \033[1;93m.dump / .json\033[0m       ", "Dumps data models/states to detect property or payload changes.", indent_size=24)
+                print_wrapped_kv("  \033[1;93mrecord: true\033[0m        ", "Generates new reference snapshots (run once to save images).", indent_size=24)
+                print_wrapped_kv("  \033[1;93misRecording = true\033[0m  ", "Class-level flag to record all tests in the file.", indent_size=24)
+                print()
+                print("  \033[1;97m💡 BEST PRACTICES\033[0m")
+                print_wrapped_kv("  1. ", "Fix simulator dimensions using ViewImageConfig.iPhone16Pro for deterministic rendering.", indent_size=5)
+                print_wrapped_kv("  2. ", "Snapshot both Light and Dark modes for all primary user views.", indent_size=5)
+                print_wrapped_kv("  3. ", "Test with accessibility / dynamic type sizes (e.g. .extraExtraExtraLarge).", indent_size=5)
+                print_wrapped_kv("  4. ", "Ensure animations are disabled via UIView.setAnimationsEnabled(false).", indent_size=5)
+                print()
+                print("  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m")
+                print(f"  \033[90m{sub_div}\033[0m")
+                print("""\033[97mimport XCTest
 import SnapshotTesting
 import SwiftUI
 @testable import MyApp
@@ -2719,8 +2765,7 @@ final class ProfileViewSnapshotTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        // Set to true once when updating baseline images:
-        // isRecording = true
+        // isRecording = true // Set true once when updating baseline images
     }
 
     func testProfileViewLightAndDarkMode() {
@@ -2744,56 +2789,53 @@ final class ProfileViewSnapshotTests: XCTestCase {
         
         assertSnapshot(of: vc, as: .image, named: "loading_state")
     }
-}\033[0m
-  \033[90m----------------------------------------------------------------------\033[0m
-  \033[1;92m======================================================================\033[0m""")
+}\033[0m""")
+                print(f"  \033[90m{sub_div}\033[0m")
+                print(f"  \033[1;92m{div}\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "3":
                 clear_screen()
                 print_header("Quick & Nimble (Behavior-Driven Development / BDD)")
-                print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m
-  Quick & Nimble provide a powerful Behavior-Driven Development (BDD) testing
-  framework for Swift. Quick structures tests into expressive behavioral contexts,
-  while Nimble delivers fluent, readable assertions with asynchronous polling.
-
-  \033[1;97m💡 WHY GO BEYOND NATIVE TESTING?\033[0m
-  • Swift Testing uses flat test functions. For complex multi-step state machines
-    (e.g. document scanning, checkout flows, upload pipelines), flat tests lead
-    to heavy duplication and ambiguous failure messages.
-  • Swift Testing lacks built-in async polling for states that settle asynchronously
-    over background queues (Combine, WebSocket events, CoreData sync).
-  • Nimble provides \033[1;93mexpect(state).toEventually(beTrue())\033[0m with automatic polling and timeouts.
-
-  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m
-  • Eliminates flaky async tests caused by arbitrary Task.sleep / sleep timeouts.
-  • Hierarchical beforeEach / afterEach scoping prevents state pollution between specs.
-  • Living documentation: Specs read as human-readable product requirements.
-
-  \033[1;97m🔗 DOCUMENTATION & SPM PACKAGES\033[0m
-  \033[1;36m• Quick Repository:\033[0m   https://github.com/Quick/Quick
-  \033[1;36m• Nimble Repository:\033[0m  https://github.com/Quick/Nimble
-  \033[1;36m• Documentation:\033[0m      https://quick.github.io/Quick/
-  \033[1;36m• SPM Package URLs:\033[0m   https://github.com/Quick/Quick.git
-                        https://github.com/Quick/Nimble.git
-
-  \033[1;97m⚡ KEY CONCEPTS & FLUENT MATCHERS\033[0m
-  \033[1;93mdescribe("...")\033[0m       Defines the class, struct, or feature under test.
-  \033[1;93mcontext("when...")\033[0m    Establishes a specific condition, state, or mock environment.
-  \033[1;93mit("should...")\033[0m       Specifies the exact behavioral expectation.
-  \033[1;93mbeforeEach / after\033[0m   Hierarchical setup and teardown scoped to each context.
-  \033[1;93mexpect(...).to(...)\033[0m  Fluent synchronous matcher (e.g. equal, beNil, contain, beTrue).
-  \033[1;93mtoEventually(...)\033[0m    Asynchronous polling matcher for async State, Combine, and network.
-  \033[1;93mAsyncSpec\033[0m             Modern base class for native async/await spec definitions.
-
-  \033[1;97m💡 BEST PRACTICES\033[0m
-  1. Structure specs like user stories: \033[1;97mdescribe(Feature) -> context(Scenario) -> it(Behavior)\033[0m.
-  2. Use \033[1;97mbeforeEach\033[0m to isolate state across specs and prevent test pollution.
-  3. Use \033[1;97mexpect(state).toEventually(beTrue())\033[0m for background async state updates.
-
-  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m
-  \033[90m----------------------------------------------------------------------\033[0m
-\033[97mimport Quick
+                div = "=" * min(cols - 4, 68)
+                sub_div = "-" * min(cols - 4, 68)
+                print(f"  \033[1;92m{div}\033[0m")
+                print("  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m")
+                print_wrapped_description("Quick & Nimble provide a powerful Behavior-Driven Development (BDD) testing framework for Swift. Quick structures tests into expressive behavioral contexts, while Nimble delivers fluent, readable assertions with asynchronous polling.", indent_size=2)
+                print()
+                print("  \033[1;97m💡 WHY GO BEYOND NATIVE TESTING?\033[0m")
+                print_wrapped_kv("  • ", "Swift Testing uses flat tests. For complex multi-step state machines (scans, checkout, uploads), flat tests lead to heavy duplication.", indent_size=4)
+                print_wrapped_kv("  • ", "Swift Testing lacks built-in async polling for states that settle asynchronously over background queues (Combine, WebSocket, CoreData).", indent_size=4)
+                print_wrapped_kv("  • ", "Nimble provides expect(state).toEventually(beTrue()) with automatic polling and timeouts.", indent_size=4)
+                print()
+                print("  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m")
+                print_wrapped_kv("  • ", "Eliminates flaky async tests caused by arbitrary Task.sleep timeouts.", indent_size=4)
+                print_wrapped_kv("  • ", "Hierarchical beforeEach/afterEach scoping prevents state pollution between specs.", indent_size=4)
+                print_wrapped_kv("  • ", "Living documentation: Specs read as human-readable product requirements.", indent_size=4)
+                print()
+                print("  \033[1;97m🔗 DOCUMENTATION & SPM PACKAGES\033[0m")
+                print_wrapped_kv("  \033[1;36m• Quick Repo:\033[0m       ", "https://github.com/Quick/Quick", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• Nimble Repo:\033[0m      ", "https://github.com/Quick/Nimble", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• Documentation:\033[0m    ", "https://quick.github.io/Quick/", indent_size=4)
+                print_wrapped_kv("  \033[1;36m• SPM Packages:\033[0m     ", "https://github.com/Quick/Quick.git", indent_size=4)
+                print_wrapped_kv("                      ", "https://github.com/Quick/Nimble.git", indent_size=4)
+                print()
+                print("  \033[1;97m⚡ KEY CONCEPTS & FLUENT MATCHERS\033[0m")
+                print_wrapped_kv("  \033[1;93mdescribe(\"...\")\033[0m    ", "Defines the class, struct, or feature under test.", indent_size=24)
+                print_wrapped_kv("  \033[1;93mcontext(\"when...\")\033[0m ", "Establishes a specific condition, state, or mock environment.", indent_size=24)
+                print_wrapped_kv("  \033[1;93mit(\"should...\")\033[0m    ", "Specifies the exact behavioral expectation.", indent_size=24)
+                print_wrapped_kv("  \033[1;93mbeforeEach / after\033[0m  ", "Hierarchical setup and teardown scoped to each context.", indent_size=24)
+                print_wrapped_kv("  \033[1;93mexpect(...).to(...)\033[0m ", "Fluent synchronous matcher (e.g. equal, beNil, contain).", indent_size=24)
+                print_wrapped_kv("  \033[1;93mtoEventually(...)\033[0m   ", "Asynchronous polling matcher for async State, Combine, and network.", indent_size=24)
+                print_wrapped_kv("  \033[1;93mAsyncSpec\033[0m           ", "Modern base class for native async/await spec definitions.", indent_size=24)
+                print()
+                print("  \033[1;97m💡 BEST PRACTICES\033[0m")
+                print_wrapped_kv("  1. ", "Structure specs like user stories: describe(Feature) -> context(Scenario) -> it(Behavior).", indent_size=5)
+                print_wrapped_kv("  2. ", "Use beforeEach to isolate state across specs and prevent test pollution.", indent_size=5)
+                print_wrapped_kv("  3. ", "Use expect(state).toEventually(beTrue()) for background async state updates.", indent_size=5)
+                print()
+                print("  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m")
+                print(f"  \033[90m{sub_div}\033[0m")
+                print("""\033[97mimport Quick
 import Nimble
 @testable import MyApp
 
@@ -2835,22 +2877,20 @@ final class DocumentProcessorSpec: AsyncSpec {
             }
         }
     }
-}\033[0m
-  \033[90m----------------------------------------------------------------------\033[0m
-  \033[1;92m======================================================================\033[0m""")
+}\033[0m""")
+                print(f"  \033[90m{sub_div}\033[0m")
+                print(f"  \033[1;92m{div}\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "4":
                 clear_screen()
                 print_header("Generate Sample Swift Testing File (Canary Suite)")
-                print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 PURPOSE & BENEFITS (JOB TO BE DONE)\033[0m
-  • \033[1;93mToolchain Canary:\033[0m Verifies in 1 second that Xcode 16+ Swift Testing macros,
-    scheme target dependencies, and @testable imports compile without errors.
-  • \033[1;93mZero-Friction Template:\033[0m Creates a ready-to-run suite with working examples
-    of #expect, #require, and parameterized arguments: matrix testing.
-  • \033[1;93mAI & Team Reference:\033[0m Gives coding agents and developers a concrete file
-    to pattern-match for expanding test coverage across other app modules.
-  \033[1;92m======================================================================\033[0m\n""")
+                div = "=" * min(cols - 4, 68)
+                print(f"  \033[1;92m{div}\033[0m")
+                print("  \033[1;97m📌 PURPOSE & BENEFITS (JOB TO BE DONE)\033[0m")
+                print_wrapped_kv("  • \033[1;93mToolchain Canary:\033[0m     ", "Verifies in 1 second that Xcode 16+ Swift Testing macros, scheme target dependencies, and @testable imports compile without errors.", indent_size=4)
+                print_wrapped_kv("  • \033[1;93mZero-Friction Template:\033[0m", "Creates a ready-to-run suite with working examples of #expect, #require, and parameterized arguments: matrix testing.", indent_size=4)
+                print_wrapped_kv("  • \033[1;93mAI & Team Reference:\033[0m   ", "Gives coding agents and developers a concrete file to pattern-match for expanding test coverage across other app modules.", indent_size=4)
+                print(f"  \033[1;92m{div}\033[0m\n")
                 tt = PROJECT_CONFIG.test_target or "AppTests"
                 tt_dir = ROOT / tt
                 tt_dir.mkdir(parents=True, exist_ok=True)
@@ -2903,14 +2943,14 @@ struct SampleSwiftTestingTests {{
                 else:
                     clear_screen()
                     print_header("xcbeautify CLI Formatter")
-                    print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 STATUS: INSTALLED & ACTIVE\033[0m
-  xcbeautify is installed on your system and automatically cleans up
-  xcodebuild test execution into colorized, 1-line pass/fail summaries.
-
-  \033[1;97m🔗 OFFICIAL REPOSITORY\033[0m
-  \033[1;36m• GitHub:\033[0m https://github.com/cpisciotta/xcbeautify
-  \033[1;92m======================================================================\033[0m""")
+                    div = "=" * min(cols - 4, 68)
+                    print(f"  \033[1;92m{div}\033[0m")
+                    print("  \033[1;97m📌 STATUS: INSTALLED & ACTIVE\033[0m")
+                    print_wrapped_description("xcbeautify is installed on your system and automatically cleans up xcodebuild test execution into colorized, 1-line pass/fail summaries.", indent_size=2)
+                    print()
+                    print("  \033[1;97m🔗 OFFICIAL REPOSITORY\033[0m")
+                    print_wrapped_kv("  \033[1;36m• GitHub:\033[0m ", "https://github.com/cpisciotta/xcbeautify", indent_size=4)
+                    print(f"  \033[1;92m{div}\033[0m")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             else:
                 error_msg = f"'{choice}'"
@@ -3051,6 +3091,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             # 1. Code Coverage Status & Visual Progress Bar
             cov_data = get_coverage_data()
             bar_width = 16
+            cov_ts_short = None
             if cov_data and cov_data.get("overall_coverage_pct") is not None:
                 cov_pct = cov_data["overall_coverage_pct"]
                 cov_ts = cov_data.get("timestamp", "")
@@ -3066,13 +3107,15 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                     cov_color = "\033[1;91m"
                 
                 bar_str = f"{cov_color}{'█' * filled}\033[90m{'░' * empty}\033[0m"
-                cov_display = f"{cov_color}{cov_pct:.1f}%\033[0m \033[90m({cov_ts_short})\033[0m"
+                cov_display = f"{cov_color}{cov_pct:.1f}%\033[0m"
             else:
                 bar_str = f"\033[90m{'░' * bar_width}\033[0m"
                 cov_display = "\033[93mNot calculated yet\033[0m \033[90m(Press 'C')\033[0m"
 
             print("  \033[1;90m┌─────────────────────────────────────────────────────────────┐\033[0m")
             print(f"  \033[1;90m│\033[0m \033[1;97mCODE COVERAGE:\033[0m [{bar_str}]  {cov_display}")
+            if cov_ts_short:
+                print(f"  \033[1;90m│\033[0m \033[1;36mLast Audited:\033[0m  \033[90m{cov_ts_short}\033[0m")
             print(f"  \033[1;90m│\033[0m \033[1;36mTest Target:\033[0m   \033[97m{PROJECT_CONFIG.test_target}\033[0m")
             print("  \033[1;90m└─────────────────────────────────────────────────────────────┘\033[0m\n")
 
@@ -3099,7 +3142,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             if suites:
                 max_suites_show = 8
                 for i, s in enumerate(suites[:max_suites_show]):
-                    print(f"    \033[1;97m{s['name']}\033[0m \033[90m({s['rel_path']})\033[0m: \033[92m{s['test_count']} test(s)\033[0m")
+                    print(f"    \033[1;97m• {s['name']}\033[0m: \033[92m{s['test_count']} test(s)\033[0m")
                 if len(suites) > max_suites_show:
                     print(f"    \033[90m... and {len(suites) - max_suites_show} more test suite(s)\033[0m")
             else:
@@ -3109,7 +3152,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             print("[\033[1;92mA\033[0m] Run Unit Tests (All or Specific Suites)")
             print("[\033[1;96mC\033[0m] Calculate / Refresh Code Coverage")
             print("[\033[1;96mE\033[0m] Expand Unit Test Coverage (AI Job)")
-            print("[\033[1;96mF\033[0m] Test Frameworks & Canaries (Swift Testing, Snapshots, BDD)")
+            print("[\033[1;96mF\033[0m] Test Frameworks & Canaries")
             print("[\033[1;96mR\033[0m] Rename a Test Suite / File")
             print("[\033[1;96mV\033[0m] Simulator Visual Check (Screenshots)")
             print("[\033[1;91mB\033[0m] Back\n")
@@ -3144,9 +3187,17 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                 if gaps:
                     options = []
                     for g in gaps:
-                        prio = g.get("priority", "HIGH")
+                        prio = str(g.get("priority", "HIGH")).upper().strip()
                         target_str = ", ".join(g.get("target_files", [])[:2])
-                        label = f"🎯 {g['subsystem']} [{prio}]"
+                        if prio == "HIGH":
+                            prio_str = "\033[1;91m[HIGH]\033[0m"
+                        elif prio == "MEDIUM":
+                            prio_str = "\033[93m[MEDIUM]\033[0m"
+                        elif prio == "LOW":
+                            prio_str = "\033[90m[LOW]\033[0m"
+                        else:
+                            prio_str = f"[{prio}]"
+                        label = f"🎯 {g['subsystem']} {prio_str}"
                         if target_str:
                             desc = f"{g['rationale']} - Targets: {target_str}"
                         else:
@@ -3155,15 +3206,12 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                     
                     options.append("🌐 Comprehensive Coverage Audit (Full audit across all uncovered app subsystems)")
                     options.append("✏️ Custom Subsystem / Focus (Manually enter a subsystem, ViewModel, or module)")
-                    options.append("↩️ Back to Manage Tests Menu")
                     
                     clear_screen()
                     print_header("Expand Unit Test Coverage - Select Focus")
                     print("Select an AI-identified coverage gap, full audit, or custom target:\n")
                     try:
                         gap_choice = prompt_radio("Select Coverage Focus / Target Gap:", options, default=options[0])
-                        if gap_choice == "↩️ Back to Manage Tests Menu":
-                            continue
                         selected_idx = options.index(gap_choice)
                     except (BackException, ValueError):
                         continue
@@ -3627,7 +3675,7 @@ def handle_archived_jobs_menu(session_allowed_machines, session_allowed_models):
                         print(f"    [{i:2}] \033[1;91m{f.name:15}\033[0m | CORRUPT")
 
             print("\nActions:")
-            print("    [\033[1;96mU\033[0m] Un-archive (Restore to main menu)")
+            print("    [\033[1;96mU\033[0m] Un-archive (Restore to main menu)\n")
             print("    [\033[1;91mB\033[0m] Back")
 
             status_bar.render(at_bottom=True, force=True)
@@ -3664,49 +3712,32 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             print_header(title)
 
     def handle_bug_still_happening(job: dict[str, Any]) -> None:
-        print("This will re-open the bug-fix job, attach the latest logs, and trigger another iteration.\n")
-        
-        desc = prompt_input("Brief description of the failure:", placeholder="e.g. OCR download fails with timeout", field_below=True)
+        job_type = job.get("type", "")
+        is_feature = job_type in {"feature-plan", "feature", "feature-design"}
+        if is_feature:
+            print("This will iterate on the feature, attach the latest logs, and trigger an automated fix/completion pass.\n")
+            desc = prompt_input("Brief description of the bug or missing functionality:", placeholder="e.g. Save button doesn't trigger API call or missing empty state", field_below=True)
+            default_hypo = "User reported bug or missing functionality in new feature."
+        else:
+            print("This will re-open the bug-fix job, attach the latest logs, and trigger another iteration.\n")
+            desc = prompt_input("Brief description of the failure:", placeholder="e.g. OCR download fails with timeout", field_below=True)
+            default_hypo = "User reported bug is still happening."
+
         if not desc:
             print("\nCancelled.")
             input("\n\033[1;96mTap Enter to continue...\033[0m")
             return
 
-        recent_log = None
-        try:
-            search_dirs = []
-            job_id = job.get("job_id")
-            if job_id:
-                search_dirs.append(OUTPUT_DIR / job_id)
-            search_dirs.extend([ROOT / "logs", OUTPUT_DIR / "manual"])
-            
-            candidates = []
-            for d in search_dirs:
-                if d.exists() and d.is_dir():
-                    for p in d.rglob("*"):
-                        if p.is_file() and p.suffix in {".log", ".txt"} and p.name != "batch_test_results.log":
-                            candidates.append(p)
-                            
-            if candidates:
-                candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                recent_log = candidates[0]
-        except Exception as e:
-            print(f"      - Error scanning for log files: {e}")
-
+        recent_log = find_latest_runtime_log(job.get("job_id"))
         log_paths = job.get("last_manual_log_paths", [])
         if not isinstance(log_paths, list):
             log_paths = []
 
         if recent_log:
-            try:
-                rel_path = str(recent_log.relative_to(ROOT))
-            except ValueError:
-                rel_path = str(recent_log)
-                
             print(f"\n✅ Automatically detected and attached latest log file:")
-            print(f"      - \033[97m{rel_path}\033[0m")
-            if rel_path not in log_paths:
-                log_paths.append(rel_path)
+            print(f"      - \033[97m{recent_log}\033[0m")
+            if recent_log not in log_paths:
+                log_paths.append(recent_log)
         else:
             print("\n\033[1;93m⚠️  Warning: Could not automatically detect any recent log files in logs/ or output directories.\033[0m")
             if prompt_confirm("Would you like to manually link or paste a log file?", default=True, clear_screen=False):
@@ -3730,7 +3761,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
         iter_num = job.get("iteration", 0) + 1
         job["debug_history"].append({
             "iteration": iter_num,
-            "hypothesis": "User reported bug is still happening.",
+            "hypothesis": default_hypo,
             "action": "Iterate fix based on user feedback.",
             "implementation_plan": desc,
             "expected_signal": "Validation successful",
@@ -3829,6 +3860,17 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print(f"  - {label}{suffix}")
                 if len(references) > 3:
                     print(f"  \033[90m...and {len(references) - 3} more\033[0m")
+            
+            clarifications = job.get("clarification_history", [])
+            if clarifications:
+                print(f"Clarifications: \033[92m{len(clarifications)} recorded\033[0m")
+                for item in clarifications[-2:]:
+                    q = item.get("question", "")
+                    a = item.get("answer", "")
+                    if len(q) > 60: q = q[:57] + "..."
+                    if len(a) > 60: a = a[:57] + "..."
+                    print(f"  \033[90m- Q: {q}\033[0m")
+                    print(f"  \033[92m  A: {a}\033[0m")
             
             # PROACTIVE STATUS CONTEXT (What should the user do?)
             print("-" * 60)
@@ -4091,8 +4133,12 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     workflow_options.append(("f", "[\033[93mF\033[0m] Deliver to Device (Firebase distribution)"))
                     workflow_options.append(("t", "[\033[93mT\033[0m] Tweak / Iterate Further"))
                 
-                if job_type in {"bug-fix", "bug-investigate"}:
+                if job_type in {"feature-plan", "feature", "feature-design"}:
+                    workflow_options.append(("h", "[\033[1;93mH\033[0m] Bug or Missing Functionality? (Iterate & Fix)"))
+                elif job_type in {"bug-fix", "bug-investigate"}:
                     workflow_options.append(("h", "[\033[1;91mH\033[0m] Bug Still Happening? (Re-open & Fix)"))
+                else:
+                    workflow_options.append(("h", "[\033[1;93mH\033[0m] Follow-up / Issue? (Iterate & Fix)"))
                 
                 # If there are tasks remaining, allow Resuming to the next task
                 if status == "review-needed" and tasks and len(completed) < len(tasks):
@@ -4381,7 +4427,10 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("Please go to [\033[1;96mC\033[0m] Configuration \033[1;96m->\033[0m [\033[1;96mF\033[0m] Manage Machine Fleet and select at least one machine.")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                     continue
-                open_action_screen("Re-open & Fix Bug")
+                if job_type in {"feature-plan", "feature", "feature-design"}:
+                    open_action_screen("Fix Bug / Missing Functionality")
+                else:
+                    open_action_screen("Re-open & Fix Bug")
                 handle_bug_still_happening(job)
                 job = refresh_job(job)
             elif choice == "m" and "m" in actions:
@@ -4397,8 +4446,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("\033[90mYour answer will be sent back to the planner and used to revise this job.\033[0m\n")
                     answer = prompt_input("Your answer:", placeholder="required to continue", field_below=True)
                     if answer:
-                        # Clear old question to avoid re-triggering if planning fails
-                        job["human_clarification_question"] = None
+                        record_clarification(job, question, answer)
                         save_job(job)
                         
                         # Trigger re-plan with the answer as feedback
@@ -5359,7 +5407,7 @@ def handle_role_prompts(session_allowed_machines, session_allowed_models):
             print("  [\033[1;92m1\033[0m] Copy system default templates to project (to enable editing)")
             if prompts_dir.exists():
                 print("  [\033[1;91m2\033[0m] Delete custom prompts (revert to system defaults)")
-            print("  [\033[1;91mB\033[0m] Back")
+            print("\n  [\033[1;91mB\033[0m] Back")
 
             # Anchor prompt to bottom
             prompt = get_choice_prompt("Choice:", "(index or letter)")
@@ -5408,7 +5456,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
             print("\033[1;97mRecent Projects\033[0m")
             print("  No recent projects found.\n")
             print("\033[1;97mActions\033[0m")
-            print("  [\033[1;92mA\033[0m] Add Project")
+            print("  [\033[1;92mA\033[0m] Add Project\n")
             print("  [\033[1;91mB\033[0m] Back")
 
             prompt = get_choice_prompt("Choice:", "(A/B)")
@@ -5439,7 +5487,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
 
             print("\n\033[1;97mActions\033[0m")
             print("  [\033[1;92mA\033[0m] Add Project")
-            print("  [\033[1;96mH\033[0m] Help")
+            print("  [\033[1;96mH\033[0m] Help\n")
             print("  [\033[1;91mB\033[0m] Back")
 
             status_bar.render(at_bottom=True, force=True)
@@ -5552,6 +5600,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
 
 def handle_configuration_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> tuple[list[str], list[str]]:
     """Secondary menu for advanced setup, tools, and configuration."""
+    global PROJECT_CONFIG
     while True:
         clear_screen()
         with StatusBar({
@@ -5589,6 +5638,7 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
             print_wrapped_option("[\033[93mE\033[0m] Email Notification Settings")
 
             print("\n  \033[1;96m--- Setup, Health & Documentation ---\033[0m")
+            print_wrapped_option("[\033[93mW\033[0m] Setup Wizard (Full Project & Tools Setup)")
             print_wrapped_option("[\033[93mP\033[0m] Run Prerequisite Audit")
             print_wrapped_option("[\033[93mS\033[0m] Documentation & Architecture Guides")
             print_wrapped_option("[\033[93mT\033[0m] Orchestrator Self-Tests")
@@ -5781,6 +5831,22 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                                 
                                 input("\n\033[1;96mTap Enter to return to docs menu...\033[0m")
                                 continue
+            elif choice == "w":
+                clear_screen()
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+                if os.name != "nt":
+                    os.system("stty sane 2>/dev/null")
+                cli_path = SCRIPTS_DIR.parent / "cli.py"
+                subprocess.run([sys.executable, str(cli_path), "wizard"], cwd=str(ROOT))
+                if os.name != "nt":
+                    os.system("stty sane 2>/dev/null")
+                import importlib
+                import orchestrator.project_config
+                importlib.reload(orchestrator.project_config)
+                PROJECT_CONFIG = orchestrator.project_config.PROJECT_CONFIG
+                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
             elif choice == "t":
                 handle_tooling_tests(session_allowed_machines, session_allowed_models)
             elif choice == "u":
@@ -5964,7 +6030,7 @@ def handle_xcode_cloud_menu(session_allowed_machines: list[str], session_allowed
             print("  \033[1;90m--- ACTIONS ---\033[0m")
             print("  [\033[1;96m1\033[0m] Setup / Generate Standard Xcode Cloud ci_scripts/ (3 Hook Scripts)")
             print("  [\033[1;96m2\033[0m] Make all ci_scripts executable (chmod +x)")
-            print("  [\033[1;96m3\033[0m] View Xcode Cloud & CI Architecture Guide")
+            print("  [\033[1;96m3\033[0m] View Xcode Cloud & CI Architecture Guide\n")
             print("  [\033[1;91mB\033[0m] Back")
 
             if error_msg:
@@ -6057,7 +6123,7 @@ def handle_quick_distribute(session_allowed_machines: list[str], session_allowed
             print(f"  \033[1;36m• Tester Groups:\033[0m      \033[97m{getattr(PROJECT_CONFIG, 'firebase_groups', None) or 'internal-testers'}\033[0m")
             print()
             print("  [\033[1;92mD\033[0m] Quick Distribute (Current Branch)")
-            print("  [\033[1;96mN\033[0m] Distribute with Custom Release Notes")
+            print("  [\033[1;96mN\033[0m] Distribute with Custom Release Notes\n")
             print("  [\033[1;91mB\033[0m] Back")
 
             if error_msg:
@@ -6098,11 +6164,228 @@ def handle_quick_distribute(session_allowed_machines: list[str], session_allowed
                         os.environ["DISTRIBUTION_RELEASE_NOTES"] = prev_notes
                     else:
                         os.environ.pop("DISTRIBUTION_RELEASE_NOTES", None)
-
-                input("\n\033[1;96mTap Enter to return to menu...\033[0m")
-                break
             else:
                 error_msg = f"'{choice}'"
+
+def get_github_auth_info() -> tuple[bool, list[dict[str, Any]], str | None]:
+    """
+    Returns:
+      (has_gh: bool, accounts: list[dict], active_user: str | None)
+      where each account dict is:
+        {"host": str, "user": str, "active": bool, "protocol": str, "scopes": str}
+    """
+    import shutil
+    has_gh = shutil.which("gh") is not None
+    if not has_gh:
+        return False, [], None
+    
+    accounts: list[dict[str, Any]] = []
+    active_user: str | None = None
+    auth_out = ""
+    try:
+        auth_out = subprocess.check_output(
+            ["gh", "auth", "status"],
+            stderr=subprocess.STDOUT,
+            cwd=str(ROOT),
+            timeout=5
+        ).decode("utf-8")
+    except subprocess.CalledProcessError as e:
+        auth_out = e.output.decode("utf-8") if hasattr(e, "output") and e.output else ""
+    except Exception:
+        auth_out = ""
+    
+    if auth_out:
+        current_host = "github.com"
+        current_acc = None
+        for line in auth_out.splitlines():
+            line_str = line.rstrip()
+            if line_str and not line_str.startswith(" ") and not line_str.startswith("\t") and "." in line_str:
+                current_host = line_str.strip().rstrip(":")
+            
+            m = re.search(r"Logged in to\s+([^\s]+)\s+account\s+([^\s\(]+)", line_str)
+            if m:
+                host = m.group(1)
+                user = m.group(2)
+                current_acc = {
+                    "host": host,
+                    "user": user,
+                    "active": False,
+                    "protocol": "",
+                    "scopes": ""
+                }
+                accounts.append(current_acc)
+                continue
+            
+            if current_acc:
+                if "Active account: true" in line_str:
+                    current_acc["active"] = True
+                    active_user = current_acc["user"]
+                elif "Git operations protocol:" in line_str:
+                    current_acc["protocol"] = line_str.split(":", 1)[1].strip()
+                elif "Token scopes:" in line_str:
+                    current_acc["scopes"] = line_str.split(":", 1)[1].strip()
+    
+    # Fallback to check ~/.config/gh/hosts.yml if auth_out didn't parse accounts
+    if not accounts:
+        hosts_path = Path.home() / ".config" / "gh" / "hosts.yml"
+        if hosts_path.exists():
+            try:
+                hosts_content = hosts_path.read_text(encoding="utf-8")
+                cur_host = "github.com"
+                in_users = False
+                active_in_file = None
+                for line in hosts_content.splitlines():
+                    striped = line.strip()
+                    if line and not line.startswith(" ") and ":" in line:
+                        cur_host = line.split(":", 1)[0].strip()
+                    if striped == "users:":
+                        in_users = True
+                        continue
+                    elif in_users and (not line.startswith(" ") or (len(line) - len(line.lstrip()) <= 4 and striped != "" and not striped.endswith(":"))):
+                        if not line.startswith("        "):
+                            in_users = False
+                    if in_users and striped.endswith(":") and not striped.startswith("oauth_token") and not striped.startswith("git_protocol"):
+                        u = striped.rstrip(":")
+                        if u not in [a["user"] for a in accounts]:
+                            accounts.append({"host": cur_host, "user": u, "active": False, "protocol": "", "scopes": ""})
+                    if striped.startswith("user:"):
+                        active_in_file = striped.split(":", 1)[1].strip()
+                if active_in_file:
+                    for a in accounts:
+                        if a["user"] == active_in_file:
+                            a["active"] = True
+                            active_user = active_in_file
+            except Exception:
+                pass
+
+    if accounts:
+        if not active_user:
+            active_user = accounts[0]["user"]
+            accounts[0]["active"] = True
+        else:
+            for a in accounts:
+                if a["user"] == active_user:
+                    a["active"] = True
+                
+    return has_gh, accounts, active_user
+
+def handle_add_github_account(status_bar: StatusBar | None = None) -> None:
+    error_msg = ""
+    while True:
+        clear_screen()
+        if status_bar:
+            status_bar.set_scroll_region()
+        print_header("Add GitHub Account")
+        print_wrapped_description("Connect a GitHub account to the CLI for repository synchronization, PR checks, and issue management.", indent_size=2)
+        print()
+        print("  [\033[1;92m1\033[0m] Web Browser \033[1;92m(Recommended)\033[0m")
+        print("      \033[90m• Connect to github.com using browser login & 1-time code\033[0m")
+        print("  [\033[1;96m2\033[0m] Personal Access Token (PAT)")
+        print("      \033[90m• Paste a classic or fine-grained GitHub access token\033[0m")
+        print("  [\033[1;96m3\033[0m] GitHub Enterprise Server")
+        print("      \033[90m• Connect to a self-hosted corporate domain (e.g. github.mycompany.com)\033[0m")
+        print("  [\033[1;96m4\033[0m] Advanced: Interactive gh Wizard")
+        print("      \033[90m• Run native 'gh auth login' prompts step-by-step\033[0m\n")
+        print("  [\033[1;91mB\033[0m] Back")
+
+        if error_msg:
+            print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
+            error_msg = ""
+
+        if status_bar:
+            prompt = get_choice_prompt("Choice:", "(1-4, B)")
+            status_bar.render(at_bottom=True, force=True, prompt=prompt)
+        choice = get_key().strip().lower()
+        clear_choice_placeholder()
+
+        if choice == "b":
+            break
+        elif choice == "1":
+            clear_screen()
+            if status_bar:
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+            print_header("GitHub Web Authentication (github.com)")
+            print("1. A one-time device code will appear below and be copied to your clipboard.")
+            print("2. Press Enter to open \033[1;96mhttps://github.com/login/device\033[0m in your browser.")
+            print("3. Paste the code and click \033[1;92m'Authorize github'\033[0m.\n")
+            
+            if os.name != "nt":
+                os.system("stty sane 2>/dev/null")
+            
+            cmd = ["gh", "auth", "login", "--hostname", "github.com", "--web", "--git-protocol", "https", "--clipboard"]
+            res = subprocess.run(cmd, cwd=str(ROOT))
+            if res.returncode != 0:
+                subprocess.run(["gh", "auth", "login", "--hostname", "github.com", "--web", "--git-protocol", "https"], cwd=str(ROOT))
+            
+            if os.name != "nt":
+                os.system("stty sane 2>/dev/null")
+            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            break
+        elif choice == "2":
+            clear_screen()
+            if status_bar:
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+            print_header("Authenticate via Personal Access Token (PAT)")
+            print("  \033[90mRequired token scopes: repo, read:org, gist\033[0m")
+            print("  \033[90mCreate a token at: https://github.com/settings/tokens\033[0m\n")
+            try:
+                token = prompt_input("Enter your GitHub Personal Access Token:", allow_back=True, field_below=True)
+            except BackException:
+                continue
+            if not token or token.strip().lower() == "b":
+                continue
+            
+            token = token.strip()
+            print("\n  Authenticating with GitHub...")
+            cmd = ["gh", "auth", "login", "--hostname", "github.com", "--with-token", "--git-protocol", "https"]
+            res = subprocess.run(cmd, input=token.encode("utf-8"), cwd=str(ROOT), capture_output=True)
+            if res.returncode == 0:
+                print("\n\033[1;92m✅ Successfully authenticated with GitHub!\033[0m")
+            else:
+                err = res.stderr.decode("utf-8", errors="replace").strip()
+                print(f"\n\033[1;91m❌ Authentication failed: {err}\033[0m")
+            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            break
+        elif choice == "3":
+            clear_screen()
+            if status_bar:
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+            print_header("Authenticate with GitHub Enterprise Server")
+            print("  \033[90mEnter the hostname of your organization's self-hosted GitHub instance.\033[0m\n")
+            try:
+                host = prompt_input("Enterprise Hostname:", placeholder="e.g. github.mycompany.com", allow_back=True, field_below=True)
+            except BackException:
+                continue
+            if not host or host.strip().lower() == "b":
+                continue
+            
+            host = host.strip()
+            if os.name != "nt":
+                os.system("stty sane 2>/dev/null")
+            cmd = ["gh", "auth", "login", "--hostname", host, "--web"]
+            subprocess.run(cmd, cwd=str(ROOT))
+            if os.name != "nt":
+                os.system("stty sane 2>/dev/null")
+            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            break
+        elif choice == "4":
+            clear_screen()
+            if status_bar:
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+            print_header("Native GitHub CLI Wizard")
+            if os.name != "nt":
+                os.system("stty sane 2>/dev/null")
+            subprocess.run(["gh", "auth", "login"], cwd=str(ROOT))
+            if os.name != "nt":
+                os.system("stty sane 2>/dev/null")
+            input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+            break
+        else:
+            error_msg = f"'{choice}'"
 
 def handle_github_menu(session_allowed_machines: list[str], session_allowed_models: list[str]) -> None:
     error_msg = ""
@@ -6118,35 +6401,18 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
             print_header("GitHub & Source Control")
 
             # 1. Check Git & GitHub Connection
-            import shutil
-            has_gh = shutil.which("gh") is not None
+            has_gh, gh_accounts, gh_user = get_github_auth_info()
             gh_cli_status = "\033[92mINSTALLED\033[0m" if has_gh else "\033[1;91mMISSING\033[0m (Run: brew install gh)"
             
-            gh_auth_status = ""
-            gh_user = None
-            gh_ok = False
-            if has_gh:
-                try:
-                    auth_out = subprocess.check_output(["gh", "auth", "status"], stderr=subprocess.STDOUT, cwd=str(ROOT), timeout=5).decode("utf-8")
-                    gh_user_match = re.search(r"Logged in to [^\s]+ account ([^\s\(]+)", auth_out)
-                    gh_user = gh_user_match.group(1) if gh_user_match else "LOGGED IN"
-                    gh_auth_status = f"\033[92m{gh_user}\033[0m"
-                    gh_ok = True
-                except subprocess.CalledProcessError as e:
-                    err_out = e.output.decode("utf-8") if hasattr(e, "output") and e.output else ""
-                    if "Logged in to" in err_out:
-                        gh_user_match = re.search(r"Logged in to [^\s]+ account ([^\s\(]+)", err_out)
-                        gh_user = gh_user_match.group(1) if gh_user_match else "LOGGED IN"
-                        gh_auth_status = f"\033[92m{gh_user}\033[0m"
-                        gh_ok = True
-                    else:
-                        gh_auth_status = "\033[1;91mNOT LOGGED IN\033[0m (Run: gh auth login)"
-                        gh_ok = False
-                except Exception:
-                    gh_auth_status = "\033[1;91mNOT LOGGED IN\033[0m"
-                    gh_ok = False
-            else:
+            gh_ok = bool(has_gh and gh_accounts)
+            if not has_gh:
                 gh_auth_status = "\033[90mN/A\033[0m"
+            elif not gh_accounts:
+                gh_auth_status = "\033[1;91mNOT LOGGED IN\033[0m (Press [A] to add account)"
+            elif len(gh_accounts) == 1:
+                gh_auth_status = f"\033[92m{gh_user}\033[0m \033[90m(Active)\033[0m"
+            else:
+                gh_auth_status = f"\033[92m{gh_user}\033[0m \033[90m(Active · {len(gh_accounts)} accounts configured)\033[0m"
 
             # 2. Check Remote Origin
             git_remote_url = "NOT SET"
@@ -6191,8 +6457,8 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
             # 4. Fetch local branches
             branches = []
             try:
-                branch_out = subprocess.check_output(["git", "branch", "--sort=-committerdate"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8")
-                branches = [b.strip().replace("* ", "") for b in branch_out.splitlines() if b.strip()]
+                branch_out = subprocess.check_output(["git", "branch", "--sort=-committerdate", "--format=%(refname:short)"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8")
+                branches = [b.strip().lstrip("*+ ").strip() for b in branch_out.splitlines() if b.strip()]
             except:
                 pass
 
@@ -6211,7 +6477,7 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
                 if not has_gh:
                     print("  \033[1;93m│\033[0m   1. Install GitHub CLI: \033[97mbrew install gh\033[0m                     \033[1;93m│\033[0m")
                 if has_gh and not gh_ok:
-                    print("  \033[1;93m│\033[0m   2. Authenticate: Press \033[1;96m[L]\033[0m or run \033[97mgh auth login\033[0m           \033[1;93m│\033[0m")
+                    print("  \033[1;93m│\033[0m   2. Add Account: Press \033[1;96m[A]\033[0m or run \033[97mgh auth login\033[0m              \033[1;93m│\033[0m")
                 if git_remote_url in ("NOT SET", ""):
                     print("  \033[1;93m│\033[0m   3. Set remote: \033[97mgit remote add origin <github-repo-url>\033[0m      \033[1;93m│\033[0m")
                 print("  \033[1;93m╰───────────────────────────────────────────────────────────────╯\033[0m")
@@ -6230,19 +6496,18 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
 
             # Actions Menu
             print("\n  \033[1;90m--- ACTIONS ---\033[0m")
-            print("    [\033[1;92mS\033[0m] Sync with GitHub (Archive closed issues / sync active jobs)")
+            print("    [\033[1;92mS\033[0m] Sync with GitHub")
             print("    [\033[1;96mP\033[0m] Push Current Branch (git push)")
             print("    [\033[1;96mU\033[0m] Pull Remote Updates (git pull)")
             print("    [\033[1;96mC\033[0m] Checkout / Switch Branch")
-            print("    [\033[1;96mN\033[0m] Create & Switch to New Branch")
+            print("    [\033[1;96mN\033[0m] Create New Branch")
             if has_gh:
                 print("    [\033[1;96mO\033[0m] Open Repo in Browser (GitHub)")
-                if not gh_ok:
-                    print("    [\033[1;92mL\033[0m] Login to GitHub (gh auth login)")
-                else:
-                    print("    [\033[1;96mL\033[0m] Re-authenticate GitHub (gh auth login)")
+                print("    [\033[1;96mV\033[0m] View Login Status (gh auth status)")
+                print("    [\033[1;92mA\033[0m] Add GitHub Account (gh auth login)")
+                print("    [\033[1;96mW\033[0m] Switch Active Account (gh auth switch)")
             print("    [\033[1;96mX\033[0m] Xcode Cloud Workflows & CI Scripts")
-            print("    [\033[1;96mR\033[0m] Refresh Status")
+            print("    [\033[1;96mR\033[0m] Refresh Status\n")
             print("    [\033[1;91mB\033[0m] Back")
 
             if error_msg:
@@ -6266,10 +6531,59 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
             elif choice == "p":
                 clear_screen()
                 print_header(f"Pushing Branch: {current_branch}")
+                
+                # Pre-inspect unpushed commits and HEAD details
+                unpushed_commits = []
+                diffstat_summary = ""
+                head_sha = ""
+                head_msg = ""
+                head_author = ""
+                head_time = ""
+                try:
+                    head_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                    head_msg = subprocess.check_output(["git", "log", "-1", "--format=%s", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                    head_author = subprocess.check_output(["git", "log", "-1", "--format=%an", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                    head_time = subprocess.check_output(["git", "log", "-1", "--format=%cr", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                    
+                    unpushed_out = subprocess.check_output(["git", "log", f"origin/{current_branch}..HEAD", "--oneline"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                    if unpushed_out:
+                        unpushed_commits = [c.strip() for c in unpushed_out.splitlines() if c.strip()]
+                        stat_out = subprocess.check_output(["git", "diff", "--shortstat", f"origin/{current_branch}..HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                        if stat_out:
+                            diffstat_summary = stat_out
+                except Exception:
+                    pass
+
                 print(f"\033[90mRunning: git push origin {current_branch}...\033[0m\n")
                 res = subprocess.run(["git", "push", "-u", "origin", current_branch], cwd=str(ROOT))
+                
+                try:
+                    cols, _ = os.get_terminal_size()
+                except Exception:
+                    cols = 80
+                cols = max(cols, 40)
+                div = "=" * min(cols - 4, 68)
+
                 if res.returncode == 0:
-                    print("\n\033[1;92m✅ Successfully pushed to remote origin.\033[0m")
+                    print(f"\n  \033[1;92m{div}\033[0m")
+                    print("  \033[1;92m🚀 PUSH COMPLETE & REMOTE SYNCHRONIZED\033[0m")
+                    print(f"  \033[1;36m• Target Branch:\033[0m  \033[1;97m{current_branch}\033[0m -> \033[90morigin/{current_branch}\033[0m")
+                    if git_remote_url and git_remote_url != "NOT SET":
+                        print(f"  \033[1;36m• Remote Origin:\033[0m  \033[90m{git_remote_url}\033[0m")
+                    if head_sha:
+                        print(f"  \033[1;36m• Current HEAD:\033[0m   \033[1;93m{head_sha}\033[0m \033[97m{head_msg}\033[0m \033[90m({head_author}, {head_time})\033[0m")
+                    
+                    if unpushed_commits:
+                        print(f"\n  \033[1;36m• Commits Pushed ({len(unpushed_commits)}):\033[0m")
+                        for c in unpushed_commits[:8]:
+                            print(f"    \033[92m+\033[0m \033[97m{c}\033[0m")
+                        if len(unpushed_commits) > 8:
+                            print(f"    \033[90m... and {len(unpushed_commits) - 8} more commit(s)\033[0m")
+                        if diffstat_summary:
+                            print(f"  \033[1;36m• Changes:\033[0m        \033[90m{diffstat_summary}\033[0m")
+                    else:
+                        print(f"  \033[1;36m• Sync Status:\033[0m    \033[92mUp-to-date\033[0m \033[90m(remote is in sync with local HEAD)\033[0m")
+                    print(f"  \033[1;92m{div}\033[0m")
                 else:
                     print(f"\n\033[1;91m❌ Push failed (exit code {res.returncode}).\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -6277,10 +6591,46 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
             elif choice == "u":
                 clear_screen()
                 print_header(f"Pulling Updates: {current_branch}")
-                print("\033[90mRunning: git pull...\033[0m\n")
+                
+                head_before = ""
+                try:
+                    head_before = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                except Exception:
+                    pass
+
+                print(f"\033[90mRunning: git pull...\033[0m\n")
                 res = subprocess.run(["git", "pull"], cwd=str(ROOT))
+                
+                try:
+                    cols, _ = os.get_terminal_size()
+                except Exception:
+                    cols = 80
+                cols = max(cols, 40)
+                div = "=" * min(cols - 4, 68)
+
                 if res.returncode == 0:
-                    print("\n\033[1;92m✅ Successfully pulled remote updates.\033[0m")
+                    pulled_commits = []
+                    try:
+                        head_after = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                        if head_before and head_after and head_before != head_after:
+                            pulled_out = subprocess.check_output(["git", "log", f"{head_before}..{head_after}", "--oneline"], cwd=str(ROOT), stderr=subprocess.DEVNULL, timeout=5).decode("utf-8").strip()
+                            if pulled_out:
+                                pulled_commits = [c.strip() for c in pulled_out.splitlines() if c.strip()]
+                    except Exception:
+                        pass
+
+                    print(f"\n  \033[1;92m{div}\033[0m")
+                    print("  \033[1;92m📥 PULL COMPLETE & LOCAL BRANCH UPDATED\033[0m")
+                    print(f"  \033[1;36m• Branch:\033[0m         \033[1;97m{current_branch}\033[0m")
+                    if pulled_commits:
+                        print(f"\n  \033[1;36m• Commits Pulled ({len(pulled_commits)}):\033[0m")
+                        for c in pulled_commits[:8]:
+                            print(f"    \033[92m+\033[0m \033[97m{c}\033[0m")
+                        if len(pulled_commits) > 8:
+                            print(f"    \033[90m... and {len(pulled_commits) - 8} more commit(s)\033[0m")
+                    else:
+                        print(f"  \033[1;36m• Status:\033[0m         \033[92mAlready up-to-date\033[0m \033[90m(no new remote commits)\033[0m")
+                    print(f"  \033[1;92m{div}\033[0m")
                 else:
                     print(f"\n\033[1;91m❌ Pull failed (exit code {res.returncode}).\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
@@ -6341,12 +6691,89 @@ def handle_github_menu(session_allowed_machines: list[str], session_allowed_mode
                         subprocess.run(["open", web_url], check=False)
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 continue
-            elif choice == "l" and has_gh:
+            elif choice == "v" and has_gh:
                 clear_screen()
-                print_header("GitHub CLI Authentication")
-                print("Launching 'gh auth login'...\n")
-                subprocess.run(["gh", "auth", "login"], cwd=str(ROOT))
+                print_header("GitHub Login & Authentication Status")
+                try:
+                    res = subprocess.run(["gh", "auth", "status"], cwd=str(ROOT), capture_output=True, text=True)
+                    out = (res.stdout or "") + (res.stderr or "")
+                    if out.strip():
+                        print(out.strip())
+                    else:
+                        print("No authentication status output returned.")
+                    
+                    if res.returncode == 0:
+                        print("\n\033[1;92m✅ GitHub CLI is authenticated and operational.\033[0m")
+                    else:
+                        print(f"\n\033[1;93mℹ️  gh auth status returned code {res.returncode}.\033[0m")
+                except Exception as e:
+                    print(f"\033[1;91mError executing 'gh auth status': {e}\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
+                continue
+            elif (choice == "a" or choice == "l") and has_gh:
+                handle_add_github_account(status_bar)
+                continue
+            elif choice == "w" and has_gh:
+                clear_screen()
+                print_header("Switch Active GitHub Account")
+                _, current_accounts, active_user = get_github_auth_info()
+                
+                if not current_accounts:
+                    print("⚠️  No authenticated GitHub accounts found.")
+                    print("You need to add or log in to an account first.\n")
+                    if prompt_confirm("Would you like to add a GitHub account now?", default=True):
+                        handle_add_github_account(status_bar)
+                    continue
+                
+                if len(current_accounts) == 1:
+                    acc = current_accounts[0]
+                    print(f"ℹ️  Only 1 GitHub account is currently logged in: \033[1;92m{acc['user']}\033[0m ({acc['host']}).")
+                    print("To switch between accounts, you must first add another account.\n")
+                    if prompt_confirm("Would you like to add another GitHub account now?", default=True):
+                        handle_add_github_account(status_bar)
+                    continue
+                
+                # Multiple accounts configured: Build options for radio prompt
+                account_options = []
+                default_option = None
+                for acc in current_accounts:
+                    label = f"{acc['user']} ({acc['host']})"
+                    if acc.get("active"):
+                        default_option = f"{label} [Current Active]"
+                        account_options.append(f"{label} [Current Active]")
+                    else:
+                        account_options.append(label)
+                
+                try:
+                    selected = prompt_radio(
+                        "Select GitHub account to switch to:",
+                        account_options,
+                        default=default_option or account_options[0]
+                    )
+                except BackException:
+                    continue
+                
+                if selected:
+                    # Find chosen account
+                    chosen_acc = None
+                    for i, opt in enumerate(account_options):
+                        if opt == selected:
+                            chosen_acc = current_accounts[i]
+                            break
+                    
+                    if chosen_acc:
+                        if chosen_acc.get("active"):
+                            print(f"\n\033[93mAccount '{chosen_acc['user']}' is already the active account.\033[0m")
+                        else:
+                            clear_screen()
+                            print_header(f"Switching Active GitHub Account to: {chosen_acc['user']}")
+                            switch_cmd = ["gh", "auth", "switch", "--hostname", chosen_acc["host"], "--user", chosen_acc["user"]]
+                            res = subprocess.run(switch_cmd, cwd=str(ROOT))
+                            if res.returncode == 0:
+                                print(f"\n\033[1;92m✅ Successfully switched active GitHub account to '{chosen_acc['user']}'.\033[0m")
+                            else:
+                                print(f"\n\033[1;91m❌ Failed to switch active account (exit code {res.returncode}).\033[0m")
+                        input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 continue
             elif choice == "x":
                 handle_xcode_cloud_menu(session_allowed_machines, session_allowed_models)
@@ -6636,7 +7063,7 @@ Read these files first and treat them as authoritative:
             if any(s == "invalid" for s in file_statuses.values()):
                 print("    [\033[1;92mR\033[0m] Repair Misconfigured Files")
             
-            print("    [\033[1;96mP\033[0m] Customize Agent Instructions (Planner/Builder/etc)")
+            print("    [\033[1;96mP\033[0m] Customize Agent Instructions (Planner/Builder/etc)\n")
             print("    [\033[1;91mB\033[0m] Back")
             
             # Anchor prompt to bottom
@@ -6818,7 +7245,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
             print_wrapped_kv("    [\033[1;96mL\033[0m] ", "Login to Firebase (Browser)")
             print_wrapped_kv("    [\033[1;96mK\033[0m] ", "Configure Headless Signing (Keychain Auto-Unlock)")
             print_wrapped_kv("    [\033[1;96mT\033[0m] ", "Test Distribution Script (Dry Run via build delivery)")
-            print_wrapped_kv("    [\033[1;96mR\033[0m] ", "Refresh Status (Re-run checks)")
+            print_wrapped_kv("    [\033[1;96mR\033[0m] ", "Refresh Status (Re-run checks)\n")
             print_wrapped_kv("    [\033[1;91mB\033[0m] ", "Back")
             
             status_bar.render(at_bottom=True, force=True, prompt=None)
@@ -6851,8 +7278,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
 def handle_keychain_setup(status_bar: StatusBar):
     options = [
         "Automated: Store password (Required for headless/remote builds)",
-        "Manual: UI prompts (Best for local interactive use)",
-        "Cancel"
+        "Manual: UI prompts (Best for local interactive use)"
     ]
     
     import textwrap
@@ -6865,7 +7291,10 @@ def handle_keychain_setup(status_bar: StatusBar):
     desc_text = "Select how to unlock the macOS keychain during the build and distribution process. Storing the password enables automated headless/remote builds, while manual mode prompts for your password dynamically."
     desc_lines = [f"  \033[90m{line}\033[0m" for line in textwrap.wrap(desc_text, width=cols - 6)]
     
-    choice = prompt_radio("Choose Keychain Setup Mode", options, default=options[0], clear_screen=True, description=desc_lines)
+    try:
+        choice = prompt_radio("Choose Keychain Setup Mode", options, default=options[0], clear_screen=True, description=desc_lines)
+    except BackException:
+        return
     
     if "Auto" in choice:
         print("\n\033[1;96mEnter your macOS login password (it will be saved to .secrets/project-secrets.zsh):\033[0m")
@@ -7019,7 +7448,7 @@ def handle_email_settings(session_allowed_machines: list[str], session_allowed_m
             if emails:
                 print("    [\033[1;96mR\033[0m] Remove recipient address")
                 print("    [\033[1;96mT\033[0m] Send Test Email")
-            print("    [\033[1;96mC\033[0m] Configure Email Sender")
+            print("    [\033[1;96mC\033[0m] Configure Email Sender\n")
             print("    [\033[1;91mB\033[0m] Back")
             
             status_bar.render(at_bottom=True, force=True)
