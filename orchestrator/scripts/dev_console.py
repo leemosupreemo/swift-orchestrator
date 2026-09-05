@@ -2588,96 +2588,213 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             elif choice == "1":
                 clear_screen()
                 print_header("Swift Testing Framework (Apple Native)")
-                print("""\033[1;97mOverview:\033[0m
-  Swift Testing is Apple's modern testing framework introduced in Xcode 16.
-  It replaces XCTest with clean macros, parameterized tests, and structured traits.
+                print("""  \033[1;92m======================================================================\033[0m
+  \033[1;97m📌 OVERVIEW\033[0m
+  Swift Testing is Apple's next-generation testing framework introduced in Xcode 16.
+  Built with Swift macros, it replaces XCTest with expressive syntax, declarative
+  traits, parameterized arguments, and structured concurrency support.
 
-\033[1;97mStarter Template:\033[0m
-```swift
-import Testing
+  \033[1;97m🔗 DOCUMENTATION & OFFICIAL RESOURCES\033[0m
+  \033[1;36m• Apple Developer Docs:\033[0m  https://developer.apple.com/documentation/testing
+  \033[1;36m• Open Source Repo:\033[0m      https://github.com/swiftlang/swift-testing
+  \033[1;36m• WWDC 2024 Sessions:\033[0m    "Meet Swift Testing" & "Go further with Swift Testing"
+
+  \033[1;97m⚡ KEY CONCEPTS & MACROS CHEAT SHEET\033[0m
+  \033[1;93m@Suite\033[0m              Groups related tests inside structs, actors, or enums (no inheritance!).
+  \033[1;93m@Test("...")\033[0m        Marks test functions with human-readable titles and traits.
+  \033[1;93m#expect(...)\033[0m        Evaluates conditions with rich diagnostics (continues on failure).
+  \033[1;93m#require(...)\033[0m       Unwraps optionals or aborts test immediately if precondition fails.
+  \033[1;93marguments:\033[0m          Runs a parameterized test across collections or zip pairs.
+  \033[1;93m.serialized\033[0m         Trait to run tests sequentially instead of in parallel.
+  \033[1;93m.tags(...)\033[0m          Tag tests for filtering (e.g. .tags(.critical, .networking)).
+  \033[1;93m.enabled(if:)\033[0m       Conditional execution based on runtime state or feature flags.
+
+  \033[1;97m💡 BEST PRACTICES\033[0m
+  1. Prefer \033[1;97mstruct\033[0m test suites with value semantics over classes.
+  2. Use \033[1;97m#require(try await ...)\033[0m for critical dependencies, and \033[1;97m#expect\033[0m for assertions.
+  3. Use descriptive `@Test("...")` titles describing expected user behavior.
+  4. Test async code naturally with \033[1;97masync throws\033[0m without expectation waiters.
+
+  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m
+  \033[90m----------------------------------------------------------------------\033[0m
+\033[97mimport Testing
 @testable import MyApp
 
-@Suite("Authentication & Session Suite")
+@Suite("Authentication & Session Pipeline")
 struct AuthenticationTests {
-    @Test("Valid credentials authenticate successfully")
+
+    @Test("Valid credentials authenticate and return auth session token")
     func loginSuccess() async throws {
         let authService = AuthService()
         let result = try await authService.login(email: "user@example.com", password: "secure")
-        #expect(result.isAuthenticated)
-        #expect(result.token != nil)
+        
+        // Use #require for critical unwraps / preconditions
+        let token = try #require(result.token, "Auth token must be non-nil on success")
+        
+        #expect(result.isAuthenticated == true)
+        #expect(token.isValid == true)
     }
 
-    @Test("Input validation for malformed emails", arguments: ["", "bad-email", "@no-domain.com"])
+    @Test("Parameterized input validation rejects malformed email strings",
+          arguments: ["", "bad-email", "@no-domain.com", "spaces in@email.com"])
     func invalidEmails(email: String) {
         #expect(Validator.isValid(email: email) == false)
     }
-}
-```""")
+
+    @Test("Concurrent session refreshes are serialized safely", .serialized)
+    func tokenRefresh() async throws {
+        let session = try await SessionManager.shared.refreshToken()
+        #expect(session.isExpired == false)
+    }
+}\033[0m
+  \033[90m----------------------------------------------------------------------\033[0m
+  \033[1;92m======================================================================\033[0m""")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "2":
                 clear_screen()
-                print_header("Point-Free SnapshotTesting")
-                print("""\033[1;97mOverview:\033[0m
-  SnapshotTesting automatically captures images or textual representations of your
-  SwiftUI views, ViewControllers, or data structures, catching visual regressions.
+                print_header("Point-Free SnapshotTesting (Visual & Data Regression)")
+                print("""  \033[1;92m======================================================================\033[0m
+  \033[1;97m📌 OVERVIEW\033[0m
+  SnapshotTesting automatically captures pixel-accurate visual snapshots (images) or
+  structured data representations (JSON, text dump) of your SwiftUI views, view
+  controllers, and models, instantly catching visual or architectural regressions.
 
-\033[1;97mInstallation via SPM:\033[0m
-  URL: https://github.com/pointfreeco/swift-snapshot-testing
-  Branch/Tag: from 1.17.0
+  \033[1;97m🔗 DOCUMENTATION & SPM PACKAGE\033[0m
+  \033[1;36m• GitHub Repository:\033[0m  https://github.com/pointfreeco/swift-snapshot-testing
+  \033[1;36m• Documentation:\033[0m      https://pointfreeco.github.io/swift-snapshot-testing/
+  \033[1;36m• SPM Package URL:\033[0m    https://github.com/pointfreeco/swift-snapshot-testing.git
+  \033[1;36m• Dependency Version:\033[0m from: "1.17.0"
 
-\033[1;97mStarter Template:\033[0m
-```swift
-import XCTest
+  \033[1;97m⚡ KEY STRATEGIES & CONCEPTS\033[0m
+  \033[1;93m.image\033[0m              Renders exact pixel image of UIViewController or SwiftUI view.
+  \033[1;93m.image(on:)\033[0m         Renders view on specific device configurations (e.g. .iPhone13Pro).
+  \033[1;93m.dump / .json\033[0m       Dumps data models/states to detect property or payload changes.
+  \033[1;93mrecord: true\033[0m        Generates new reference snapshots (run once to save images).
+  \033[1;93misRecording = true\033[0m  Class-level flag to record all tests in the file.
+
+  \033[1;97m💡 BEST PRACTICES\033[0m
+  1. Fix simulator dimensions using \033[1;97mViewImageConfig.iPhone16Pro\033[0m for deterministic rendering.
+  2. Snapshot both \033[1;97mLight\033[0m and \033[1;97mDark\033[0m modes for all primary user views.
+  3. Test with accessibility / dynamic type sizes (e.g. \033[1;97m.extraExtraExtraLarge\033[0m).
+  4. Ensure animations are disabled via \033[1;97mUIView.setAnimationsEnabled(false)\033[0m.
+
+  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m
+  \033[90m----------------------------------------------------------------------\033[0m
+\033[97mimport XCTest
 import SnapshotTesting
 import SwiftUI
 @testable import MyApp
 
 final class ProfileViewSnapshotTests: XCTestCase {
-    func testProfileViewLightMode() {
-        let view = ProfileView(user: .mock)
+
+    override func setUp() {
+        super.setUp()
+        // Set to true once when updating baseline images:
+        // isRecording = true
+    }
+
+    func testProfileViewLightAndDarkMode() {
+        let view = ProfileView(user: .mockUser)
         let vc = UIHostingController(rootView: view)
         vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852) // iPhone 16 Pro
-        
-        assertSnapshot(of: vc, as: .image)
+
+        // 1. Light Mode
+        vc.overrideUserInterfaceStyle = .light
+        assertSnapshot(of: vc, as: .image, named: "light_mode")
+
+        // 2. Dark Mode
+        vc.overrideUserInterfaceStyle = .dark
+        assertSnapshot(of: vc, as: .image, named: "dark_mode")
     }
-}
-```""")
+
+    func testProfileViewLoadingState() {
+        let view = ProfileView(user: nil, isLoading: true)
+        let vc = UIHostingController(rootView: view)
+        vc.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        
+        assertSnapshot(of: vc, as: .image, named: "loading_state")
+    }
+}\033[0m
+  \033[90m----------------------------------------------------------------------\033[0m
+  \033[1;92m======================================================================\033[0m""")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "3":
                 clear_screen()
-                print_header("Quick & Nimble (Behavior-Driven Development)")
-                print("""\033[1;97mOverview:\033[0m
-  Quick provides a BDD DSL (describe/context/it) and Nimble provides expressive,
-  fluent matchers with asynchronous expectation support (toEventually).
+                print_header("Quick & Nimble (Behavior-Driven Development / BDD)")
+                print("""  \033[1;92m======================================================================\033[0m
+  \033[1;97m📌 OVERVIEW\033[0m
+  Quick & Nimble provide a powerful Behavior-Driven Development (BDD) testing
+  framework for Swift. Quick structures tests into expressive behavioral contexts,
+  while Nimble delivers fluent, readable assertions with asynchronous polling.
 
-\033[1;97mInstallation via SPM:\033[0m
-  URLs: https://github.com/Quick/Quick and https://github.com/Quick/Nimble
+  \033[1;97m🔗 DOCUMENTATION & SPM PACKAGES\033[0m
+  \033[1;36m• Quick Repository:\033[0m   https://github.com/Quick/Quick
+  \033[1;36m• Nimble Repository:\033[0m  https://github.com/Quick/Nimble
+  \033[1;36m• Documentation:\033[0m      https://quick.github.io/Quick/
+  \033[1;36m• SPM Package URLs:\033[0m   https://github.com/Quick/Quick.git
+                        https://github.com/Quick/Nimble.git
 
-\033[1;97mStarter Template:\033[0m
-```swift
-import Quick
+  \033[1;97m⚡ KEY CONCEPTS & FLUENT MATCHERS\033[0m
+  \033[1;93mdescribe("...")\033[0m       Defines the class, struct, or feature under test.
+  \033[1;93mcontext("when...")\033[0m    Establishes a specific condition, state, or mock environment.
+  \033[1;93mit("should...")\033[0m       Specifies the exact behavioral expectation.
+  \033[1;93mbeforeEach / after\033[0m   Hierarchical setup and teardown scoped to each context.
+  \033[1;93mexpect(...).to(...)\033[0m  Fluent synchronous matcher (e.g. equal, beNil, contain, beTrue).
+  \033[1;93mtoEventually(...)\033[0m    Asynchronous polling matcher for async State, Combine, and network.
+  \033[1;93mAsyncSpec\033[0m             Modern base class for native async/await spec definitions.
+
+  \033[1;97m💡 BEST PRACTICES\033[0m
+  1. Structure specs like user stories: \033[1;97mdescribe(Feature) -> context(Scenario) -> it(Behavior)\033[0m.
+  2. Use \033[1;97mbeforeEach\033[0m to isolate state across specs and prevent test pollution.
+  3. Use \033[1;97mexpect(state).toEventually(beTrue())\033[0m for background async state updates.
+
+  \033[1;97m📝 PRODUCTION STARTER TEMPLATE\033[0m
+  \033[90m----------------------------------------------------------------------\033[0m
+\033[97mimport Quick
 import Nimble
 @testable import MyApp
 
-final class CartSpec: AsyncSpec {
+final class DocumentProcessorSpec: AsyncSpec {
     override class func spec() {
-        describe("Shopping Cart") {
-            var cart: ShoppingCart!
+        describe("DocumentProcessor Pipeline") {
+            var processor: DocumentProcessor!
+            var mockScanner: MockScannerService!
 
             beforeEach {
-                cart = ShoppingCart()
+                mockScanner = MockScannerService()
+                processor = DocumentProcessor(scannerService: mockScanner)
             }
 
-            context("when an item is added") {
-                it("increases total price") {
-                    cart.add(item: Item(price: 19.99))
-                    expect(cart.total).to(equal(19.99))
+            context("when a valid document is imported") {
+                beforeEach {
+                    mockScanner.stubbedResult = .success(DocumentData.sample)
+                }
+
+                it("processes OCR text and transitions state to completed") {
+                    await processor.processDocument(id: "doc-123")
+                    
+                    expect(processor.state).to(equal(.completed))
+                    expect(processor.extractedText).to(contain("INVOICE"))
+                }
+            }
+
+            context("when scanning fails with network timeout") {
+                beforeEach {
+                    mockScanner.stubbedResult = .failure(.timeout)
+                }
+
+                it("sets error message and enables retry button") {
+                    await processor.processDocument(id: "doc-123")
+                    
+                    expect(processor.state).to(equal(.failed(reason: "timeout")))
+                    expect(processor.canRetry).to(beTrue())
                 }
             }
         }
     }
-}
-```""")
+}\033[0m
+  \033[90m----------------------------------------------------------------------\033[0m
+  \033[1;92m======================================================================\033[0m""")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "4":
                 clear_screen()
@@ -2691,18 +2808,26 @@ final class CartSpec: AsyncSpec {
 
 @Suite("Sample Orchestrator Suite")
 struct SampleSwiftTestingTests {{
-    @Test("Basic arithmetic validation")
+
+    @Test("Basic arithmetic validation with expect")
     func basicAssertion() {{
         #expect(2 + 2 == 4)
     }}
 
-    @Test("Parameterized calculation test", arguments: [
+    @Test("Parameterized calculation validation", arguments: [
         (2, 3, 5),
         (10, 20, 30),
         (-5, 5, 0)
     ])
     func parameterizedTest(a: Int, b: Int, expected: Int) {{
         #expect(a + b == expected)
+    }}
+
+    @Test("Async requirement verification")
+    func asyncRequirement() async throws {{
+        let value: Int? = 42
+        let unwrapped = try #require(value, "Value must be present")
+        #expect(unwrapped > 0)
     }}
 }}
 """
