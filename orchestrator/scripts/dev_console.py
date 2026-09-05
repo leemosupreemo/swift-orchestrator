@@ -4200,12 +4200,15 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             navigation_options = []
 
             # 2. Status-Specific Actions
+            is_bug_job = str(job_type).lower() in {"bug-fix", "bug-investigate", "bug", "quick-fix", "quick"}
+
             if status == "planned":
                 if job_type == "feature-plan":
                     workflow_options.append(("a", "[\033[92mA\033[0m] Approve / Create Sub-tasks"))
                 else:
                     workflow_options.append(("s", "[\033[92mS\033[0m] Schedule & Dispatch"))
-                workflow_options.append(("f", "[\033[93mF\033[0m] Revise Plan (Update Scope & Tasks)"))
+                if not is_bug_job:
+                    workflow_options.append(("f", "[\033[93mF\033[0m] Revise Plan (Update Scope & Tasks)"))
             elif status == "scheduled":
                 workflow_options.append(("e", "[\033[92mE\033[0m] Execute (Worker Run)"))
             elif status == "debugging":
@@ -4222,15 +4225,11 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     workflow_options.append(("m", "[\033[92mM\033[0m] Merge & Mark Completed"))
                     workflow_options.append(("f", "[\033[93mF\033[0m] Deliver to Device (Firebase distribution)"))
                 
-                if job_type in {"feature-plan", "feature", "feature-design"}:
-                    workflow_options.append(("h", "[\033[1;93mH\033[0m] Report Bug or Missing Feature (Re-open & Fix)"))
-                elif job_type in {"bug-fix", "bug-investigate"}:
+                if is_bug_job:
                     workflow_options.append(("h", "[\033[1;91mH\033[0m] Bug Still Happening? (Re-open & Fix)"))
                 else:
-                    workflow_options.append(("h", "[\033[1;93mH\033[0m] Report Issue / Bug (Re-open & Fix)"))
-
-                if status == "review-needed":
-                    workflow_options.append(("t", "[\033[93mT\033[0m] Revise Plan & Scope (AI Re-planning)"))
+                    if status == "review-needed":
+                        workflow_options.append(("t", "[\033[93mT\033[0m] Revise Plan & Scope (AI Re-planning)"))
                 
                 # If there are tasks remaining, allow Resuming to the next task
                 if status == "review-needed" and tasks and len(completed) < len(tasks):
@@ -4238,7 +4237,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             elif status == "human-needed":
                 if job.get("branch"):
                     workflow_options.append(("f", "[\033[93mF\033[0m] Deliver to Device (Firebase distribution)"))
-                workflow_options.append(("t", "[\033[93mT\033[0m] Revise Plan & Scope (AI Re-planning)"))
+                if not is_bug_job:
+                    workflow_options.append(("t", "[\033[93mT\033[0m] Revise Plan & Scope (AI Re-planning)"))
                 workflow_options.append(("u", "[\033[92mU\033[0m] Resume Job"))
             elif status == "executing" or is_stalled:
                 workflow_options.append(("u", "[\033[93mU\033[0m] Resume Job"))
@@ -4247,7 +4247,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             if status not in ["completed", "discarded", "planned"]:
                 if status != "debugging":
                     workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous TDD Test Loop)"))
-                workflow_options.append(("r", "[\033[1;91mR\033[0m] Full Re-run \033[1;91m(Deletes existing changes & resets to Planned)\033[0m"))
+                workflow_options.append(("r", "[\033[1;91mR\033[0m] Reset & Rerun \033[1;91m(Stashes changes & resets to Planned)\033[0m"))
             
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
@@ -4627,14 +4627,20 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print("\n✅ Job status reset to Planned.")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "r":
-                open_action_screen("Full Re-run")
-                print("\033[1;91mWARNING: This will permanently delete local AI progress and code changes for this job.\033[0m")
-                print("Use this when the current attempt is not salvageable and the job should start over from planning.")
+                open_action_screen("Reset & Rerun")
+                print("\033[1;93mNotice: This will stash existing local code changes and reset the job to 'planned' for a fresh execution.\033[0m")
+                print("Use this when the current attempt is not salvageable and you want to start over while safely preserving your changes in git stash.")
                 print()
-                if prompt_confirm("Delete existing changes and restart this job?", default=False):
-                    # 1. Clean up local files
-                    print("\n      - Cleaning up existing changes...")
-                    perform_job_revert(job)
+                if prompt_confirm("Stash existing changes and restart this job?", default=False):
+                    # 1. Stash changes
+                    job_id = job.get("job_id", "job")
+                    stash_msg = f"orchestrator: reset-rerun {job_id} ({now_iso()})"
+                    print(f"\n      - Stashing existing changes: {stash_msg}...")
+                    stash_res = subprocess.run(["git", "stash", "push", "-u", "-m", stash_msg], cwd=str(ROOT), capture_output=True, text=True)
+                    if stash_res.returncode == 0:
+                        print(f"      - ✅ Saved changes to git stash: '{stash_msg}'")
+                    else:
+                        print(f"      - ⚠️  Git stash: {stash_res.stderr.strip() or stash_res.stdout.strip() or 'No local uncommitted changes to stash'}")
 
                     # 2. Add branch selection logic here
                     branch_options = ["new", "current-branch (git pull)", "manual (no git actions)"]
