@@ -1226,9 +1226,28 @@ class AppFeatureTests_{i}: XCTestCase {{
         self.assertNotIn("#79", row)
         self.assertIn("09/05", row)
 
+    def test_format_job_header_prominent_banner(self):
+        job1 = {
+            "job_id": "20260905-130559-bug-79",
+            "type": "bug",
+            "title": "Fix risk tab selection",
+        }
+        banner1 = dev_console.format_job_header(job1)
+        self.assertIn("===== [BUG] FIX RISK TAB SELECTION =====", banner1)
+        self.assertIn("====", banner1)
+
+        job2 = {
+            "job_id": "20260905-130559-report-80",
+            "type": "report",
+            "title": "[Report] Fix risk tab selection",
+        }
+        banner2 = dev_console.format_job_header(job2)
+        self.assertIn("===== [REPORT] FIX RISK TAB SELECTION =====", banner2)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

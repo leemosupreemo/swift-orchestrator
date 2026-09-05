@@ -600,6 +600,47 @@ def format_job_date(job: dict[str, Any]) -> str:
         return f"{job_id[4:6]}/{job_id[6:8]}"
     return "--/--"
 
+def format_job_header(job: dict[str, Any]) -> str:
+    raw_title = job.get("title", "Untitled Job")
+    clean_title = re.sub(r"^#\d+\s*", "", raw_title).strip()
+    clean_title = re.sub(r"^(bug|feature|coverage|design|report):\s*", "", clean_title, flags=re.I).strip()
+    
+    # Determine type tag
+    job_type = str(job.get("type", "job")).strip()
+    if clean_title.startswith("["):
+        full_title = clean_title.upper()
+    else:
+        tag = "REPORT" if "report" in job_type.lower() else (
+            "BUG" if "bug" in job_type.lower() else (
+                "FEATURE" if "feature" in job_type.lower() else (
+                    "COVERAGE" if "coverage" in job_type.lower() else (
+                        "DESIGN" if "design" in job_type.lower() else job_type.upper()
+                    )
+                )
+            )
+        )
+        full_title = f"[{tag}] {clean_title.upper()}"
+        
+    try:
+        cols, _ = os.get_terminal_size()
+    except Exception:
+        cols = 80
+        
+    safe_cols = max(40, cols - 2)
+    border = "=" * safe_cols
+    
+    inner_text = f"===== {full_title} ====="
+    if len(inner_text) < safe_cols:
+        padding = (safe_cols - len(inner_text)) // 2
+        title_line = " " * padding + inner_text
+    else:
+        title_line = inner_text[:safe_cols]
+        
+    return f"\n\033[1;96m{border}\033[0m\n\033[1;97m{title_line}\033[0m\n\033[1;96m{border}\033[0m"
+
+def print_job_header(job: dict[str, Any]) -> None:
+    print(format_job_header(job))
+
 def format_job_row(idx: int, job: dict[str, Any], title_width: int = 30) -> str:
     status_map = {
         "planned": "plan",
@@ -3851,7 +3892,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
         with StatusBar(job, sub_menu=True) as status_bar:
             status_bar.set_scroll_region()
 
-            print_header(job.get("title", "Untitled Job"))
+            print_job_header(job)
             print(f"Job ID: {format_job_id(job.get('job_id', 'unknown'))}")
             
             # Display Linked Logs
