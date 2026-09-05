@@ -173,12 +173,16 @@ def main() -> None:
             time.sleep(max(0, args.interval))
 
     report_lines = [
-        "# Simulator Visual Check",
+        "# 📱 Simulator Visual Check Report",
         "",
-        f"- Destination: `{destination}`",
-        f"- Bundle ID: `{bundle_id}`",
-        f"- App path: `{app_path}`",
-        f"- Build: `{'skipped' if args.no_build else 'passed'}`",
+        "## Overview",
+        f"- **Captured Scope:** Active foreground root view & initial UI state of `{bundle_id}` after launch.",
+        f"- **Screenshots Taken:** {len(screenshot_paths)} screenshot(s) (with {args.wait:.1f}s post-launch settle delay).",
+        f"- **Target Simulator:** `{destination}`",
+        f"- **Bundle Identifier:** `{bundle_id}`",
+        f"- **App Binary:** `{app_path}`",
+        f"- **Build Status:** `{'Skipped (reused binary)' if args.no_build else 'Passed'}`",
+        f"- **Output Folder:** [{out_dir.name}](file://{out_dir.resolve()})",
         "",
         "## Screenshots",
         "",
@@ -189,15 +193,29 @@ def main() -> None:
     )
     report_lines.extend([
         "",
-        "Review the screenshots for layout clipping, overlap, blank views, and incorrect positioning.",
+        "## Visual QA Checklist",
+        "- [ ] Verify root view layout and element alignment across safe area insets.",
+        "- [ ] Check for text clipping, missing labels, or truncated strings.",
+        "- [ ] Ensure light/dark color contrast and asset rendering look correct.",
+        "- [ ] Confirm that no unhandled blank, error, or loading freeze states occurred on startup.",
         "",
     ])
     write_text(out_dir / "report.md", "\n".join(report_lines))
 
-    print("\n# ✅ Simulator Visual Check Captured")
-    print(f"Report: {markdown_link('Open report', out_dir / 'report.md')}")
-    for path in screenshot_paths:
-        print(f"Screenshot: {markdown_link(path.name, path)}")
+    print("\n\033[1;92m======================================================================\033[0m")
+    print("   \033[1;92m📱 SIMULATOR VISUAL CHECK COMPLETE\033[0m")
+    print("\033[1;92m======================================================================\033[0m")
+    print(f"   \033[1;36m• Target App:\033[0m        \033[1;97m{bundle_id}\033[0m \033[90m({app_path.name})\033[0m")
+    print(f"   \033[1;36m• Scope Captured:\033[0m    \033[97mForeground root view & initial UI state after launch\033[0m")
+    print(f"   \033[1;36m• Screenshots:\033[0m       \033[1;93m{len(screenshot_paths)} screenshot(s)\033[0m \033[90m({args.wait:.1f}s post-launch settle delay)\033[0m")
+    print(f"   \033[1;36m• Target Device:\033[0m     \033[97m{destination}\033[0m")
+    print(f"   \033[1;36m• Output Folder:\033[0m     {markdown_link(str(out_dir.relative_to(ROOT)), out_dir)}")
+    print(f"   \033[1;36m• Visual Report:\033[0m     {markdown_link('Open report.md', out_dir / 'report.md')}")
+    if screenshot_paths:
+        print(f"   \033[1;36m• Captured Images:\033[0m")
+        for idx, path in enumerate(screenshot_paths, start=1):
+            print(f"     \033[90m- Screenshot #{idx}:\033[0m {markdown_link(path.name, path)}")
+    print("\033[1;92m======================================================================\033[0m\n")
     cleanup_logs(manual_base)
 
 
