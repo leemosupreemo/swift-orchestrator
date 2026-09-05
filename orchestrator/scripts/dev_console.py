@@ -2554,25 +2554,32 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             has_snapshot_testing = "import SnapshotTesting" in all_test_content or "assertSnapshot" in all_test_content
             has_quick_nimble = "import Quick" in all_test_content or "import Nimble" in all_test_content
 
-            st_status = "\033[92mIN USE\033[0m" if has_swift_testing else "\033[96mAVAILABLE\033[0m (Native Xcode 16+)"
-            snap_status = "\033[92mIN USE\033[0m" if has_snapshot_testing else "\033[90mNOT DETECTED\033[0m (SPM: swift-snapshot-testing)"
-            qn_status = "\033[92mIN USE\033[0m" if has_quick_nimble else "\033[90mNOT DETECTED\033[0m (SPM: Quick/Nimble)"
+            st_badge = "\033[1;92m[IN USE]\033[0m" if has_swift_testing else "\033[1;96m[AVAILABLE - Xcode 16+]\033[0m"
+            snap_badge = "\033[1;92m[IN USE]\033[0m" if has_snapshot_testing else "\033[90m[NOT DETECTED]\033[0m"
+            qn_badge = "\033[1;92m[IN USE]\033[0m" if has_quick_nimble else "\033[90m[NOT DETECTED]\033[0m"
+            xcb_badge = "\033[1;92m[INSTALLED]\033[0m" if has_xcbeautify else "\033[1;93m[NOT INSTALLED]\033[0m"
 
-            print("  \033[1;90m--- FRAMEWORK STATUS IN PROJECT ---\033[0m")
-            print(f"  \033[1;36m• Swift Testing (Native):\033[0m        {st_status}")
-            print(f"  \033[1;36m• Point-Free SnapshotTesting:\033[0m    {snap_status}")
-            print(f"  \033[1;36m• Quick & Nimble (BDD):\033[0m          {qn_status}")
-            print(f"  \033[1;36m• xcbeautify (CLI Formatter):\033[0m    {xcbeautify_status}")
+            print(f"  [\033[1;96m1\033[0m] \033[1;97mSwift Testing (Apple Native)\033[0m               {st_badge}")
+            print("      \033[90m• Macro-driven assertions (#expect, #require), traits & parameterized arguments\033[0m")
+            print("      \033[36m→ Select [1] to learn more, view macro cheat sheet & copy templates\033[0m")
             print()
-
-            print("  \033[1;90m--- GUIDES & ACTIONS ---\033[0m")
-            print("  [\033[1;96m1\033[0m] View Swift Testing Guide & Template (@Suite, @Test, #expect)")
-            print("  [\033[1;96m2\033[0m] View Point-Free SnapshotTesting Guide & Template (assertSnapshot)")
-            print("  [\033[1;96m3\033[0m] View Quick & Nimble BDD Guide & Template (describe/context/it)")
-            print("  [\033[1;96m4\033[0m] Generate Sample Swift Testing File for Your Project")
+            print(f"  [\033[1;96m2\033[0m] \033[1;97mPoint-Free SnapshotTesting\033[0m                 {snap_badge}")
+            print("      \033[90m• Pixel-accurate visual regression for SwiftUI views & data structure snapshots\033[0m")
+            print("      \033[36m→ Select [2] to learn more, view setup guide & copy templates\033[0m")
+            print()
+            print(f"  [\033[1;96m3\033[0m] \033[1;97mQuick & Nimble (BDD Testing)\033[0m               {qn_badge}")
+            print("      \033[90m• Behavior-driven DSL (describe/context/it) & fluent async matchers\033[0m")
+            print("      \033[36m→ Select [3] to learn more, view BDD workflow & copy templates\033[0m")
+            print()
+            print("  [\033[1;96m4\033[0m] \033[1;97mGenerate Sample Swift Testing File\033[0m")
+            print(f"      \033[90m• Creates a ready-to-run @Suite template inside\033[0m \033[93m{PROJECT_CONFIG.test_target or 'AppTests'}\033[0m")
+            print()
             if not has_xcbeautify:
-                print("  [\033[1;92mI\033[0m] Install xcbeautify (via Homebrew)")
-            print("  [\033[1;91mB\033[0m] Back")
+                print(f"  [\033[1;92mI\033[0m] \033[1;97mInstall xcbeautify (CLI Formatter)\033[0m         {xcb_badge}")
+                print("      \033[90m• Formats xcodebuild test execution into clean, colorized terminal output\033[0m")
+                print("      \033[36m→ Select [I] to install via Homebrew (brew install xcbeautify)\033[0m")
+                print()
+            print("  [\033[1;91mB\033[0m] \033[1;97mBack to Manage Tests Menu\033[0m")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
