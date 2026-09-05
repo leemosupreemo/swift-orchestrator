@@ -2557,26 +2557,29 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
             st_badge = "\033[1;92m[IN USE]\033[0m" if has_swift_testing else "\033[1;96m[AVAILABLE - Xcode 16+]\033[0m"
             snap_badge = "\033[1;92m[IN USE]\033[0m" if has_snapshot_testing else "\033[90m[NOT DETECTED]\033[0m"
             qn_badge = "\033[1;92m[IN USE]\033[0m" if has_quick_nimble else "\033[90m[NOT DETECTED]\033[0m"
-            xcb_badge = "\033[1;92m[INSTALLED]\033[0m" if has_xcbeautify else "\033[1;93m[NOT INSTALLED]\033[0m"
-
             print(f"  [\033[1;96m1\033[0m] \033[1;97mSwift Testing (Apple Native)\033[0m               {st_badge}")
-            print("      \033[90m• Macro-driven assertions (#expect, #require), traits & parameterized arguments\033[0m")
-            print("      \033[36m→ Select [1] to learn more, view macro cheat sheet & copy templates\033[0m")
+            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mCore business logic, ViewModels & async code (Replaces legacy XCTest)\033[0m")
+            print("      \033[90m• Pain Solved:\033[0m      \033[90mEliminates XCTestCase boilerplate, subclassing & manual async waiters\033[0m")
+            print("      \033[36m→ Select [1] to view macro cheat sheet (#expect, #require), traits & starter template\033[0m")
             print()
             print(f"  [\033[1;96m2\033[0m] \033[1;97mPoint-Free SnapshotTesting\033[0m                 {snap_badge}")
-            print("      \033[90m• Pixel-accurate visual regression for SwiftUI views & data structure snapshots\033[0m")
-            print("      \033[36m→ Select [2] to learn more, view setup guide & copy templates\033[0m")
+            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mCatch silent visual bugs (clipped text, broken layouts, Dark Mode)\033[0m")
+            print("      \033[1;95m• Why Beyond Native:\033[0m \033[90mSwift Testing checks data in memory, NOT rendered pixels on screen\033[0m")
+            print("      \033[36m→ Select [2] to view visual regression guide, SPM setup & SwiftUI snapshot template\033[0m")
             print()
             print(f"  [\033[1;96m3\033[0m] \033[1;97mQuick & Nimble (BDD Testing)\033[0m               {qn_badge}")
-            print("      \033[90m• Behavior-driven DSL (describe/context/it) & fluent async matchers\033[0m")
-            print("      \033[36m→ Select [3] to learn more, view BDD workflow & copy templates\033[0m")
+            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mMulti-step async workflows, state machines & specs with polling matchers\033[0m")
+            print("      \033[1;95m• Why Beyond Native:\033[0m \033[90mHierarchical before/after contexts & automatic toEventually async polling\033[0m")
+            print("      \033[36m→ Select [3] to view BDD specification patterns & async matcher template\033[0m")
             print()
             print("  [\033[1;96m4\033[0m] \033[1;97mGenerate Sample Swift Testing File\033[0m")
-            print(f"      \033[90m• Creates a ready-to-run @Suite template inside\033[0m \033[93m{PROJECT_CONFIG.test_target or 'AppTests'}\033[0m")
+            print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mInstant canary test to verify Xcode 16+ toolchain & module linking\033[0m")
+            print(f"      \033[90m• Why Choose This:\033[0m  \033[90m1-click test file creation in \033[93m{PROJECT_CONFIG.test_target or 'AppTests'}\033[90m with zero manual setup\033[0m")
+            print("      \033[36m→ Select [4] to generate sample test file & test your build toolchain\033[0m")
             print()
             if not has_xcbeautify:
                 print(f"  [\033[1;92mI\033[0m] \033[1;97mInstall xcbeautify (CLI Formatter)\033[0m         {xcb_badge}")
-                print("      \033[90m• Formats xcodebuild test execution into clean, colorized terminal output\033[0m")
+                print("      \033[1;93m• Job To Be Done:\033[0m   \033[97mStrip 10,000+ lines of raw xcodebuild compiler spam into 1-line pass/fail\033[0m")
                 print("      \033[36m→ Select [I] to install via Homebrew (brew install xcbeautify)\033[0m")
                 print()
             print("  [\033[1;91mB\033[0m] \033[1;97mBack to Manage Tests Menu\033[0m")
@@ -2596,10 +2599,17 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
                 clear_screen()
                 print_header("Swift Testing Framework (Apple Native)")
                 print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 OVERVIEW\033[0m
+  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m
   Swift Testing is Apple's next-generation testing framework introduced in Xcode 16.
   Built with Swift macros, it replaces XCTest with expressive syntax, declarative
   traits, parameterized arguments, and structured concurrency support.
+
+  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m
+  • No more inheriting from XCTestCase classes or managing reference cycle leaks.
+  • Rich runtime diagnostics: #expect shows exact left vs right values on failure.
+  • Safe early exit: #require unwraps optionals or aborts without guard boilerplate.
+  • Parameterized testing: Test dozens of inputs in 1 test function (arguments: [...]).
+  • Native async/await support without XCTestExpectation waiters.
 
   \033[1;97m🔗 DOCUMENTATION & OFFICIAL RESOURCES\033[0m
   \033[1;36m• Apple Developer Docs:\033[0m  https://developer.apple.com/documentation/testing
@@ -2661,10 +2671,21 @@ struct AuthenticationTests {
                 clear_screen()
                 print_header("Point-Free SnapshotTesting (Visual & Data Regression)")
                 print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 OVERVIEW\033[0m
+  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m
   SnapshotTesting automatically captures pixel-accurate visual snapshots (images) or
   structured data representations (JSON, text dump) of your SwiftUI views, view
   controllers, and models, instantly catching visual or architectural regressions.
+
+  \033[1;97m💡 WHY GO BEYOND NATIVE TESTING?\033[0m
+  • Native Swift Testing and XCTest only inspect variables in memory (e.g. state == .loaded).
+  • They CANNOT detect clipped text, missing padding, Dynamic Type (accessibility sizes)
+    overflows, or invisible text in Dark Mode.
+  • SnapshotTesting renders actual views offscreen and diffs them against baseline images.
+
+  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m
+  • Eliminates tedious manual visual QA across dozens of screens and iOS devices.
+  • Prevents unintended layout breakage when refactoring design systems or shared styles.
+  • Automates visual verification directly in CI pull requests.
 
   \033[1;97m🔗 DOCUMENTATION & SPM PACKAGE\033[0m
   \033[1;36m• GitHub Repository:\033[0m  https://github.com/pointfreeco/swift-snapshot-testing
@@ -2729,10 +2750,23 @@ final class ProfileViewSnapshotTests: XCTestCase {
                 clear_screen()
                 print_header("Quick & Nimble (Behavior-Driven Development / BDD)")
                 print("""  \033[1;92m======================================================================\033[0m
-  \033[1;97m📌 OVERVIEW\033[0m
+  \033[1;97m📌 OVERVIEW & JOB TO BE DONE\033[0m
   Quick & Nimble provide a powerful Behavior-Driven Development (BDD) testing
   framework for Swift. Quick structures tests into expressive behavioral contexts,
   while Nimble delivers fluent, readable assertions with asynchronous polling.
+
+  \033[1;97m💡 WHY GO BEYOND NATIVE TESTING?\033[0m
+  • Swift Testing uses flat test functions. For complex multi-step state machines
+    (e.g. document scanning, checkout flows, upload pipelines), flat tests lead
+    to heavy duplication and ambiguous failure messages.
+  • Swift Testing lacks built-in async polling for states that settle asynchronously
+    over background queues (Combine, WebSocket events, CoreData sync).
+  • Nimble provides \033[1;93mexpect(state).toEventually(beTrue())\033[0m with automatic polling and timeouts.
+
+  \033[1;97m⚠️ PAIN POINTS SOLVED\033[0m
+  • Eliminates flaky async tests caused by arbitrary Task.sleep / sleep timeouts.
+  • Hierarchical beforeEach / afterEach scoping prevents state pollution between specs.
+  • Living documentation: Specs read as human-readable product requirements.
 
   \033[1;97m🔗 DOCUMENTATION & SPM PACKAGES\033[0m
   \033[1;36m• Quick Repository:\033[0m   https://github.com/Quick/Quick
@@ -2805,7 +2839,16 @@ final class DocumentProcessorSpec: AsyncSpec {
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "4":
                 clear_screen()
-                print_header("Generate Sample Test File")
+                print_header("Generate Sample Swift Testing File (Canary Suite)")
+                print("""  \033[1;92m======================================================================\033[0m
+  \033[1;97m📌 PURPOSE & BENEFITS (JOB TO BE DONE)\033[0m
+  • \033[1;93mToolchain Canary:\033[0m Verifies in 1 second that Xcode 16+ Swift Testing macros,
+    scheme target dependencies, and @testable imports compile without errors.
+  • \033[1;93mZero-Friction Template:\033[0m Creates a ready-to-run suite with working examples
+    of #expect, #require, and parameterized arguments: matrix testing.
+  • \033[1;93mAI & Team Reference:\033[0m Gives coding agents and developers a concrete file
+    to pattern-match for expanding test coverage across other app modules.
+  \033[1;92m======================================================================\033[0m\n""")
                 tt = PROJECT_CONFIG.test_target or "AppTests"
                 tt_dir = ROOT / tt
                 tt_dir.mkdir(parents=True, exist_ok=True)
@@ -2839,10 +2882,11 @@ struct SampleSwiftTestingTests {{
 }}
 """
                 if sample_file.exists():
-                    print(f"\n  \033[93mFile already exists: {sample_file.relative_to(ROOT)}\033[0m")
+                    print(f"  \033[93mFile already exists: {sample_file.relative_to(ROOT)}\033[0m")
                 else:
                     sample_file.write_text(sample_code, encoding="utf-8")
-                    print(f"\n  \033[1;92m✅ Created {sample_file.relative_to(ROOT)}\033[0m")
+                    print(f"  \033[1;92m✅ Created {sample_file.relative_to(ROOT)}\033[0m")
+                print(f"\n  \033[90mRun this test anytime by pressing 'A' (Run All Unit Tests) in the Manage Tests menu.\033[0m")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i" and not has_xcbeautify:
                 clear_screen()
@@ -2926,14 +2970,14 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
             else:
                 print("    \033[90mNo test suites found in " + PROJECT_CONFIG.test_target + ".\033[0m")
 
-            print("\n  \033[1;90m--- ACTIONS ---\033[0m")
-            print("  [\033[1;92mA\033[0m] Run All Unit Tests")
-            print("  [\033[1;96mC\033[0m] Calculate / Refresh Code Coverage")
-            print("  [\033[1;96mE\033[0m] Expand Unit Test Coverage (Create AI Coverage Job)")
-            print("  [\033[1;96mF\033[0m] Recommended Test Frameworks & Plugins (SnapshotTesting, etc.)")
-            print("  [\033[1;96mR\033[0m] Rename a Test Suite / File")
-            print("  [\033[1;96mV\033[0m] Simulator Visual Check (build, launch, screenshots)")
-            print("  [\033[1;91mB\033[0m] Back")
+            print("\n  \033[1;90m--- ACTIONS (JOBS TO BE DONE) ---\033[0m")
+            print("  [\033[1;92mA\033[0m] \033[1;97mRun All Unit Tests\033[0m                     \033[90m• Execute suite via xcodebuild & verify passes\033[0m")
+            print("  [\033[1;96mC\033[0m] \033[1;97mCalculate / Refresh Code Coverage\033[0m      \033[90m• Identify untested lines & generate delta report\033[0m")
+            print("  [\033[1;96mE\033[0m] \033[1;97mExpand Unit Test Coverage\033[0m              \033[90m• Autonomous AI agent writes tests for uncovered files\033[0m")
+            print("  [\033[1;96mF\033[0m] \033[1;97mTest Frameworks, Plugins & Canaries\033[0m    \033[90m• Swift Testing, SnapshotTesting, Quick/Nimble & sample file\033[0m")
+            print("  [\033[1;96mR\033[0m] \033[1;97mRename a Test Suite / File\033[0m             \033[90m• Clean up and organize test suite naming\033[0m")
+            print("  [\033[1;96mV\033[0m] \033[1;97mSimulator Visual Check\033[0m                 \033[90m• Build, launch in simulator & capture screenshots\033[0m")
+            print("  [\033[1;91mB\033[0m] \033[1;97mBack\033[0m")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
