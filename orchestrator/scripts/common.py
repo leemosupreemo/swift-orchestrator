@@ -349,6 +349,39 @@ def update_issue_status(issue_number: int, labels_to_add: str | list[str], label
             
     run(cmd, cwd=ROOT, check=False)
 
+
+def get_github_url(job: dict[str, Any]) -> tuple[str, str]:
+    """Returns (kind, url) e.g. ('Pull Request #75', 'https://github.com/...') or ('Issue #123', 'https://github.com/...')"""
+    pr_number = job.get("pr_number")
+    issue_number = job.get("issue_number")
+
+    if pr_number:
+        if job.get("pr_url"):
+            return f"Pull Request #{pr_number}", job["pr_url"]
+        try:
+            url = gh_text("pr", "view", str(pr_number), "--json", "url", "--jq", ".url")
+            if url and (url.startswith("http://") or url.startswith("https://")):
+                job["pr_url"] = url
+                return f"Pull Request #{pr_number}", url
+        except Exception:
+            pass
+        return f"Pull Request #{pr_number}", f"gh pr view {pr_number} --web"
+
+    if issue_number:
+        if job.get("issue_url"):
+            return f"Issue #{issue_number}", job["issue_url"]
+        try:
+            url = gh_text("issue", "view", str(issue_number), "--json", "url", "--jq", ".url")
+            if url and (url.startswith("http://") or url.startswith("https://")):
+                job["issue_url"] = url
+                return f"Issue #{issue_number}", url
+        except Exception:
+            pass
+        return f"Issue #{issue_number}", f"gh issue view {issue_number} --web"
+
+    return "GitHub", ""
+
+
 @dataclass
 class JobPaths:
     job_file: Path

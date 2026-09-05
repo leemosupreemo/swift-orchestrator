@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -4590,13 +4590,25 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 open_action_screen("Export Context")
                 run_script("export_job.py", [str(job["_path"])], sub_menu=True)
             elif choice == "g":
+                open_action_screen("View in GitHub")
+                label, url = get_github_url(job)
+
+                if url and (url.startswith("http://") or url.startswith("https://")):
+                    clickable_url = f"\033]8;;{url}\033\\{url}\033]8;;\033\\"
+                    print(f"🔗 {label}:")
+                    print(f"   \033[4;96m{clickable_url}\033[0m\n")
+                elif label:
+                    print(f"🔗 {label}\n")
+
                 if job.get("pr_number"):
                     print(f"Opening PR #{job['pr_number']} in browser...")
                     subprocess.run(["gh", "pr", "view", str(job["pr_number"]), "--web"], cwd=str(ROOT))
-                else:
+                elif job.get("issue_number"):
                     print(f"Opening Issue #{job['issue_number']} in browser...")
                     subprocess.run(["gh", "issue", "view", str(job["issue_number"]), "--web"], cwd=str(ROOT))
-                
+                else:
+                    print("No PR or Issue associated with this job.")
+
                 # Clear any leaking output from gh
                 sys.stdout.write("\r\033[K")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")

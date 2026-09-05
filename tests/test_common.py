@@ -698,6 +698,25 @@ class FollowupAndLogTests(unittest.TestCase):
             plain = common.format_file_link(p)
             self.assertEqual(plain, f"{resolved} (file://{resolved})")
 
+    def test_get_github_url_returns_cached_or_queries_gh(self) -> None:
+        job_pr = {
+            "job_id": "test-job",
+            "pr_number": 75,
+            "pr_url": "https://github.com/leemosupreemo/Themis/pull/75"
+        }
+        label, url = common.get_github_url(job_pr)
+        self.assertEqual(label, "Pull Request #75")
+        self.assertEqual(url, "https://github.com/leemosupreemo/Themis/pull/75")
+
+        job_issue = {
+            "job_id": "test-job",
+            "issue_number": 79,
+            "issue_url": "https://github.com/leemosupreemo/Themis/issues/79"
+        }
+        label_issue, url_issue = common.get_github_url(job_issue)
+        self.assertEqual(label_issue, "Issue #79")
+        self.assertEqual(url_issue, "https://github.com/leemosupreemo/Themis/issues/79")
+
 
 if __name__ == "__main__":
     unittest.main()
