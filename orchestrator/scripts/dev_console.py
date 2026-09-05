@@ -4342,9 +4342,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     curr_defaults = resolve_model_selection_defaults(curr_allowed_ids, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[1;92mF\033[0m] Free Models Only  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
-                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. Press [\033[1;92mF\033[0m] for Free Tier models only."
-                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "f", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
+                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m."
+                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             job["allowed_models"] = [value_map[label] for label in new_labels]
                             save_job(job)
@@ -4358,18 +4358,6 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             break
                         elif exc.key == "k":
                             handle_api_keys(session_allowed_machines, curr_allowed_ids)
-                            continue
-                        elif exc.key == "f":
-                            from model_registry import get_free_models
-                            free_ids = {m.id for m in get_free_models()}
-                            free_selected = [m_id for label, m_id in value_map.items() if m_id in free_ids]
-                            if free_selected:
-                                job["allowed_models"] = free_selected
-                                save_job(job)
-                                print(f"\n✅ Restricted job allowed models to Free Tier ({len(free_selected)} models).")
-                            else:
-                                print("\n⚠️ No free models currently detected in enabled services.")
-                            input("\n\033[1;96mTap Enter to continue...\033[0m")
                             continue
                         elif exc.key in ["r", "d"]:
                             from model_registry import sync_models
@@ -5775,9 +5763,9 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     curr_defaults = resolve_model_selection_defaults(session_allowed_models, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[1;92mF\033[0m] Free Models Only  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
-                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m. Press [\033[1;92mF\033[0m] for Free Tier models only."
-                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "f", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
+                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m."
+                        new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
                             session_allowed_models = [value_map[label] for label in new_labels]
                         else:
@@ -5789,17 +5777,6 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                             break
                         elif exc.key == "k":
                             handle_api_keys(session_allowed_machines, session_allowed_models)
-                            continue
-                        elif exc.key == "f":
-                            from model_registry import get_free_models
-                            free_ids = {m.id for m in get_free_models()}
-                            free_selected = [m_id for label, m_id in value_map.items() if m_id in free_ids]
-                            if free_selected:
-                                session_allowed_models = free_selected
-                                print(f"\n✅ Restricted session allowed models to Free Tier ({len(free_selected)} models).")
-                            else:
-                                print("\n⚠️ No free models currently detected in enabled services.")
-                            input("\n\033[1;96mTap Enter to continue...\033[0m")
                             continue
                         elif exc.key in ["r", "d"]:
                             from model_registry import sync_models

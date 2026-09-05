@@ -406,17 +406,8 @@ def main(args_override: list[str] | None = None) -> None:
         allowed_models = args.allowed_models.split(",")
     else:
         print("\nLLM Model Selection (restrict workflow to these models):")
-        footer = "[\033[1;92mF\033[0m] Select Free Models Only  [\033[1;91mB\033[0m] Back"
-        try:
-            allowed_models = prompt_checkbox("select models", all_models, DEFAULT_FALLBACKS, extra_keys=["f"], footer=footer)
-        except KeyInterruptException as exc:
-            if exc.key == "f":
-                from model_registry import get_free_models
-                free_models = [m.id for m in get_free_models() if m.id in all_models]
-                allowed_models = free_models if free_models else DEFAULT_FALLBACKS
-                print(f"\n✅ Restricted model selection to Free Tier models ({len(allowed_models)} models).")
-            else:
-                raise
+        footer = "[\033[1;91mB\033[0m] Back"
+        allowed_models = prompt_checkbox("select models", all_models, DEFAULT_FALLBACKS, footer=footer)
     
     if not allowed_models:
         print("\n\033[1;91m⚠️  ERROR: No AI models selected.\033[0m")
