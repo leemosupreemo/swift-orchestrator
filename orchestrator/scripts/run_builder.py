@@ -64,7 +64,10 @@ Constraints:
 ''' + "\n".join(f'- {x}' for x in plan.get("constraints", [])) + f'''
 
 Likely files:
-''' + "\n".join(f'- {x}' for x in plan.get("likely_files", [])) + f"\n{references}\n"
+''' + "\n".join(f'- {x}' for x in plan.get("likely_files", [])) + (f'''
+
+Test recommendations (TDD):
+''' + "\n".join(f'- {x}' for x in plan.get("test_recommendations", [])) if plan.get("test_recommendations") else "") + f"\n{references}\n"
     elif job["type"] == "feature-plan":
         return f'''# Feature task brief
 

@@ -4246,7 +4246,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             # Global actions available for most non-archived states
             if status not in ["completed", "discarded", "planned"]:
                 if status != "debugging":
-                    workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous Test Loop)"))
+                    workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous TDD Test Loop)"))
                 workflow_options.append(("r", "[\033[1;91mR\033[0m] Full Re-run \033[1;91m(Deletes existing changes & resets to Planned)\033[0m"))
             
             ai_modified = job.get("ai_modified_files", [])
@@ -4861,9 +4861,9 @@ def view_job_brief_summary(job: dict[str, Any]) -> None:
 
 def prompt_autofix_iteration_settings(job: dict[str, Any]) -> tuple[str | None, int]:
     print_header("Auto-Fix / Iterate")
-    print("\033[90mThe AI will inspect the current job, linked logs, and recent output, then run another fix-and-verify loop.\033[0m")
+    print("\033[90mThe AI will inspect the current job, linked logs, and failing test output, apply a targeted fix, and rerun the job's TDD test suite to verify the fix.\033[0m")
     print()
-    print("Use this when the implementation is close but still failing tests, review, or expected behavior.")
+    print("Use this when the implementation is close but still failing unit tests, review checks, or expected behavior.")
     print()
     print("Optional guidance examples:")
     print("  - Focus on the checkout retry failure in the latest build log.")
