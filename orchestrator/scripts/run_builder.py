@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from common import OUTPUT_DIR, PROMPTS_DIR, ROOT, read_json, write_text, print_phase, StatusBar, format_clarification_history
+from common import OUTPUT_DIR, PROMPTS_DIR, ROOT, read_json, write_text, print_phase, StatusBar, format_clarification_history, format_investigation_history
 from llm import run_llm, extract_json_block
 from model_router import ModelRole
 from run_build_and_tests import run_build_and_tests
@@ -26,6 +26,11 @@ def make_brief(job: dict) -> str:
     history = job.get("clarification_history", [])
     if history:
         clarification_text = f"\n---\n{format_clarification_history(history)}\n"
+
+    investigation_text = ""
+    inv_history = format_investigation_history(job)
+    if inv_history:
+        investigation_text = f"\n---\n{inv_history}\n"
 
     verification_text = ""
     if verification:
@@ -50,6 +55,7 @@ Title: {job["title"]}
 Summary:
 {plan.get("summary", "No summary provided.")}
 {clarification_text}
+{investigation_text}
 {verification_text}
 Repro steps:
 ''' + "\n".join(f'- {x}' for x in plan.get("repro_steps", [])) + f'''
@@ -77,6 +83,7 @@ Title: {job["title"]}
 Summary:
 {plan.get("summary", "No summary provided.")}
 {clarification_text}
+{investigation_text}
 
 Acceptance criteria:
 ''' + "\n".join(f'- {x}' for x in plan.get("acceptance_criteria", [])) + f'''
@@ -95,9 +102,12 @@ Instructions:
 Summary:
 {plan.get("summary", "No summary provided.")}
 {clarification_text}
+{investigation_text}
 
 Acceptance criteria:
-''' + "\n".join(f'- {x}' for x in plan.get("acceptance_criteria", [])) + f"\n{references}\n"
+''' + "\n".join(f'- {x}' for x in plan.get("acceptance_criteria", [])) + f'''
+Likely files:
+''' + "\n".join(f'- {x}' for x in plan.get("likely_files", [])) + f"\n{references}\n"
     else:
         return f'''# Feature task brief
 
@@ -107,6 +117,7 @@ Title: {job["title"]}
 Summary:
 {plan.get("summary", "No summary provided.")}
 {clarification_text}
+{investigation_text}
 {verification_text}
 {references}
 '''

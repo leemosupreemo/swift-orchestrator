@@ -604,6 +604,84 @@ class ClarificationHelperTests(unittest.TestCase):
         self.assertEqual(common.format_clarification_history([]), "")
         self.assertEqual(common.format_clarification_history(None), "")
 
+    def test_record_interactive_investigation_persists_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_output = Path(tmp) / ".orchestrator" / "output"
+            old_output = common.OUTPUT_DIR
+            common.OUTPUT_DIR = tmp_output
+            try:
+                job = {
+                    "job_id": "test-job-456",
+                    "issue_number": 456,
+                    "title": "Fix Risk View",
+                }
+                job = common.record_interactive_investigation(
+                    job,
+                    tool="Codex CLI",
+                    cli_key="codex",
+                    duration="1m 45s",
+                    notes="Identified bug in RiskViewModel state machine",
+                    new_commits=["a1b2c3d Fix state transition in risk tab"],
+                    duration_seconds=105,
+                )
+                self.assertEqual(len(job["interactive_investigations"]), 1)
+                inv = job["interactive_investigations"][0]
+                self.assertEqual(inv["tool"], "Codex CLI")
+                self.assertEqual(inv["cli_key"], "codex")
+                self.assertEqual(inv["duration"], "1m 45s")
+                self.assertEqual(inv["duration_seconds"], 105)
+                self.assertEqual(inv["notes"], "Identified bug in RiskViewModel state machine")
+                self.assertEqual(inv["new_commits"], ["a1b2c3d Fix state transition in risk tab"])
+
+                self.assertEqual(len(job["investigation_notes"]), 1)
+                self.assertEqual(job["investigation_notes"][0]["note"], "Identified bug in RiskViewModel state machine")
+
+                self.assertTrue(job["updated_at"])
+                self.assertTrue(job["llm_sessions"])
+
+                inv_file = tmp_output / "test-job-456" / "investigations.md"
+                self.assertTrue(inv_file.exists())
+                content = inv_file.read_text(encoding="utf-8")
+                self.assertIn("Interactive Investigation Log for Job #456: Fix Risk View", content)
+                self.assertIn("## Session 1: Codex CLI", content)
+                self.assertIn("Identified bug in RiskViewModel state machine", content)
+                self.assertIn("a1b2c3d Fix state transition in risk tab", content)
+            finally:
+                common.OUTPUT_DIR = old_output
+
+    def test_format_investigation_history_renders_markdown(self) -> None:
+        job = {
+            "interactive_investigations": [
+                {
+                    "tool": "Codex CLI",
+                    "timestamp": "2026-09-06T14:30:00-05:00",
+                    "duration": "2m 10s",
+                    "notes": "Traced memory leak to unclosed sink",
+                    "new_commits": ["1234abc Clean up Combine subscription"],
+                },
+                {
+                    "tool": "Antigravity CLI (agy)",
+                    "timestamp": "2026-09-06T14:45:00-05:00",
+                    "duration": "45s",
+                    "notes": "Verified unit test passes",
+                    "new_commits": [],
+                }
+            ]
+        }
+        md = common.format_investigation_history(job)
+        self.assertIn("### 🔍 Interactive Investigation Findings & CLI Notes", md)
+        self.assertIn("1. **Codex CLI | 2m 10s | 2026-09-06 14:30**", md)
+        self.assertIn("Traced memory leak to unclosed sink", md)
+        self.assertIn("`1234abc Clean up Combine subscription`", md)
+        self.assertIn("2. **Antigravity CLI (agy) | 45s | 2026-09-06 14:45**", md)
+        self.assertIn("Verified unit test passes", md)
+
+    def test_format_investigation_history_handles_empty(self) -> None:
+        self.assertEqual(common.format_investigation_history({}), "")
+        self.assertEqual(common.format_investigation_history([]), "")
+        self.assertEqual(common.format_investigation_history(None), "")
+
+
 
 class FollowupAndLogTests(unittest.TestCase):
     def test_find_latest_runtime_log_discovers_newest_file(self) -> None:

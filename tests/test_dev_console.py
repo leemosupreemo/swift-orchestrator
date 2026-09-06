@@ -1327,6 +1327,106 @@ class AppFeatureTests_{i}: XCTestCase {{
         self.assertTrue(len(claude_calls) > 0)
         self.assertIn("Job #999: Refactor router", claude_calls[0][1])
 
+    def test_generate_chat_context_bundles_investigations_and_diff(self):
+        job = {
+            "job_id": "test-job-ctx-1",
+            "issue_number": 55,
+            "title": "Fix crash on launch",
+            "status": "debugging",
+            "branch": "feature/fix-crash",
+            "base_branch": "main",
+            "interactive_investigations": [
+                {
+                    "tool": "Codex CLI",
+                    "timestamp": "2026-09-06T14:00:00-05:00",
+                    "duration": "1m 15s",
+                    "notes": "Found nil unwrap in AppDelegate",
+                    "new_commits": ["abc1234 Guard against nil config"],
+                }
+            ],
+        }
+        bundle, ctx_path = dev_console.generate_chat_context(job)
+        self.assertIn("# Context for Job #55: Fix crash on launch", bundle)
+        self.assertIn("## Prior Investigation Findings & CLI Notes", bundle)
+        self.assertIn("Codex CLI | 1m 15s | 2026-09-06 14:00", bundle)
+        self.assertIn("Found nil unwrap in AppDelegate", bundle)
+        self.assertIn("`abc1234 Guard against nil config`", bundle)
+        self.assertTrue(ctx_path.exists())
+
+    @patch("dev_console.shutil.which", side_effect=lambda x: f"/usr/local/bin/{x}" if x == "codex" else None)
+    @patch("dev_console.sys.stdin.isatty", return_value=True)
+    @patch("dev_console.prompt_input", side_effect=["1", "Root cause identified in DatabasePool", "b"])
+    @patch("dev_console.subprocess.run")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.save_job")
+    def test_handle_ask_ai_captures_notes_and_commits_into_job_and_investigations_file(
+        self, mock_save, _mock_clear, mock_subproc, _mock_prompt_input, _mock_isatty, _mock_which
+    ):
+        job = {
+            "job_id": "test-job-investigate-1",
+            "issue_number": 88,
+            "title": "Investigate sqlite lock contention",
+            "status": "debugging",
+            "branch": "feature/sqlite-fix",
+            "base_branch": "main",
+        }
+
+        # Mock git rev-parse HEAD (initial), codex run, git log (new commit)
+        def subproc_side_effect(cmd, *args, **kwargs):
+            m = MagicMock()
+            m.returncode = 0
+            if isinstance(cmd, list):
+                if cmd[:2] == ["git", "rev-parse"]:
+                    m.stdout = "head1111\n"
+                elif cmd[:2] == ["git", "log"]:
+                    m.stdout = "head2222 Add WAL mode pragma\n"
+                elif cmd[0] == "codex":
+                    m.stdout = ""
+                else:
+                    m.stdout = ""
+            else:
+                m.stdout = ""
+            m.stderr = ""
+            return m
+
+        mock_subproc.side_effect = subproc_side_effect
+
+        dev_console.handle_ask_ai(job, ["codex"])
+
+        self.assertIn("interactive_investigations", job)
+        self.assertEqual(len(job["interactive_investigations"]), 1)
+        inv = job["interactive_investigations"][0]
+        self.assertEqual(inv["tool"], "Codex CLI")
+        self.assertEqual(inv["cli_key"], "codex")
+        self.assertEqual(inv["notes"], "Root cause identified in DatabasePool")
+        self.assertEqual(inv["new_commits"], ["head2222 Add WAL mode pragma"])
+
+        self.assertIn("investigation_notes", job)
+        self.assertEqual(job["investigation_notes"][0]["note"], "Root cause identified in DatabasePool")
+
+        mock_save.assert_called_with(job)
+
+        inv_file = dev_console.OUTPUT_DIR / "test-job-investigate-1" / "investigations.md"
+        self.assertTrue(inv_file.exists())
+        inv_content = inv_file.read_text(encoding="utf-8")
+        self.assertIn("Investigate sqlite lock contention", inv_content)
+        self.assertIn("Root cause identified in DatabasePool", inv_content)
+        self.assertIn("head2222 Add WAL mode pragma", inv_content)
+
+    @patch("dev_console.print_header")
+    def test_view_job_brief_summary_renders_investigations(self, _mock_header):
+        job_id = "test-job-view-inv"
+        job_dir = dev_console.OUTPUT_DIR / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        inv_file = job_dir / "investigations.md"
+        inv_file.write_text("## Session 1: Codex CLI\n- Notes: Fixed bug", encoding="utf-8")
+
+        job = {"job_id": job_id, "title": "Test Inv View"}
+        with patch("builtins.print") as mock_print:
+            dev_console.view_job_brief_summary(job)
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Fixed bug", printed)
+
 if __name__ == "__main__":
     unittest.main()
 

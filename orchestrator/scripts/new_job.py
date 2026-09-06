@@ -830,6 +830,8 @@ def main(args_override: list[str] | None = None) -> None:
             "plan": plan,
             "llm_sessions": llm_sessions,
             "clarification_history": clarification_history if clarification_history else job.get("clarification_history", []),
+            "interactive_investigations": existing_job.get("interactive_investigations", []) if existing_job else job.get("interactive_investigations", []),
+            "investigation_notes": existing_job.get("investigation_notes", []) if existing_job else job.get("investigation_notes", []),
         })
         
         # Special override for design-to-feature transition

@@ -191,6 +191,155 @@ def format_clarification_history(history: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def record_interactive_investigation(
+    job: dict[str, Any],
+    tool: str,
+    cli_key: str,
+    duration: str,
+    notes: str = "",
+    new_commits: list[str] | None = None,
+    duration_seconds: int = 0,
+) -> dict[str, Any]:
+    """Records an interactive AI CLI session and developer notes into the job and persists an investigations markdown log."""
+    ts = now_iso()
+    new_commits_list = list(new_commits or [])
+    notes_clean = notes.strip() if isinstance(notes, str) else ""
+
+    session_entry = {
+        "tool": tool,
+        "cli_key": cli_key,
+        "timestamp": ts,
+        "duration": duration,
+        "duration_seconds": duration_seconds,
+        "notes": notes_clean,
+        "new_commits": new_commits_list,
+    }
+    investigations = job.setdefault("interactive_investigations", [])
+    investigations.append(session_entry)
+
+    if notes_clean:
+        notes_list = job.setdefault("investigation_notes", [])
+        notes_list.append({
+            "tool": tool,
+            "note": notes_clean,
+            "timestamp": ts,
+            "commits": new_commits_list,
+        })
+
+    # Record into llm_sessions
+    import time
+    session_id = f"cli-{cli_key}-{int(time.time())}"
+    job.setdefault("llm_sessions", []).append({
+        "id": session_id,
+        "model": tool,
+        "timestamp": ts,
+        "tool": cli_key,
+    })
+
+    job["updated_at"] = ts
+
+    # Write to .orchestrator/output/<job_id>/investigations.md
+    job_id = job.get("job_id")
+    if job_id:
+        out_dir = OUTPUT_DIR / job_id
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            inv_file = out_dir / "investigations.md"
+
+            issue_num = job.get("issue_number", "")
+            title = job.get("title", "")
+
+            md_lines = [
+                f"# Interactive Investigation Log for Job #{issue_num}: {title}",
+                f"**Job ID**: `{job_id}`",
+                f"**Updated**: {ts}",
+                "",
+            ]
+            for idx, item in enumerate(investigations, 1):
+                i_tool = item.get("tool", "AI CLI")
+                i_dur = item.get("duration", "")
+                i_ts = item.get("timestamp", "")
+                i_notes = item.get("notes", "") or item.get("note", "")
+                i_commits = item.get("new_commits", [])
+
+                md_lines.append(f"## Session {idx}: {i_tool} ({i_ts[:16].replace('T', ' ') if i_ts else 'N/A'})")
+                if i_dur:
+                    md_lines.append(f"- **Duration**: {i_dur}")
+                md_lines.append(f"- **Notes / Findings**: {i_notes if i_notes else '(No notes captured)'}")
+                if i_commits:
+                    md_lines.append(f"- **Commits Made**:")
+                    for c in i_commits:
+                        md_lines.append(f"  - `{c}`")
+                md_lines.append("")
+
+            inv_file.write_text("\n".join(md_lines), encoding="utf-8")
+        except Exception:
+            pass
+
+    return job
+
+
+def format_investigation_history(job_or_investigations: dict[str, Any] | list[dict[str, Any]] | None) -> str:
+    """Formats interactive investigation sessions and developer notes as markdown for injecting into LLM prompts and briefs."""
+    if not job_or_investigations:
+        return ""
+
+    if isinstance(job_or_investigations, dict):
+        investigations = job_or_investigations.get("interactive_investigations", [])
+        notes = job_or_investigations.get("investigation_notes", [])
+    elif isinstance(job_or_investigations, list):
+        investigations = job_or_investigations
+        notes = []
+    else:
+        return ""
+
+    if not investigations and not notes:
+        return ""
+
+    lines = ["### 🔍 Interactive Investigation Findings & CLI Notes"]
+    if investigations:
+        for idx, inv in enumerate(investigations, 1):
+            tool = inv.get("tool") or inv.get("cli_key", "AI CLI")
+            ts = inv.get("timestamp", "")
+            duration = inv.get("duration", "")
+            meta_parts = [tool]
+            if duration:
+                meta_parts.append(duration)
+            if ts:
+                meta_parts.append(ts[:16].replace("T", " "))
+            header = f"{idx}. **{' | '.join(meta_parts)}**"
+            lines.append(header)
+
+            note_content = inv.get("notes") or inv.get("note")
+            if note_content:
+                lines.append(f"   - **Findings/Notes**: {note_content}")
+
+            commits = inv.get("new_commits", [])
+            if commits:
+                lines.append(f"   - **Commits Made**:")
+                for c in commits:
+                    lines.append(f"     - `{c}`")
+    elif notes:
+        for idx, item in enumerate(notes, 1):
+            if isinstance(item, dict):
+                tool = item.get("tool", "AI CLI")
+                note_text = item.get("note", "")
+                ts = item.get("timestamp", "")
+                prefix = f"{idx}. **{tool}**"
+                if ts:
+                    prefix += f" ({ts[:16].replace('T', ' ')})"
+                lines.append(f"{prefix}: {note_text}")
+                commits = item.get("commits", [])
+                if commits:
+                    for c in commits:
+                        lines.append(f"   - Commit: `{c}`")
+            else:
+                lines.append(f"{idx}. {item}")
+
+    return "\n".join(lines)
+
+
+
 def find_latest_runtime_log(job_id: Optional[str] = None) -> Optional[str]:
     """Finds the most recent log file from output/job_id, logs/, or output/manual."""
     search_dirs = []

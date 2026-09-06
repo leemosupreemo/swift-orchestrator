@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, record_interactive_investigation, format_investigation_history
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -3961,6 +3961,22 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     if len(a) > 60: a = a[:57] + "..."
                     print(f"  \033[90m- Q: {q}\033[0m")
                     print(f"  \033[92m  A: {a}\033[0m")
+
+            investigations = job.get("interactive_investigations", [])
+            if investigations:
+                print(f"Investigations: \033[92m{len(investigations)} session(s) recorded\033[0m")
+                for item in investigations[-2:]:
+                    tool = item.get("tool", "AI CLI")
+                    dur = item.get("duration", "")
+                    note = item.get("notes", "") or item.get("note", "")
+                    commits = item.get("new_commits", [])
+                    dur_str = f" ({dur})" if dur else ""
+                    commit_str = f" [{len(commits)} commit(s)]" if commits else ""
+                    if note and len(note) > 60:
+                        note = note[:57] + "..."
+                    note_str = f": \033[97m{note}\033[0m" if note else ""
+                    print(f"  \033[90m- \033[1;96m{tool}\033[0m{dur_str}{commit_str}{note_str}")
+
             
             # PROACTIVE STATUS CONTEXT (What should the user do?)
             print("-" * 60)
@@ -4800,6 +4816,12 @@ def view_job_brief_summary(job: dict[str, Any]) -> None:
         print(format_markdown_for_terminal(summary_file.read_text(encoding="utf-8")))
         rendered_any = True
 
+    inv_file = OUTPUT_DIR / job_id / "investigations.md"
+    if inv_file.exists():
+        print_header("Investigations & Notes")
+        print(format_markdown_for_terminal(inv_file.read_text(encoding="utf-8")))
+        rendered_any = True
+
     if not rendered_any:
         print_header("Brief / Summary")
         print("No brief.md or builder_summary.md file has been generated for this job yet.")
@@ -4963,15 +4985,13 @@ def handle_tweak_revise(job: dict[str, Any]):
     run_script("new_job.py", args, sub_menu=True)
     return refresh_job(job)
 
-def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
-    """Opens a conversational interface or launches an interactive LLM CLI session."""
-    import shutil
+def generate_chat_context(job: dict[str, Any]) -> tuple[str, Path]:
+    """Generates and writes a comprehensive markdown context bundle for interactive AI CLI sessions."""
     from reference_artifacts import reference_context
 
-    # 1. Gather Context
     branch = job.get("branch")
     base = job.get("base_branch", "main")
-    
+
     diff_text = "(No diff available)"
     if branch:
         try:
@@ -4980,7 +5000,7 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                 diff_text = res.stdout
                 if len(diff_text) > 80000:
                     diff_text = diff_text[:80000] + "\n... (diff truncated for length)"
-        except:
+        except Exception:
             pass
 
     # Get brief, summary, and recent logs
@@ -4988,14 +5008,25 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
     brief_dir = OUTPUT_DIR / job_id
     brief_content = ""
     summary_content = ""
-    
+
     if (brief_dir / "brief.md").exists():
-        brief_content = (brief_dir / "brief.md").read_text(encoding="utf-8")
+        try:
+            brief_content = (brief_dir / "brief.md").read_text(encoding="utf-8")
+        except Exception:
+            pass
     if (brief_dir / "builder_summary.md").exists():
-        summary_content = (brief_dir / "builder_summary.md").read_text(encoding="utf-8")
+        try:
+            summary_content = (brief_dir / "builder_summary.md").read_text(encoding="utf-8")
+        except Exception:
+            pass
 
     issue_num = job.get("issue_number", "")
     title = job.get("title", "")
+
+    investigation_section = ""
+    inv_text = format_investigation_history(job)
+    if inv_text:
+        investigation_section = f"\n## Prior Investigation Findings & CLI Notes\n{inv_text}\n"
 
     context_bundle = f"""# Context for Job #{issue_num}: {title}
 **Job ID**: `{job_id}`
@@ -5007,7 +5038,7 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
 
 ## Reference Artifacts
 {reference_context(job) or "None"}
-
+{investigation_section}
 ## Builder Summary
 {summary_content or "No builder summary available."}
 
@@ -5016,14 +5047,22 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
 {diff_text}
 ```
 """
-
-    # Write context bundle to file so CLIs can easily reference or read it
     context_file = brief_dir / "chat_context.md"
     try:
         brief_dir.mkdir(parents=True, exist_ok=True)
         context_file.write_text(context_bundle, encoding="utf-8")
-    except:
+    except Exception:
         pass
+
+    return context_bundle, context_file
+
+
+def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
+    """Opens a conversational interface or launches an interactive LLM CLI session."""
+    import shutil
+
+    # Initial context bundle generation
+    _, context_file = generate_chat_context(job)
 
     # Detect installed CLIs
     available_clis = []
@@ -5125,14 +5164,21 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
             # Check if user picked an interactive CLI
             if choice.isdigit() and 1 <= int(choice) <= len(ordered_clis):
                 cli_key, cli_label, bin_name = ordered_clis[int(choice) - 1]
+
+                # Ensure fresh context bundle is generated before launching
+                _, context_file = generate_chat_context(job)
+
                 clear_screen()
                 print_header(f"🤖 Orchestrator AI Session ({cli_label})")
                 display_ctx = context_file.name
                 try:
                     if context_file.is_relative_to(ROOT):
                         display_ctx = str(context_file.relative_to(ROOT))
-                except:
+                except Exception:
                     pass
+
+                issue_num = job.get("issue_number", "")
+                title = job.get("title", "")
                 print(f"  • \033[1;36mTarget Job:\033[0m   \033[1;97m#{issue_num} ({title})\033[0m")
                 print(f"  • \033[1;36mContext:\033[0m      {display_ctx}")
                 print(f"  • \033[1;36mExit to Menu:\033[0m Type \033[1;92m/exit\033[0m or press \033[1;92mCtrl-D\033[0m anytime to return to Orchestrator.\n")
@@ -5154,6 +5200,15 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                 else:
                     cmd = [bin_name, intro_prompt]
 
+                start_time = datetime.now()
+                start_head = None
+                try:
+                    head_res = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=str(ROOT))
+                    if head_res.returncode == 0:
+                        start_head = head_res.stdout.strip()
+                except Exception:
+                    pass
+
                 try:
                     sub_env = os.environ.copy()
                     sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
@@ -5171,6 +5226,59 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     # Clean up terminal state upon return
                     status_bar.clear_footer()
                     status_bar.reset_scroll_region(force=True)
+
+                # Post-session calculation and context capture
+                end_time = datetime.now()
+                elapsed_secs = max(0, int((end_time - start_time).total_seconds()))
+                mins, secs = divmod(elapsed_secs, 60)
+                duration_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+
+                new_commits = []
+                if start_head:
+                    try:
+                        log_res = subprocess.run(
+                            ["git", "log", f"{start_head}..HEAD", "--oneline"],
+                            capture_output=True,
+                            text=True,
+                            cwd=str(ROOT)
+                        )
+                        if log_res.returncode == 0 and log_res.stdout.strip():
+                            new_commits = [c.strip() for c in log_res.stdout.splitlines() if c.strip()]
+                    except Exception:
+                        pass
+
+                print(f"\n\033[1;92m✓ {cli_label} session ended\033[0m \033[90m({duration_str})\033[0m")
+                if new_commits:
+                    print(f"  \033[1;93mNew Commits Detected:\033[0m {len(new_commits)} commit(s)")
+                    for c in new_commits[:3]:
+                        print(f"    \033[90m• {c}\033[0m")
+                    if len(new_commits) > 3:
+                        print(f"    \033[90m...and {len(new_commits) - 3} more\033[0m")
+
+                note = ""
+                if sys.stdin.isatty():
+                    print("\n\033[1;97mCapture findings or technical notes from this session into the job context?\033[0m")
+                    note = prompt_input(
+                        "Investigation Finding / Note (Enter to skip):",
+                        placeholder="e.g. Verified root cause in RiskTab.swift",
+                        field_below=True
+                    ).strip()
+
+                job = record_interactive_investigation(
+                    job,
+                    tool=cli_label,
+                    cli_key=cli_key,
+                    duration=duration_str,
+                    notes=note,
+                    new_commits=new_commits,
+                    duration_seconds=elapsed_secs,
+                )
+                save_job(job)
+                generate_chat_context(job)
+
+                if note or new_commits:
+                    print(f"\n\033[1;92m✅ Saved investigation context to Job #{issue_num} & investigations.md\033[0m")
+                    time.sleep(1.0)
                 continue
 
 def handle_api_keys(session_allowed_machines, session_allowed_models):

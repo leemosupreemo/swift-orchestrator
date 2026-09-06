@@ -82,11 +82,61 @@ func test() {
     def test_export_job_zip(self):
         """Verify export_job creates a valid zip containing job files and manifest."""
         job_file = self.temp_root / "job-1.json"
-        job_file.write_text(json.dumps({"job_id": "job-1", "title": "Test Job"}))
+        job_data = {
+            "job_id": "job-1",
+            "title": "Test Job",
+            "interactive_investigations": [
+                {
+                    "tool": "Codex CLI",
+                    "timestamp": "2026-09-06T14:30:00-05:00",
+                    "duration": "1m 10s",
+                    "notes": "Verified root cause",
+                }
+            ]
+        }
+        job_file.write_text(json.dumps(job_data))
         zip_out = self.temp_root / "export.zip"
 
         export_job.export_job(str(job_file), str(zip_out))
         self.assertTrue(zip_out.exists())
+
+        import zipfile
+        with zipfile.ZipFile(zip_out, "r") as z:
+            manifest_text = z.read("job-1/manifest.txt").decode("utf-8")
+            self.assertIn("Verified root cause", manifest_text)
+            self.assertIn("Codex CLI", manifest_text)
+
+    def test_make_brief_includes_investigation_history(self):
+        """Verify make_brief injects interactive investigation history into briefs."""
+        import run_builder
+        job = {
+            "type": "bug-fix",
+            "issue_number": 101,
+            "title": "Fix crash on launch",
+            "plan": {
+                "summary": "Fix AppDelegate launch crash",
+                "repro_steps": ["Launch app", "Observe crash"],
+                "expected_behavior": "App launches smoothly",
+                "acceptance_criteria": ["No crash on startup"],
+                "constraints": ["Keep iOS 17 compatibility"],
+                "likely_files": ["Sources/AppDelegate.swift"],
+            },
+            "interactive_investigations": [
+                {
+                    "tool": "Codex CLI",
+                    "timestamp": "2026-09-06T14:00:00-05:00",
+                    "duration": "2m 15s",
+                    "notes": "Traced null pointer in launch configuration",
+                    "new_commits": ["abc1234 Add safe unwrapping to AppDelegate"],
+                }
+            ]
+        }
+        brief = run_builder.make_brief(job)
+        self.assertIn("# Bug brief", brief)
+        self.assertIn("### 🔍 Interactive Investigation Findings & CLI Notes", brief)
+        self.assertIn("Codex CLI | 2m 15s | 2026-09-06 14:00", brief)
+        self.assertIn("Traced null pointer in launch configuration", brief)
+        self.assertIn("`abc1234 Add safe unwrapping to AppDelegate`", brief)
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,9 @@ def export_job(job_path_str: str, output_zip: str | None = None):
     print_phase("exporting", subtext=job_id)
     print(f"Creating export archive: {output_path.name}")
 
+    from common import format_investigation_history
+    inv_str = format_investigation_history(job)
+
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         # 1. Add Job JSON
         zipf.write(job_path, arcname=f"{job_id}/job.json")
@@ -65,6 +68,8 @@ def export_job(job_path_str: str, output_zip: str | None = None):
             f"\nPlan Summary:\n{json.dumps(job.get('plan', {}).get('summary', 'No summary'), indent=2)}",
             f"\nReference Artifacts:\n{reference_context(job) or 'None'}",
         ]
+        if inv_str:
+            manifest.append(f"\nInvestigations & CLI Notes:\n{inv_str}")
         zipf.writestr(f"{job_id}/manifest.txt", "\n".join(manifest))
         print(f"  + Added manifest.txt")
 
