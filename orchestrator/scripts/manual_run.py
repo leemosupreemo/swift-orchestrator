@@ -13,7 +13,18 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import ROOT, OUTPUT_DIR, timestamp, write_text, extract_commands, JOBS_DIR, read_json
+from common import (
+    ROOT,
+    OUTPUT_DIR,
+    timestamp,
+    write_text,
+    extract_commands,
+    JOBS_DIR,
+    read_json,
+    extract_destination_from_command,
+    command_with_destination,
+    get_fallback_simulator_destinations,
+)
 
 
 def strip_xcode_test_plan(cmd: str) -> str:
@@ -55,8 +66,16 @@ def cleanup_logs(manual_base: Path, keep: int = 3):
             import shutil
             shutil.rmtree(d)
 
-def stream_command(cmd: str, log_file: Path) -> bool:
-    """Runs a command and streams output to both terminal and file in real-time."""
+def stream_command(cmd: str, log_file: Path, is_retry: bool = False, attempted_dests: set[str] | None = None) -> bool:
+    """Runs a command and streams output to both terminal and file in real-time.
+    Automatically retries with fallback simulator destinations if xcodebuild destination mismatch occurs."""
+    if attempted_dests is None:
+        attempted_dests = set()
+
+    current_dest = extract_destination_from_command(cmd)
+    if current_dest:
+        attempted_dests.add(current_dest)
+
     print(f"🚀 Executing: {cmd}", flush=True)
     print(f"📝 Logging to: {log_file.relative_to(ROOT)}", flush=True)
     
@@ -77,6 +96,7 @@ def stream_command(cmd: str, log_file: Path) -> bool:
         except Exception:
             formatter_proc = None
 
+    captured_lines: list[str] = []
     with open(log_file, "w", encoding="utf-8") as f:
         process = subprocess.Popen(
             cmd,
@@ -92,6 +112,7 @@ def stream_command(cmd: str, log_file: Path) -> bool:
         for line in process.stdout:
             f.write(line)
             f.flush()
+            captured_lines.append(line)
             if formatter_proc and formatter_proc.stdin:
                 try:
                     formatter_proc.stdin.write(line)
@@ -112,7 +133,24 @@ def stream_command(cmd: str, log_file: Path) -> bool:
             except Exception:
                 pass
 
-        return process.returncode == 0
+        if process.returncode == 0:
+            return True
+
+        # If xcodebuild failed due to destination mismatch, attempt automated fallback retry
+        full_output = "".join(captured_lines)
+        if "xcodebuild" in cmd and "Unable to find a device matching the provided destination specifier" in full_output:
+            fallbacks = get_fallback_simulator_destinations(current_dest)
+            for candidate in fallbacks:
+                if candidate in attempted_dests:
+                    continue
+                attempted_dests.add(candidate)
+                print(f"\n\033[1;93m⚠️  Simulator destination '{current_dest}' rejected by xcodebuild.\033[0m")
+                print(f"\033[1;96m🔄 Retrying automatically with fallback destination: {candidate}...\033[0m\n", flush=True)
+                new_cmd = command_with_destination(cmd, candidate)
+                if stream_command(new_cmd, log_file, is_retry=True, attempted_dests=attempted_dests):
+                    return True
+
+        return False
 
 def capture_logs(manual_out: Path) -> Path | None:
     """Prompts the user to paste logs and saves them to manual_out / 'captured.log'."""

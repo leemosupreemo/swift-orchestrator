@@ -446,6 +446,34 @@ class MarkdownFormatterTests(unittest.TestCase):
         self.assertIsInstance(diag["has_simctl"], bool)
         self.assertIsInstance(diag["has_runtimes"], bool)
 
+    def test_extract_destination_from_command(self) -> None:
+        cmd = "xcodebuild test -workspace App.xcworkspace -scheme App -destination 'platform=iOS Simulator,id=123-ABC'"
+        dest = common.extract_destination_from_command(cmd)
+        self.assertEqual(dest, "platform=iOS Simulator,id=123-ABC")
+
+    def test_extract_destination_none_when_missing(self) -> None:
+        cmd = "xcodebuild test -workspace App.xcworkspace -scheme App"
+        dest = common.extract_destination_from_command(cmd)
+        self.assertIsNone(dest)
+
+    def test_command_with_destination_replaces_existing(self) -> None:
+        cmd = "xcodebuild test -workspace App.xcworkspace -destination 'platform=iOS Simulator,name=iPhone 15' -scheme App"
+        new_cmd = common.command_with_destination(cmd, "platform=iOS Simulator,id=NEW-ID")
+        self.assertIn("-destination 'platform=iOS Simulator,id=NEW-ID'", new_cmd)
+        self.assertNotIn("iPhone 15", new_cmd)
+
+    def test_command_with_destination_appends_when_missing(self) -> None:
+        cmd = "xcodebuild test -workspace App.xcworkspace -scheme App"
+        new_cmd = common.command_with_destination(cmd, "platform=iOS Simulator,name=iPhone 16")
+        self.assertIn("-destination 'platform=iOS Simulator,name=iPhone 16'", new_cmd)
+
+    def test_get_fallback_simulator_destinations(self) -> None:
+        fallbacks = common.get_fallback_simulator_destinations("platform=iOS Simulator,id=MY-ID,arch=arm64")
+        self.assertTrue(len(fallbacks) > 0)
+        self.assertIn("platform=iOS Simulator,id=MY-ID", fallbacks)
+        self.assertIn("platform=iOS Simulator,name=iPhone 16", fallbacks)
+        self.assertIn("platform=iOS Simulator,OS=latest", fallbacks)
+
 
 class StepExtractorTests(unittest.TestCase):
     def test_extract_phase_steps(self) -> None:

@@ -14,7 +14,15 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
-from common import OUTPUT_DIR, ROOT, extract_commands, get_best_simulator_destination, timestamp, write_text
+from common import (
+    OUTPUT_DIR,
+    ROOT,
+    extract_commands,
+    get_best_simulator_destination,
+    command_with_destination,
+    timestamp,
+    write_text,
+)
 from manual_run import cleanup_logs, stream_command
 from orchestrator.project_config import PROJECT_CONFIG
 
@@ -30,20 +38,6 @@ DEFAULT_BUNDLE_ID = PROJECT_CONFIG.app_bundle_id or ""
 def simulator_udid(destination: str) -> str | None:
     match = re.search(r"(?:^|,)id=([^,]+)", destination)
     return match.group(1) if match else None
-
-
-def command_with_destination(command: str, destination: str) -> str:
-    parts = shlex.split(command)
-    cleaned: list[str] = []
-    i = 0
-    while i < len(parts):
-        if parts[i] == "-destination":
-            i += 2
-            continue
-        cleaned.append(parts[i])
-        i += 1
-    cleaned.extend(["-destination", destination])
-    return shlex.join(cleaned)
 
 
 def run_simctl(args: list[str], log_file: Path) -> bool:

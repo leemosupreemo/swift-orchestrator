@@ -1606,6 +1606,34 @@ def extract_commands() -> tuple[str, str]:
         test += f" -derivedDataPath {shlex.quote(PROJECT_CONFIG.derived_data_path)}"
 
     return build, test
+def extract_destination_from_command(command: str) -> str | None:
+    """Extracts the destination argument from a shell command string."""
+    try:
+        parts = shlex.split(command)
+        for i in range(len(parts)):
+            if parts[i] == "-destination" and i + 1 < len(parts):
+                return parts[i + 1]
+    except Exception:
+        pass
+    return None
+
+def command_with_destination(command: str, destination: str) -> str:
+    """Replaces or injects -destination <destination> into a shell command string."""
+    try:
+        parts = shlex.split(command)
+    except Exception:
+        return f"{command} -destination {shlex.quote(destination)}"
+    cleaned: list[str] = []
+    i = 0
+    while i < len(parts):
+        if parts[i] == "-destination":
+            i += 2
+            continue
+        cleaned.append(parts[i])
+        i += 1
+    cleaned.extend(["-destination", destination])
+    return shlex.join(cleaned)
+
 def get_best_simulator_destination() -> str:
     """
     Intelligently finds the best available iOS simulator destination.
@@ -1613,11 +1641,9 @@ def get_best_simulator_destination() -> str:
     """
     try:
         def parse_version(v_str: str) -> tuple[int, ...]:
-            # Extract numbers from string like 'iOS 18.2' or 'com.apple.CoreSimulator.SimRuntime.iOS-18-0'
             parts = re.findall(r"(\d+)", v_str)
             return tuple(map(int, parts))
 
-        # We use 'available' to exclude simulators that don't have a matching runtime installed
         res = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "--json"], capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
         devices_by_runtime = data.get("devices", {})
@@ -1629,7 +1655,7 @@ def get_best_simulator_destination() -> str:
 
             version = parse_version(runtime)
             for d in devices:
-                if d.get("isAvailable") == False: continue # simctl 'available' flag is not enough
+                if d.get("isAvailable") == False: continue
 
                 all_candidates.append({
                     "udid": d["udid"],
@@ -1642,29 +1668,70 @@ def get_best_simulator_destination() -> str:
         if not all_candidates:
             return "platform=iOS Simulator,name=iPhone 16"
 
-        # Sort: Booted first, then latest version, then iPhone, then Name
-        # Using negative numbers for boolean/tuple sorts for descending order
         def sort_key(c):
             return (
-                not c["booted"],     # False (Booted) comes before True
+                not c["booted"],            # False (Booted) comes before True
                 [-x for x in c["version"]], # Higher versions first
-                not c["is_iphone"],  # iPhone first
+                not c["is_iphone"],         # iPhone first
                 c["name"]
             )
 
         best = sorted(all_candidates, key=sort_key)[0]
-
-        # Include arch=arm64 on Apple Silicon to resolve ambiguous destination warnings
-        # and prevent 'device not found' when multiple archs exist for the same UDID.
-        import platform
-        is_arm = platform.machine().startswith("arm") or platform.processor().startswith("arm")
-        arch_suffix = ",arch=arm64" if is_arm else ""
-
-        return f"platform=iOS Simulator,id={best['udid']}{arch_suffix}"
+        return f"platform=iOS Simulator,id={best['udid']}"
 
     except Exception:
-        # Final hardcoded fallback if everything fails
         return "platform=iOS Simulator,name=iPhone 16"
+
+def get_fallback_simulator_destinations(primary_dest: str | None = None) -> list[str]:
+    """
+    Returns an ordered list of candidate simulator destinations for fallback retries.
+    """
+    destinations: list[str] = []
+    
+    if primary_dest:
+        clean_primary = re.sub(r",arch=[^,]+", "", primary_dest)
+        if clean_primary not in destinations:
+            destinations.append(clean_primary)
+
+    try:
+        res = subprocess.run(["xcrun", "simctl", "list", "devices", "available", "--json"], capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+        devices_by_runtime = data.get("devices", {})
+
+        # 1. Booted devices first
+        for runtime, devices in devices_by_runtime.items():
+            if "iOS" not in runtime: continue
+            for d in devices:
+                if d.get("isAvailable") != False and d.get("state") == "Booted":
+                    d_id = f"platform=iOS Simulator,id={d['udid']}"
+                    d_name = f"platform=iOS Simulator,name={d['name']}"
+                    if d_id not in destinations: destinations.append(d_id)
+                    if d_name not in destinations: destinations.append(d_name)
+
+        # 2. Available iPhones by name and id
+        for runtime, devices in devices_by_runtime.items():
+            if "iOS" not in runtime: continue
+            for d in devices:
+                if d.get("isAvailable") != False and "iPhone" in d.get("name", ""):
+                    d_name = f"platform=iOS Simulator,name={d['name']}"
+                    d_id = f"platform=iOS Simulator,id={d['udid']}"
+                    if d_name not in destinations: destinations.append(d_name)
+                    if d_id not in destinations: destinations.append(d_id)
+    except Exception:
+        pass
+
+    # 3. Standard well-known model names
+    for name in ["iPhone 16", "iPhone 17", "iPhone 16 Pro", "iPhone 15", "iPhone 15 Pro", "iPhone 14"]:
+        d_name = f"platform=iOS Simulator,name={name}"
+        if d_name not in destinations:
+            destinations.append(d_name)
+
+    # 4. Generic latest OS
+    for generic in ["platform=iOS Simulator,OS=latest", "generic/platform=iOS"]:
+        if generic not in destinations:
+            destinations.append(generic)
+
+    return destinations
 
 def get_simulator_diagnostic() -> dict[str, Any]:
     """
