@@ -1305,6 +1305,27 @@ class AppFeatureTests_{i}: XCTestCase {{
         self.assertTrue(len(codex_calls) > 0)
         self.assertIn("Job #789: Fix memory leak", codex_calls[0][1])
 
+    @patch("dev_console.shutil.which", side_effect=lambda x: f"/usr/local/bin/{x}" if x in ["opencode", "claude"] else None)
+    @patch("dev_console.prompt_input", side_effect=["", "b"])  # Empty input = hit Enter for default
+    @patch("dev_console.subprocess.run")
+    @patch("dev_console.clear_screen")
+    def test_handle_ask_ai_recommended_default_launch(self, _mock_clear, mock_subproc, _mock_prompt_input, _mock_which):
+        # Job built by claude-opus-4-7 should recommend claude (option 2) and launch it on Enter
+        job = {
+            "job_id": "test-job-999",
+            "issue_number": 999,
+            "title": "Refactor router",
+            "status": "review-needed",
+            "builder": "claude-opus-4-7",
+        }
+        mock_subproc.return_value = MagicMock(return_value=0, stdout="", stderr="")
+        dev_console.handle_ask_ai(job, ["gemini"])
+
+        called_cmds = [call.args[0] for call in mock_subproc.call_args_list if call.args]
+        claude_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "claude"]
+        self.assertTrue(len(claude_calls) > 0)
+        self.assertIn("Job #999: Refactor router", claude_calls[0][1])
+
     @patch("dev_console.shutil.which", return_value=None)
     @patch("dev_console.prompt_input", side_effect=["q", "Why was this changed?", "", "b"])
     @patch("dev_console.run_llm", return_value=("Because of a nil check error.", "gemini", "session-1"))

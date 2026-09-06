@@ -5036,6 +5036,41 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
     if shutil.which("gemini"): available_clis.append(("gemini", "Gemini CLI", "gemini"))
     if shutil.which("codex"): available_clis.append(("codex", "Codex CLI", "codex"))
 
+    # Determine recommended CLI based on user preference or job builder/planner
+    settings_path = CONFIG_DIR / "settings.json"
+    settings = read_json(settings_path) if settings_path.exists() else {}
+    preferred_cli = (settings.get("preferred_cli") or settings.get("default_cli") or "").lower()
+
+    builder_model = str(job.get("builder") or job.get("planner") or "").lower()
+    recommended_key = None
+    rec_reason = ""
+
+    if preferred_cli:
+        recommended_key = preferred_cli
+        rec_reason = "Default"
+    elif "claude" in builder_model or "anthropic" in builder_model:
+        recommended_key = "claude"
+        rec_reason = "Job Builder"
+    elif "antigravity" in builder_model:
+        recommended_key = "agy"
+        rec_reason = "Job Builder"
+    elif "gemini" in builder_model:
+        recommended_key = "gemini"
+        rec_reason = "Job Builder"
+    elif "codex" in builder_model or "openai" in builder_model or "o3" in builder_model or "gpt" in builder_model:
+        recommended_key = "codex"
+        rec_reason = "Job Builder"
+    elif "opencode" in builder_model or "qwen" in builder_model or "deepseek" in builder_model:
+        recommended_key = "opencode"
+        rec_reason = "Job Builder"
+
+    rec_idx = 1
+    if available_clis:
+        for idx, (cli_key, _, _) in enumerate(available_clis, 1):
+            if recommended_key and cli_key == recommended_key:
+                rec_idx = idx
+                break
+
     while True:
         clear_screen()
         print_header("Ask AI / Interactive Investigation")
@@ -5044,7 +5079,9 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
         print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
         if available_clis:
             for idx, (cli_key, cli_label, _) in enumerate(available_clis, 1):
-                print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m (Interactive Multi-Turn Session)")
+                is_rec = (idx == rec_idx)
+                rec_tag = f" \033[1;92m⭐️ (Recommended{f' - {rec_reason}' if rec_reason and is_rec else ''})\033[0m" if is_rec else ""
+                print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m{rec_tag} (Interactive Multi-Turn Session)")
         else:
             print("  \033[90m(No local AI CLIs detected in PATH)\033[0m")
 
@@ -5052,8 +5089,14 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
         print("  [\033[1;93mQ\033[0m] Quick Question in Console (Single Turn)")
         print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
 
-        choice = prompt_input("Select Option:", placeholder="1, Q, or B", field_below=True).strip().lower()
-        if not choice or choice == "b":
+        placeholder = f"{rec_idx} (Enter for default), Q, or B" if available_clis else "Q or B"
+        choice = prompt_input("Select Option:", placeholder=placeholder, field_below=True).strip().lower()
+        if not choice:
+            if available_clis:
+                choice = str(rec_idx)
+            else:
+                break
+        elif choice == "b":
             break
 
         # Check if user picked an interactive CLI
