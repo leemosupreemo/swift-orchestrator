@@ -6990,9 +6990,11 @@ def main_loop():
                         cols = 80
                     
                     # Columns and separators (visible characters):
-                    # [ID] (5) + | Type (10) + | Status (9) + | Modified (11) = 35 (+ 3 for | Title) = 38
-                    title_width = max(10, cols - 38)
-                    header = f"ID   | Type    | Status | {'Title':<{title_width}} | Modified"
+                    # [ID] (4) + | (3) + Type (7) + | (3) + Status (6) + | (3) + | (3) + Modified (8) = 37 fixed chars
+                    # Safe margin of 3 cols ensures right edge padding/terminal scrollbars never cause line wrapping
+                    safe_cols = max(45, cols - 3)
+                    title_width = max(10, safe_cols - 37)
+                    header = f"ID   | Type   | Status | {'Title':<{title_width}} | Modified"
                     print(header)
                     print("-" * len(header))
                     for i, job in enumerate(jobs):
