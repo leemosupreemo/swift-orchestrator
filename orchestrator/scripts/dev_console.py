@@ -5103,7 +5103,7 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
             if other_clis:
                 print("\033[1;95m🚀 OTHER AI CLI SESSIONS\033[0m")
                 for idx, (cli_key, cli_label, _) in enumerate(other_clis, 2):
-                    print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m \033[90m(Interactive Multi-Turn Session)\033[0m")
+                    print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m")
                 print()
             elif not rec_cli:
                 print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
