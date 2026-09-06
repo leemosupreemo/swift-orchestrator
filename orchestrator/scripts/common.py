@@ -368,7 +368,7 @@ def count_created_tests_in_diff(branch: str | None, base: str = "main") -> int:
 
 
 def parse_test_output(test_output_text: str) -> dict[str, Any]:
-    """Parses unit test execution output (Swift SPM, xcodebuild, unittest, pytest) for counts and failures."""
+    """Parses unit test execution output (Swift SPM, xcodebuild, xcbeautify, unittest, pytest) for counts and failures."""
     if not test_output_text:
         return {
             "total_run": 0,
@@ -381,7 +381,7 @@ def parse_test_output(test_output_text: str) -> dict[str, Any]:
     failed = 0
     failing_tests: list[str] = []
 
-    # 1. Swift SPM format: 'Executed 14 tests, with 2 failures'
+    # 1. Swift SPM / xcodebuild format: 'Executed 14 tests, with 2 failures'
     spm_match = re.search(r"Executed (\d+) tests?, with (\d+) failures?", test_output_text)
     if spm_match:
         total = int(spm_match.group(1))
@@ -406,6 +406,24 @@ def parse_test_output(test_output_text: str) -> dict[str, Any]:
         if clean_name not in failing_tests:
             failing_tests.append(clean_name)
 
+    # xcbeautify / emoji failing patterns: ✖ -[PackageTests.ViewModelTests testMethod] or ❌ Class.testMethod
+    for m in re.finditer(r"(?:✖|❌|Failing)\s+(?:-\[)?([^\s,\]]+)(?:\s+([^\s,\]]+))?\]?", test_output_text):
+        cls_name = m.group(1)
+        mth_name = m.group(2)
+        full_name = f"{cls_name}.{mth_name}" if mth_name else cls_name
+        parts = full_name.split(".")
+        clean_name = ".".join(parts[-2:]) if len(parts) >= 2 else full_name
+        if clean_name not in failing_tests:
+            failing_tests.append(clean_name)
+
+    # Swift Testing pattern: Test "testMethod()" failed or ✘ Test "testMethod()" failed
+    for m in re.finditer(r'(?:✘\s+)?Test "(?:-\[)?([^"]+)" failed', test_output_text):
+        name = m.group(1).replace("()", "").strip()
+        parts = name.split(".")
+        clean_name = ".".join(parts[-2:]) if len(parts) >= 2 else name
+        if clean_name not in failing_tests:
+            failing_tests.append(clean_name)
+
     # Python unittest pattern: FAIL: test_feature (test_file.TestCase)
     for m in re.finditer(r"(?:FAIL|ERROR): ([^\s]+)(?: \(([^\)]+)\))?", test_output_text):
         mth = m.group(1)
@@ -427,6 +445,12 @@ def parse_test_output(test_output_text: str) -> dict[str, Any]:
         failed = len(failing_tests)
         if total < failed:
             total = failed
+
+    # If total is still 0, count passes from line-by-line matches
+    if total == 0:
+        pass_count = len(re.findall(r"(?:Test [Cc]ase '?[^\n']+'?\s+passed|✔\s+[^\n]+|Passing\s+[^\n]+|Test \"[^\"]+\" passed)", test_output_text))
+        if pass_count > 0 or failed > 0:
+            total = pass_count + failed
 
     passed = max(0, total - failed)
 
@@ -2379,17 +2403,105 @@ def extract_step_from_line(line: str) -> str | None:
         if rest:
             return f"[{step_num}] {rest}"
 
-    # 3. Match compiler, test, tool, and progress lines
-    if clean.startswith("CompileSwift") or clean.startswith("Compiling "):
+    # 3. Match specific test case / test suite execution lines (dynamic test feed)
+    tc_start = re.search(r"Test [Cc]ase '?(?:-\[)?([^\s'\]]+)(?:\s+([^\s'\]]+))?\]?'?\s+started", clean)
+    if tc_start:
+        cls_name = tc_start.group(1)
+        mth_name = tc_start.group(2)
+        if mth_name:
+            cls_part = cls_name.split(".")[-1]
+            return f"Testing: {cls_part}.{mth_name}"
+        else:
+            parts = cls_name.split(".")
+            name = ".".join(parts[-2:]) if len(parts) >= 2 else cls_name
+            return f"Testing: {name}"
+
+    st_start = re.search(r'Test "(?:-\[)?([^"]+)" started', clean)
+    if st_start:
+        name = st_start.group(1).replace("()", "")
+        return f"Testing: {name}"
+
+    xc_pass = re.search(r"(?:Passing|✔)\s+(?:-\[)?([A-Za-z0-9_\.]+)(?:\s+([A-Za-z0-9_]+))?\]?", clean)
+    if xc_pass:
+        cls_name = xc_pass.group(1)
+        mth_name = xc_pass.group(2)
+        if mth_name:
+            cls_part = cls_name.split(".")[-1]
+            return f"Passed: {cls_part}.{mth_name}"
+        else:
+            parts = cls_name.split(".")
+            name = ".".join(parts[-2:]) if len(parts) >= 2 else cls_name
+            return f"Passed: {name}"
+
+    xc_fail = re.search(r"(?:Failing|✖|❌)\s+(?:-\[)?([A-Za-z0-9_\.]+)(?:\s+([A-Za-z0-9_]+))?\]?", clean)
+    if xc_fail:
+        cls_name = xc_fail.group(1)
+        mth_name = xc_fail.group(2)
+        if mth_name:
+            cls_part = cls_name.split(".")[-1]
+            return f"Failed: {cls_part}.{mth_name}"
+        else:
+            parts = cls_name.split(".")
+            name = ".".join(parts[-2:]) if len(parts) >= 2 else cls_name
+            return f"Failed: {name}"
+
+    ts_start = re.search(r"Test Suite '([^']+)' started", clean) or re.search(r"Test Suite ([^\s]+) started", clean)
+    if ts_start:
+        suite = ts_start.group(1)
+        if suite.lower() in ["all tests", "selected tests"] or suite.endswith(".xctest"):
+            return "Running test suite"
+        return f"Running suite: {suite}"
+
+    summary_match = re.search(r"Executed (\d+) tests?, with (\d+) failures?", clean)
+    if summary_match:
+        tot = summary_match.group(1)
+        fails = summary_match.group(2)
+        return f"Finished {tot} tests ({fails} failures)"
+
+    test_dest = re.search(r"Testing on '([^']+)'", clean)
+    if test_dest:
+        return f"Testing on {test_dest.group(1)}"
+
+    # 4. Match compiler, test, tool, and progress lines
+    if clean.startswith("CompileSwift normal") or clean.startswith("CompileSwift "):
+        swift_file_match = re.search(r'/([^/\s]+\.swift)\b', clean)
+        if swift_file_match:
+            return f"Compiling {swift_file_match.group(1)}"
         return "Compiling Swift sources"
+    elif clean.startswith("CompileSwiftSources"):
+        return "Compiling Swift sources"
+    elif clean.startswith("Compiling "):
+        file_match = re.search(r'Compiling\s+([^\s]+)', clean)
+        if file_match:
+            return f"Compiling {Path(file_match.group(1)).name}"
+        return "Compiling Swift sources"
+    elif clean.startswith("CompileAssetCatalog"):
+        return "Compiling asset catalog"
+    elif clean.startswith("CompileStoryboard"):
+        return "Compiling storyboards"
+    elif clean.startswith("ProcessInfoPlistFile"):
+        return "Processing Info.plist"
+    elif clean.startswith("PhaseScriptExecution"):
+        return "Running build scripts"
+    elif clean.startswith("CodeSign"):
+        return "Code signing application"
     elif clean.startswith("Ld ") or clean.startswith("Linking "):
         return "Linking binaries"
+    elif clean.startswith("Fetching ") and ".git" in clean:
+        repo_name = clean.split("/")[-1].replace(".git", "").split()[0]
+        return f"Fetching {repo_name}"
+    elif clean.startswith("Resolving package ") or clean.startswith("Resolved source packages"):
+        return "Resolving package dependencies"
     elif "** TEST EXECUTE **" in clean or ("Test Suite" in clean and "started" in clean):
         return "Running test suite"
     elif "** TEST SUCCEEDED **" in clean or ("Test Suite" in clean and "passed" in clean):
         return "Tests succeeded"
+    elif "** TEST FAILED **" in clean or ("Test Suite" in clean and "failed" in clean):
+        return "Tests failed"
     elif "** BUILD SUCCEEDED **" in clean:
         return "Build succeeded"
+    elif "** BUILD FAILED **" in clean:
+        return "Build failed"
     elif "Generating (" in clean or ("received" in clean and "lines of response" in clean):
         return "Generating code"
     elif clean.startswith("Consulting "):

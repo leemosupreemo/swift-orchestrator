@@ -138,5 +138,51 @@ func test() {
         self.assertIn("Traced null pointer in launch configuration", brief)
         self.assertIn("`abc1234 Add safe unwrapping to AppDelegate`", brief)
 
+    def test_strip_xcode_test_plan(self):
+        import manual_run
+        cmd = "xcodebuild test -scheme App -testPlan SmokeTests -destination 'platform=iOS Simulator,id=123'"
+        stripped = manual_run.strip_xcode_test_plan(cmd)
+        self.assertNotIn("-testPlan", stripped)
+        self.assertNotIn("SmokeTests", stripped)
+        self.assertIn("-scheme App", stripped)
+
+    def test_manual_run_headers_and_summaries(self):
+        import manual_run
+        captured_output = io.StringIO()
+        with patch("sys.stdout", captured_output):
+            manual_run.print_execution_header("xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=SIM1'", Path("orchestrator_output/manual/latest/test.log"), mode="test")
+        out = captured_output.getvalue()
+        self.assertIn("TEST EXECUTION PIPELINE", out)
+        self.assertIn("SIM1", out)
+        self.assertIn("test.log", out)
+
+        # Test success summary
+        test_out_success = "Executed 10 tests, with 0 failures in 1.2s"
+        captured_output = io.StringIO()
+        with patch("sys.stdout", captured_output):
+            manual_run.print_test_results_summary(test_out_success, Path("orchestrator_output/manual/latest/test.log"), 4.5, 0)
+        out = captured_output.getvalue()
+        self.assertIn("TEST RUN SUCCEEDED", out)
+        self.assertIn("4.5s", out)
+        self.assertIn("10", out)
+
+        # Test failure summary with failing tests
+        test_out_fail = "Executed 10 tests, with 2 failures\nTest Case '-[AppTests.AuthTests testLogin]' failed\nTest Case '-[AppTests.AuthTests testLogout]' failed"
+        captured_output = io.StringIO()
+        with patch("sys.stdout", captured_output):
+            manual_run.print_test_results_summary(test_out_fail, Path("orchestrator_output/manual/latest/test.log"), 3.2, 1)
+        out = captured_output.getvalue()
+        self.assertIn("TEST RUN FAILED", out)
+        self.assertIn("AuthTests.testLogin", out)
+        self.assertIn("AuthTests.testLogout", out)
+
+        # Test build summary
+        captured_output = io.StringIO()
+        with patch("sys.stdout", captured_output):
+            manual_run.print_build_results_summary("", Path("orchestrator_output/manual/latest/build.log"), 8.0, 0)
+        out = captured_output.getvalue()
+        self.assertIn("BUILD SUCCEEDED", out)
+
+
 if __name__ == "__main__":
     unittest.main()

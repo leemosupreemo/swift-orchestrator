@@ -525,6 +525,40 @@ class StepExtractorTests(unittest.TestCase):
         self.assertEqual(common.extract_step_from_line("      - Committing 2 modified and 1 untracked files..."), "Committing changes")
         self.assertEqual(common.extract_step_from_line("      - Syncing code to worker mac2..."), "Syncing code to worker")
 
+    def test_extract_step_from_line_test_runner_events(self) -> None:
+        self.assertEqual(
+            common.extract_step_from_line("Test Case '-[ThemisTests.AlgorithmTests testGreedyMatching]' started."),
+            "Testing: AlgorithmTests.testGreedyMatching"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("Test Suite 'AlgorithmTests' started at 2026-09-06 14:00:00.000"),
+            "Running suite: AlgorithmTests"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("CompileSwift normal arm64 /Users/dev/Themis/AuthManager.swift (in target 'Themis')"),
+            "Compiling AuthManager.swift"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("Fetching https://github.com/google/abseil-cpp-binary.git (cached)"),
+            "Fetching abseil-cpp-binary"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("Executed 50 tests, with 0 failures (0 unexpected) in 1.234s"),
+            "Finished 50 tests (0 failures)"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("Passing AlgorithmTests.testGreedyMatching (0.012 seconds)"),
+            "Passed: AlgorithmTests.testGreedyMatching"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("Failing AlgorithmTests.testGreedyMatching (0.045 seconds)"),
+            "Failed: AlgorithmTests.testGreedyMatching"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("Testing on 'iPhone 16' (id=12345)"),
+            "Testing on iPhone 16"
+        )
+
 
 class StatusReportTests(unittest.TestCase):
     def test_format_distributed_status(self) -> None:
@@ -741,6 +775,32 @@ FAILED (failures=1)
         self.assertEqual(parsed["failed_count"], 1)
         self.assertEqual(parsed["passed_count"], 41)
         self.assertEqual(parsed["failing_tests"], ["AuthTests.test_auth_recovery"])
+
+    def test_parse_test_output_xcbeautify_and_swift_testing_format(self) -> None:
+        xcbeautify_output = """
+✔ AuthViewModelTests.testInitialState (0.005 seconds)
+✔ AuthViewModelTests.testValidLogin (0.010 seconds)
+✖ -[ThemisTests.AuthViewModelTests testInvalidPassword], failed - Expected error message
+Executed 3 tests, with 1 failure (0 unexpected) in 0.050 seconds
+"""
+        parsed_xc = common.parse_test_output(xcbeautify_output)
+        self.assertEqual(parsed_xc["total_run"], 3)
+        self.assertEqual(parsed_xc["failed_count"], 1)
+        self.assertEqual(parsed_xc["passed_count"], 2)
+        self.assertEqual(parsed_xc["failing_tests"], ["AuthViewModelTests.testInvalidPassword"])
+
+        swift_testing_output = """
+Test "testDataLoading()" started on 'iPhone 16'
+Test "testDataLoading()" passed on 'iPhone 16' (0.012 seconds)
+Test "testNetworkErrorRetry()" started on 'iPhone 16'
+Test "testNetworkErrorRetry()" failed on 'iPhone 16' (0.030 seconds)
+Executed 2 tests, with 1 failure (0 unexpected) in 0.050 seconds
+"""
+        parsed_st = common.parse_test_output(swift_testing_output)
+        self.assertEqual(parsed_st["total_run"], 2)
+        self.assertEqual(parsed_st["failed_count"], 1)
+        self.assertEqual(parsed_st["passed_count"], 1)
+        self.assertEqual(parsed_st["failing_tests"], ["testNetworkErrorRetry"])
 
     def test_get_job_test_summary_derives_metrics_and_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
