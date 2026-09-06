@@ -4347,11 +4347,11 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             elif status == "debugging":
                 if phase == "propose" or phase == "paused":
                     if failed_cnt > 0:
-                        workflow_options.append(("d", f"[\033[1;92mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} failing)\033[0m \033[90m(Autonomous TDD Loop)\033[0m"))
+                        workflow_options.append(("d", f"[\033[1;92mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} {'test' if failed_cnt == 1 else 'tests'} failing)\033[0m"))
                     elif t_status == "build-failed":
-                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Auto-Fix Build Errors \033[90m(Autonomous Compiler Loop)\033[0m"))
+                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Auto-Fix Build Errors"))
                     else:
-                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Auto-Fix Failing Tests \033[90m(Autonomous TDD Loop)\033[0m"))
+                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Auto-Fix / Propose Solution"))
                 elif phase == "verify":
                     workflow_options.append(("d", "[\033[92mD\033[0m] Verify Fix (Pass/Fail Result)"))
 
@@ -4387,12 +4387,10 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             # Global actions available for most non-archived states
             if status not in ["completed", "discarded", "planned"]:
                 if status != "debugging":
-                    if t_status == "failing" and failed_cnt > 0:
-                        workflow_options.append(("d", f"[\033[1;93mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} failing)\033[0m"))
+                    if failed_cnt > 0:
+                        workflow_options.append(("d", f"[\033[1;93mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} {'test' if failed_cnt == 1 else 'tests'} failing)\033[0m"))
                     elif t_status == "build-failed":
                         workflow_options.append(("d", "[\033[1;93mD\033[0m] Auto-Fix Build Errors"))
-                    else:
-                        workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous TDD Test Loop)"))
                 workflow_options.append(("r", "[\033[1;91mR\033[0m] Reset & Rerun \033[1;91m(Stashes changes)\033[0m"))
             
             ai_modified = job.get("ai_modified_files", [])

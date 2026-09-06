@@ -397,6 +397,16 @@ class DevConsoleTests(unittest.TestCase):
             "type": "feature-plan",
             "issue_number": 123,
             "_path": job_path,
+            "test_summary": {
+                "status": "failing",
+                "created_count": 0,
+                "planned_count": 0,
+                "failed_count": 1,
+                "passed_count": 0,
+                "total_run": 1,
+                "failing_tests": ["TestA"],
+                "tests_ok": False,
+            },
         }
 
         dev_console.handle_job_selection(job, ["local"], ["gemini"])
@@ -440,6 +450,16 @@ class DevConsoleTests(unittest.TestCase):
             "type": "feature-plan",
             "issue_number": 123,
             "_path": self.temp_root / "autofix-job.json",
+            "test_summary": {
+                "status": "failing",
+                "created_count": 0,
+                "planned_count": 0,
+                "failed_count": 1,
+                "passed_count": 0,
+                "total_run": 1,
+                "failing_tests": ["TestA"],
+                "tests_ok": False,
+            },
         }
 
         dev_console.handle_job_selection(job, ["local"], ["gemini"])
@@ -455,7 +475,7 @@ class DevConsoleTests(unittest.TestCase):
         self.assertIn("Focus on retries.", args)
 
     def test_review_needed_job_menu_actions_are_reachable(self):
-        action_keys = ["m", "f", "t", "d", "r", "l", "k", "q", "o", "y", "v", "g", "c", "x", "b"]
+        action_keys = ["m", "f", "t", "r", "l", "k", "q", "o", "y", "v", "g", "c", "x", "b"]
 
         for key in action_keys:
             with self.subTest(key=key):
@@ -510,9 +530,6 @@ class DevConsoleTests(unittest.TestCase):
                     )
                 elif key == "t":
                     mock_tweak.assert_called_once_with(job)
-                elif key == "d":
-                    mock_auto_logs.assert_called_once_with(job)
-                    self.assertEqual(mock_run_script.call_args.args[0], "debug_job.py")
                 elif key == "r":
                     mock_confirm.assert_called()
                 elif key == "l":
@@ -1460,7 +1477,7 @@ class AppFeatureTests_{i}: XCTestCase {{
             self.assertIn("1 failing (14 passing)", printed)
             self.assertIn("ThemisTests.RiskViewModelTests.testTabSelection", printed)
             self.assertIn("Fix Failing Tests", printed)
-            self.assertIn("(1 failing)", printed)
+            self.assertIn("(1 test failing)", printed)
 
     @patch("dev_console.refresh_job")
     @patch("dev_console.get_job_test_summary")
