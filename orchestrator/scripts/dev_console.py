@@ -5028,7 +5028,10 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
     # Detect installed CLIs
     available_clis = []
     if shutil.which("opencode"): available_clis.append(("opencode", "OpenCode CLI", "opencode"))
-    if shutil.which("agy"): available_clis.append(("agy", "Antigravity CLI (agy)", "agy"))
+    if shutil.which("agy"):
+        available_clis.append(("agy", "Antigravity CLI (agy)", "agy"))
+    elif shutil.which("antigravity"):
+        available_clis.append(("agy", "Antigravity CLI", "antigravity"))
     if shutil.which("claude"): available_clis.append(("claude", "Claude Code CLI", "claude"))
     if shutil.which("gemini"): available_clis.append(("gemini", "Gemini CLI", "gemini"))
     if shutil.which("codex"): available_clis.append(("codex", "Codex CLI", "codex"))
@@ -5075,15 +5078,15 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
             if cli_key == "opencode":
                 cmd = ["opencode", "--prompt", intro_prompt]
             elif cli_key == "agy":
-                cmd = ["agy", "--prompt-interactive", intro_prompt]
+                cmd = [bin_name, "--prompt-interactive", intro_prompt]
             elif cli_key == "gemini":
                 cmd = ["gemini", "-i", intro_prompt]
             elif cli_key == "claude":
                 cmd = ["claude", intro_prompt]
             elif cli_key == "codex":
-                cmd = ["codex"]
+                cmd = ["codex", intro_prompt]
             else:
-                cmd = [bin_name]
+                cmd = [bin_name, intro_prompt]
 
             try:
                 sub_env = os.environ.copy()

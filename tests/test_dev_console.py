@@ -1248,7 +1248,7 @@ class AppFeatureTests_{i}: XCTestCase {{
     @patch("dev_console.prompt_input", side_effect=["1", "b"])
     @patch("dev_console.subprocess.run")
     @patch("dev_console.clear_screen")
-    def test_handle_ask_ai_interactive_cli_launch(self, _mock_clear, mock_subproc, _mock_prompt_input, _mock_which):
+    def test_handle_ask_ai_interactive_opencode_launch(self, _mock_clear, mock_subproc, _mock_prompt_input, _mock_which):
         job = {
             "job_id": "test-job-123",
             "issue_number": 123,
@@ -1258,14 +1258,52 @@ class AppFeatureTests_{i}: XCTestCase {{
             "base_branch": "main",
         }
         mock_subproc.return_value = MagicMock(return_value=0, stdout="", stderr="")
-
         dev_console.handle_ask_ai(job, ["gemini"])
 
-        # Check that opencode was executed interactively with prompt
         called_cmds = [call.args[0] for call in mock_subproc.call_args_list if call.args]
         opencode_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "opencode"]
         self.assertTrue(len(opencode_calls) > 0)
         self.assertEqual(opencode_calls[0][1], "--prompt")
+        self.assertIn("Job #123: Fix risk tab", opencode_calls[0][2])
+
+    @patch("dev_console.shutil.which", side_effect=lambda x: f"/usr/local/bin/{x}" if x in ["agy", "claude", "gemini", "codex"] else None)
+    @patch("dev_console.prompt_input", side_effect=["1", "2", "3", "4", "b"])
+    @patch("dev_console.subprocess.run")
+    @patch("dev_console.clear_screen")
+    def test_handle_ask_ai_all_cli_options(self, _mock_clear, mock_subproc, _mock_prompt_input, _mock_which):
+        job = {
+            "job_id": "test-job-789",
+            "issue_number": 789,
+            "title": "Fix memory leak",
+            "status": "review-needed",
+            "branch": "feature/fix-leak",
+            "base_branch": "main",
+        }
+        mock_subproc.return_value = MagicMock(return_value=0, stdout="", stderr="")
+        dev_console.handle_ask_ai(job, ["gemini"])
+
+        called_cmds = [call.args[0] for call in mock_subproc.call_args_list if call.args]
+        # Verify agy
+        agy_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "agy"]
+        self.assertTrue(len(agy_calls) > 0)
+        self.assertEqual(agy_calls[0][1], "--prompt-interactive")
+        self.assertIn("Job #789: Fix memory leak", agy_calls[0][2])
+
+        # Verify claude
+        claude_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "claude"]
+        self.assertTrue(len(claude_calls) > 0)
+        self.assertIn("Job #789: Fix memory leak", claude_calls[0][1])
+
+        # Verify gemini
+        gemini_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "gemini"]
+        self.assertTrue(len(gemini_calls) > 0)
+        self.assertEqual(gemini_calls[0][1], "-i")
+        self.assertIn("Job #789: Fix memory leak", gemini_calls[0][2])
+
+        # Verify codex
+        codex_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "codex"]
+        self.assertTrue(len(codex_calls) > 0)
+        self.assertIn("Job #789: Fix memory leak", codex_calls[0][1])
 
     @patch("dev_console.shutil.which", return_value=None)
     @patch("dev_console.prompt_input", side_effect=["q", "Why was this changed?", "", "b"])
