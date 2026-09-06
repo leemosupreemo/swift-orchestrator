@@ -3045,100 +3045,82 @@ def handle_run_tests_menu(session_allowed_machines: list[str], session_allowed_m
                 pad = " " * max(0, width - len(raw_tag))
                 return f"[{color_code}{k}\033[0m]{pad}"
 
-            if cols >= 80:
-                desc_w = max(16, cols - 58)
-                header = f"{'Opt':<{opt_w}} | {'Test Target / Suite':<{name_w}} | {'Test Count':<{count_w}} | {'Scope / Location':<{desc_w}}"
-                print(header)
-                print("-" * min(len(header), cols - 2))
+            target_name = PROJECT_CONFIG.test_target or "All Targets"
+            opt1_count = f"{total_tests} test(s)" if total_tests > 0 else "All tests"
 
-                # Option 1: Run All Tests
-                target_name = PROJECT_CONFIG.test_target or "All Targets"
-                opt1_name = f"All Unit Tests ({target_name})"
-                if len(opt1_name) > name_w:
-                    opt1_name = opt1_name[:name_w - 2] + ".."
-                opt1_count = f"{total_tests} test(s)" if total_tests > 0 else "All tests"
-                opt1_desc = "Runs entire test target via xcodebuild test"
-                display_desc = opt1_desc if len(opt1_desc) <= desc_w else opt1_desc[:max(0, desc_w - 2)] + ".."
-                print(f"{format_opt_cell('1', '\033[1;92m')} | \033[1;97m{opt1_name:<{name_w}}\033[0m | \033[1;92m{opt1_count:<{count_w}}\033[0m | \033[97m{display_desc:<{desc_w}}\033[0m")
+            # Primary Action: Run All Tests
+            print(f"  [\033[1;92m1\033[0m] \033[1;92m🚀 Run All Unit Tests\033[0m \033[1;97m({opt1_count})\033[0m \033[90m• Target: {target_name}\033[0m")
+            print(f"      \033[90mRuns entire test target via xcodebuild test\033[0m\n")
 
-                # Option map for dispatching
-                option_map: dict[str, dict[str, Any]] = {}
-                current_idx = 2
+            option_map: dict[str, dict[str, Any]] = {}
+            current_idx = 2
 
-                # List individual suites
-                for s in suites:
-                    key = str(current_idx)
-                    option_map[key] = {"type": "suite", "suite": s}
-                    s_name = s["name"]
-                    if len(s_name) > name_w:
-                        s_name = s_name[:name_w - 2] + ".."
-                    s_count = f"{s['test_count']} test(s)"
-                    s_rel = str(s["rel_path"])
-                    display_rel = s_rel if len(s_rel) <= desc_w else s_rel[:max(0, desc_w - 2)] + ".."
-                    print(f"{format_opt_cell(key)} | {s_name:<{name_w}} | \033[93m{s_count:<{count_w}}\033[0m | \033[90m{display_rel:<{desc_w}}\033[0m")
-                    current_idx += 1
+            if suites or test_plans:
+                print(f"  \033[1;97m📋 Individual Test Suites\033[0m \033[90m(-only-testing)\033[0m")
 
-                # List test plans if any exist
-                if test_plans:
-                    print(f"{' ' * opt_w} | \033[1;90m--- XCODE TEST PLANS ---\033[0m")
-                    for tp in test_plans:
+                if cols >= 80:
+                    desc_w = max(16, cols - 60)
+                    header = f"  {'Opt':<{opt_w}} | {'Test Suite':<{name_w}} | {'Test Count':<{count_w}} | {'Scope / Location':<{desc_w}}"
+                    print(header)
+                    print("  " + "-" * min(len(header) - 2, cols - 4))
+
+                    # List individual suites
+                    for s in suites:
                         key = str(current_idx)
-                        option_map[key] = {"type": "plan", "plan": tp}
-                        tp_name = tp.stem
-                        if len(tp_name) > name_w:
-                            tp_name = tp_name[:name_w - 2] + ".."
-                        tp_rel = str(tp.relative_to(ROOT))
-                        display_rel = tp_rel if len(tp_rel) <= desc_w else tp_rel[:max(0, desc_w - 2)] + ".."
-                        print(f"{format_opt_cell(key)} | {tp_name:<{name_w}} | \033[95m{'Test Plan':<{count_w}}\033[0m | \033[90m{display_rel:<{desc_w}}\033[0m")
-                        current_idx += 1
-            else:
-                # Responsive compact layout for narrow terminals (fits cleanly in 50 cols)
-                name_w_compact = max(16, cols - 24)
-                header = f"{'Opt':<{opt_w}} | {'Test Target / Suite':<{name_w_compact}} | {'Test Count':<{count_w}}"
-                print(header)
-                print("-" * min(len(header), cols - 2))
-
-                # Option 1: Run All Tests
-                target_name = PROJECT_CONFIG.test_target or "All Targets"
-                opt1_name = f"All Unit Tests ({target_name})"
-                if len(opt1_name) > name_w_compact:
-                    opt1_name = opt1_name[:name_w_compact - 2] + ".."
-                opt1_count = f"{total_tests} test(s)" if total_tests > 0 else "All tests"
-                print(f"{format_opt_cell('1', '\033[1;92m')} | \033[1;97m{opt1_name:<{name_w_compact}}\033[0m | \033[1;92m{opt1_count:<{count_w}}\033[0m")
-
-                # Option map for dispatching
-                option_map = {}
-                current_idx = 2
-
-                # List individual suites
-                for s in suites:
-                    key = str(current_idx)
-                    option_map[key] = {"type": "suite", "suite": s}
-                    s_name = s["name"]
-                    if len(s_name) > name_w_compact:
-                        s_name = s_name[:name_w_compact - 2] + ".."
-                    s_count = f"{s['test_count']} test(s)"
-                    print(f"{format_opt_cell(key)} | {s_name:<{name_w_compact}} | \033[93m{s_count:<{count_w}}\033[0m")
-                    current_idx += 1
-
-                # List test plans if any exist
-                if test_plans:
-                    print(f"{' ' * opt_w} | \033[1;90m--- XCODE TEST PLANS ---\033[0m")
-                    for tp in test_plans:
-                        key = str(current_idx)
-                        option_map[key] = {"type": "plan", "plan": tp}
-                        tp_name = tp.stem
-                        if len(tp_name) > name_w_compact:
-                            tp_name = tp_name[:name_w_compact - 2] + ".."
-                        print(f"{format_opt_cell(key)} | {tp_name:<{name_w_compact}} | \033[95m{'Test Plan':<{count_w}}\033[0m")
+                        option_map[key] = {"type": "suite", "suite": s}
+                        s_name = s["name"]
+                        if len(s_name) > name_w:
+                            s_name = s_name[:name_w - 2] + ".."
+                        s_count = f"{s['test_count']} test(s)"
+                        s_rel = str(s["rel_path"])
+                        display_rel = s_rel if len(s_rel) <= desc_w else s_rel[:max(0, desc_w - 2)] + ".."
+                        print(f"  {format_opt_cell(key)} | {s_name:<{name_w}} | \033[93m{s_count:<{count_w}}\033[0m | \033[90m{display_rel:<{desc_w}}\033[0m")
                         current_idx += 1
 
-            print_header("Actions")
-            print("[\033[1;92m1\033[0m]   Run all test suites in target")
-            if suites:
-                max_key = current_idx - 1
-                print(f"[\033[1;96m2-{max_key}\033[0m] Run specific individual test suite (-only-testing)")
-            print("[\033[1;91mB\033[0m]   Back to Manage Test Coverage Menu\n")
+                    # List test plans if any exist
+                    if test_plans:
+                        print(f"  {' ' * opt_w} | \033[1;90m--- XCODE TEST PLANS ---\033[0m")
+                        for tp in test_plans:
+                            key = str(current_idx)
+                            option_map[key] = {"type": "plan", "plan": tp}
+                            tp_name = tp.stem
+                            if len(tp_name) > name_w:
+                                tp_name = tp_name[:name_w - 2] + ".."
+                            tp_rel = str(tp.relative_to(ROOT))
+                            display_rel = tp_rel if len(tp_rel) <= desc_w else tp_rel[:max(0, desc_w - 2)] + ".."
+                            print(f"  {format_opt_cell(key)} | {tp_name:<{name_w}} | \033[95m{'Test Plan':<{count_w}}\033[0m | \033[90m{display_rel:<{desc_w}}\033[0m")
+                            current_idx += 1
+                else:
+                    # Responsive compact layout for narrow terminals
+                    name_w_compact = max(16, cols - 26)
+                    header = f"  {'Opt':<{opt_w}} | {'Test Suite':<{name_w_compact}} | {'Test Count':<{count_w}}"
+                    print(header)
+                    print("  " + "-" * min(len(header) - 2, cols - 4))
+
+                    # List individual suites
+                    for s in suites:
+                        key = str(current_idx)
+                        option_map[key] = {"type": "suite", "suite": s}
+                        s_name = s["name"]
+                        if len(s_name) > name_w_compact:
+                            s_name = s_name[:name_w_compact - 2] + ".."
+                        s_count = f"{s['test_count']} test(s)"
+                        print(f"  {format_opt_cell(key)} | {s_name:<{name_w_compact}} | \033[93m{s_count:<{count_w}}\033[0m")
+                        current_idx += 1
+
+                    # List test plans if any exist
+                    if test_plans:
+                        print(f"  {' ' * opt_w} | \033[1;90m--- XCODE TEST PLANS ---\033[0m")
+                        for tp in test_plans:
+                            key = str(current_idx)
+                            option_map[key] = {"type": "plan", "plan": tp}
+                            tp_name = tp.stem
+                            if len(tp_name) > name_w_compact:
+                                tp_name = tp_name[:name_w_compact - 2] + ".."
+                            print(f"  {format_opt_cell(key)} | {tp_name:<{name_w_compact}} | \033[95m{'Test Plan':<{count_w}}\033[0m")
+                            current_idx += 1
+
+            print("\n  [\033[1;91mB\033[0m] Back\n")
 
             if error_msg:
                 print(f"\n\033[1;91mNOT A VALID OPTION, PLEASE TRY AGAIN... ({error_msg})\033[0m")
