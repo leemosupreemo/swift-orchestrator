@@ -5064,44 +5064,62 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
         recommended_key = "opencode"
         rec_reason = "Job Builder"
 
-    rec_idx = 1
-    if available_clis:
-        for idx, (cli_key, _, _) in enumerate(available_clis, 1):
-            if recommended_key and cli_key == recommended_key:
-                rec_idx = idx
-                break
+    # Partition into recommended and others
+    rec_cli = None
+    other_clis = []
+    for item in available_clis:
+        if recommended_key and item[0] == recommended_key and rec_cli is None:
+            rec_cli = item
+        else:
+            other_clis.append(item)
+
+    if rec_cli is None and available_clis:
+        rec_cli = available_clis[0]
+        other_clis = available_clis[1:]
+
+    ordered_clis = ([rec_cli] if rec_cli else []) + other_clis
 
     while True:
         clear_screen()
         print_header("Ask AI / Interactive Investigation")
         print("\033[90mInspect code modifications, ask clarifying questions, and test hypotheses.\033[0m\n")
 
-        print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
-        if available_clis:
-            for idx, (cli_key, cli_label, _) in enumerate(available_clis, 1):
-                is_rec = (idx == rec_idx)
-                rec_tag = f" \033[1;92m⭐️ (Recommended{f' - {rec_reason}' if rec_reason and is_rec else ''})\033[0m" if is_rec else ""
-                print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m{rec_tag} (Interactive Multi-Turn Session)")
-        else:
-            print("  \033[90m(No local AI CLIs detected in PATH)\033[0m")
+        # 1. Prominently Highlighted Recommended Session
+        if rec_cli:
+            rec_key, rec_label, _ = rec_cli
+            rec_badge = f" \033[1;92m⭐️ ({rec_reason})\033[0m" if rec_reason else " \033[1;92m⭐️ (Recommended)\033[0m"
+            print("\033[1;92m⭐️ RECOMMENDED LLM SESSION\033[0m")
+            print(f"  [\033[1;92m1\033[0m] Launch \033[1;97;42m {rec_label} \033[0m{rec_badge}")
+            print(f"      \033[90mPreloads job brief, builder summary & full git diff into interactive session.\033[0m\n")
 
-        print("\n\033[1;95m💬 IN-CONSOLE MODE\033[0m")
+        # 2. Other Available AI CLI Sessions
+        if other_clis:
+            print("\033[1;95m🚀 OTHER AI CLI SESSIONS\033[0m")
+            for idx, (cli_key, cli_label, _) in enumerate(other_clis, 2):
+                print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m \033[90m(Interactive Multi-Turn Session)\033[0m")
+            print()
+        elif not rec_cli:
+            print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
+            print("  \033[90m(No local AI CLIs detected in PATH)\033[0m\n")
+
+        # 3. In-Console Mode & Navigation
+        print("\033[1;95m💬 IN-CONSOLE MODE\033[0m")
         print("  [\033[1;93mQ\033[0m] Quick Question in Console (Single Turn)")
         print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
 
-        placeholder = f"{rec_idx} (Enter for default), Q, or B" if available_clis else "Q or B"
+        placeholder = "1 (Enter for recommended), Q, or B" if ordered_clis else "Q or B"
         choice = prompt_input("Select Option:", placeholder=placeholder, field_below=True).strip().lower()
         if not choice:
-            if available_clis:
-                choice = str(rec_idx)
+            if ordered_clis:
+                choice = "1"
             else:
                 break
         elif choice == "b":
             break
 
         # Check if user picked an interactive CLI
-        if choice.isdigit() and 1 <= int(choice) <= len(available_clis):
-            cli_key, cli_label, bin_name = available_clis[int(choice) - 1]
+        if choice.isdigit() and 1 <= int(choice) <= len(ordered_clis):
+            cli_key, cli_label, bin_name = ordered_clis[int(choice) - 1]
             clear_screen()
             print_header(f"🤖 Orchestrator AI Session ({cli_label})")
             display_ctx = context_file.name
