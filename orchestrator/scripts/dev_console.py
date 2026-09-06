@@ -2685,11 +2685,7 @@ def handle_test_frameworks_menu(session_allowed_machines: list[str], session_all
                     p_name = name if len(name) <= name_w - 2 else name[:name_w - 4] + ".."
                     status_str = f"{color}{status:<{status_w-2}}\033[0m"
                     print(f"  \033[1;90m│\033[0m  \033[1;96m{key:<{opt_w-3}}\033[0m\033[1;90m│\033[0m \033[1;97m{p_name:<{name_w-2}}\033[0m \033[1;90m│\033[0m {status_str} \033[1;90m│\033[0m")
-                print(f"  \033[1;90m└{'─'*opt_w}┴{'─'*name_w}┴{'─'*status_w}┘\033[0m")
-                print()
-                for key, name, status, color, desc in items:
-                    print_wrapped_kv(f"  • [\033[1;96m{key}\033[0m] \033[1;97m{name}\033[0m: ", desc)
-                print()
+                print(f"  \033[1;90m└{'─'*opt_w}┴{'─'*name_w}┴{'─'*status_w}┘\033[0m\n")
 
             print("  [\033[1;91mB\033[0m] Back\n")
 
