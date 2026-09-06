@@ -1353,14 +1353,15 @@ class AppFeatureTests_{i}: XCTestCase {{
         self.assertIn("`abc1234 Guard against nil config`", bundle)
         self.assertTrue(ctx_path.exists())
 
+    @patch("dev_console.time.sleep")
     @patch("dev_console.shutil.which", side_effect=lambda x: f"/usr/local/bin/{x}" if x == "codex" else None)
     @patch("dev_console.sys.stdin.isatty", return_value=True)
-    @patch("dev_console.prompt_input", side_effect=["1", "Root cause identified in DatabasePool", "b"])
+    @patch("dev_console.prompt_input", side_effect=["1", "b"])
     @patch("dev_console.subprocess.run")
     @patch("dev_console.clear_screen")
     @patch("dev_console.save_job")
-    def test_handle_ask_ai_captures_notes_and_commits_into_job_and_investigations_file(
-        self, mock_save, _mock_clear, mock_subproc, _mock_prompt_input, _mock_isatty, _mock_which
+    def test_handle_ask_ai_captures_commits_into_job_and_investigations_file(
+        self, mock_save, _mock_clear, mock_subproc, _mock_prompt_input, _mock_isatty, _mock_which, mock_sleep
     ):
         job = {
             "job_id": "test-job-investigate-1",
@@ -1398,19 +1399,15 @@ class AppFeatureTests_{i}: XCTestCase {{
         inv = job["interactive_investigations"][0]
         self.assertEqual(inv["tool"], "Codex CLI")
         self.assertEqual(inv["cli_key"], "codex")
-        self.assertEqual(inv["notes"], "Root cause identified in DatabasePool")
         self.assertEqual(inv["new_commits"], ["head2222 Add WAL mode pragma"])
 
-        self.assertIn("investigation_notes", job)
-        self.assertEqual(job["investigation_notes"][0]["note"], "Root cause identified in DatabasePool")
-
         mock_save.assert_called_with(job)
+        mock_sleep.assert_called_with(2.0)
 
         inv_file = dev_console.OUTPUT_DIR / "test-job-investigate-1" / "investigations.md"
         self.assertTrue(inv_file.exists())
         inv_content = inv_file.read_text(encoding="utf-8")
         self.assertIn("Investigate sqlite lock contention", inv_content)
-        self.assertIn("Root cause identified in DatabasePool", inv_content)
         self.assertIn("head2222 Add WAL mode pragma", inv_content)
 
     @patch("dev_console.print_header")

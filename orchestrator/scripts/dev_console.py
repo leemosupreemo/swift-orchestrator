@@ -5497,7 +5497,7 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     except Exception:
                         pass
 
-                print(f"\033[1;92m✓ {cli_label} session ended\033[0m \033[90m({duration_str})\033[0m")
+                print(f"\n\033[1;92m✓ {cli_label} session ended\033[0m \033[90m({duration_str})\033[0m")
                 if new_commits:
                     print(f"  \033[1;93mNew Commits:\033[0m {len(new_commits)} detected")
                     for c in new_commits[:3]:
@@ -5505,30 +5505,19 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     if len(new_commits) > 3:
                         print(f"    \033[90m...and {len(new_commits) - 3} more\033[0m")
 
-                note = ""
-                if sys.stdin.isatty():
-                    print("\n\033[1;97mCapture findings / technical notes for this job:\033[0m")
-                    note = prompt_input(
-                        "Note (Enter to skip):",
-                        placeholder="e.g. Verified root cause in RiskTab.swift",
-                        field_below=True
-                    ).strip()
-
                 job = record_interactive_investigation(
                     job,
                     tool=cli_label,
                     cli_key=cli_key,
                     duration=duration_str,
-                    notes=note,
+                    notes="",
                     new_commits=new_commits,
                     duration_seconds=elapsed_secs,
                 )
                 save_job(job)
                 generate_chat_context(job)
 
-                if note or new_commits:
-                    print(f"\n\033[1;92m✅ Saved investigation context to Job #{issue_num} & investigations.md\033[0m")
-                    time.sleep(1.0)
+                time.sleep(2.0)
                 continue
 
 def handle_api_keys(session_allowed_machines, session_allowed_models):
