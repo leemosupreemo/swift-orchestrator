@@ -735,7 +735,7 @@ def script_failure_summary(output_log: str) -> str | None:
         return "\n".join(error_lines[:5])
     return None
 
-def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None) -> tuple[int, str]:
+def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None, label: str | None = None) -> tuple[int, str]:
     if job:
         job["online_machines"] = get_online_machines(job.get("allowed_machines", []))
     else:
@@ -749,9 +749,14 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
     show_status_bar = sys.stdout.isatty()
     last_render = 0.0
     last_output_time = time.monotonic()
-    initial_label = "Executing workflow"
-    if job and job.get("title"):
+    if label:
+        initial_label = label
+    elif job and job.get("title"):
         initial_label = f"Working on {job.get('title')}"
+    elif any("manual_run.py" in str(c) for c in cmd) and any("test" in str(c) for c in cmd):
+        initial_label = "Running unit tests"
+    else:
+        initial_label = "Executing workflow"
     indicator = ProgressIndicator(label=initial_label, hint="Ctrl-C to abort")
     output_chunks = []
 
@@ -881,16 +886,22 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
             for part in parts[1:]:
                 test_targets.append(part.split()[0].strip())
 
+    try:
+        cols, _ = os.get_terminal_size()
+    except Exception:
+        cols = 80
+    box_width = max(45, min(60, cols - 2))
+
     if test_targets:
-        try:
-            cols, _ = os.get_terminal_size()
-        except Exception:
-            cols = 80
-        box_width = max(45, min(60, cols - 2))
         target_str = ", ".join(test_targets)
         print("\033[1;95m" + "★" * box_width)
         print(f"  🧪 TESTS CHOSEN TO BE RUN: {target_str}")
         print("★" * box_width + "\033[0m\n")
+    elif script_name == "manual_run.py" and "test" in args:
+        tt = PROJECT_CONFIG.test_target or "All Targets"
+        print("\033[1;92m" + "=" * box_width)
+        print(f"  🧪 RUNNING ALL UNIT TESTS ({tt})")
+        print("=" * box_width + "\033[0m\n")
 
     returncode = 1
     try:
@@ -917,7 +928,7 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
             returncode = subprocess.run(cmd, cwd=str(ROOT), stdin=sys.stdin, stdout=None, stderr=None, env=sub_env).returncode
             output_log = ""
         else:
-            returncode, output_log = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models)
+            returncode, output_log = run_streaming_process(cmd, job=job, sub_menu=sub_menu, session_machines=session_machines, session_models=session_models, label=prompt)
             
         if returncode != 0:
             print(f"\n\033[1;91mScript failed (exit {returncode}).\033[0m")
@@ -3136,8 +3147,10 @@ def handle_run_tests_menu(session_allowed_machines: list[str], session_allowed_m
             if choice == "b":
                 break
             elif choice in ("1", "a"):
+                clear_screen()
                 print_header(f"Running All Unit Tests ({target_name})")
-                run_script("manual_run.py", ["test"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                print(f"  \033[90mTarget: {target_name} ({opt1_count})\033[0m\n")
+                run_script("manual_run.py", ["test"], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt=f"Running all unit tests ({target_name})")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice in option_map:
                 opt = option_map[choice]
@@ -3146,16 +3159,18 @@ def handle_run_tests_menu(session_allowed_machines: list[str], session_allowed_m
                     suite_name = selected_suite["name"]
                     tt = PROJECT_CONFIG.test_target or ""
                     testing_flag = f"-only-testing:{tt}/{suite_name}" if tt else f"-only-testing:{suite_name}"
+                    clear_screen()
                     print_header(f"Running Test Suite: {suite_name}")
                     print(f"  \033[90mExecuting {testing_flag}...\033[0m\n")
-                    run_script("manual_run.py", ["test", "--test-only", testing_flag], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                    run_script("manual_run.py", ["test", "--test-only", testing_flag], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt=f"Running {suite_name}")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 elif opt["type"] == "plan":
                     tp = opt["plan"]
                     flags = get_test_plan_flags(tp)
+                    clear_screen()
                     print_header(f"Running Test Plan: {tp.stem}")
                     print(f"  \033[90mExecuting {flags}...\033[0m\n")
-                    run_script("manual_run.py", ["test", "--test-only", flags], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
+                    run_script("manual_run.py", ["test", "--test-only", flags], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt=f"Running {tp.stem}")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             else:
                 error_msg = f"'{choice}'"
