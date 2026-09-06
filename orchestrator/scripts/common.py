@@ -1434,6 +1434,8 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     if opt.strip() == "---":
                         output.append("")
                     else:
+                        if i > 0 and output and output[-1] != "":
+                            output.append("")
                         output.append(f"  \033[1;90m{opt}\033[0m")
                     continue
                 cursor = "> " if i == idx else "  "
