@@ -5259,17 +5259,17 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     sub_env = os.environ.copy()
                     sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
                     sub_env.setdefault("GOOGLE_CLOUD_LOCATION", "us-central1")
-                    # Render Orchestrator footer at bottom and keep scroll region active
-                    status_bar.set_scroll_region()
-                    status_bar.render(at_bottom=True, force=True, q_msg="Type /exit or Ctrl-D to return to Orchestrator")
-                    sys.stdout.write("\033[?25h")
+                    # Clear parent footer and reset scroll region so the interactive child CLI has full viewport control
+                    status_bar.clear_footer()
+                    status_bar.reset_scroll_region(force=True)
+                    sys.stdout.write("\033[r\033[?25h")
                     sys.stdout.flush()
                     subprocess.run(cmd, cwd=str(ROOT), env=sub_env)
                 except Exception as e:
                     print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
                     input("\n\033[1;96mTap Enter to continue...\033[0m")
                 finally:
-                    # Clean up terminal state upon return
+                    # Clean up terminal state and reset scroll region upon return
                     status_bar.clear_footer()
                     status_bar.reset_scroll_region(force=True)
                     sys.stdout.write("\033[0m\r\n\033[K")
