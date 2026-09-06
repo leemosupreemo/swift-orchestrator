@@ -5103,6 +5103,157 @@ def generate_chat_context(job: dict[str, Any]) -> tuple[str, Path]:
     return context_bundle, context_file
 
 
+def run_interactive_cli_with_framed_footer(
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    status_bar: StatusBar | None = None,
+    q_msg: str = "Type /exit or Ctrl-D to return to Orchestrator",
+) -> int:
+    """Runs an interactive CLI in a pseudo-terminal (PTY) with an anchored Orchestrator footer.
+
+    By constraining the child PTY height to (terminal_lines - 4), the child process
+    (Codex, Claude, Antigravity, Gemini) renders its TUI strictly within the top rows,
+    while the bottom 4 rows remain pinned as the active Orchestrator status bar / footer.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        res = subprocess.run(cmd, cwd=str(ROOT), env=env)
+        return res.returncode if hasattr(res, "returncode") else 0
+
+    try:
+        import fcntl
+        import pty
+        import select
+        import signal
+        import struct
+        import termios
+        import tty
+
+        try:
+            cols, lines = os.get_terminal_size()
+        except Exception:
+            cols, lines = 80, 24
+
+        child_lines = max(5, lines - 4)
+        child_cols = max(10, cols)
+
+        master_fd, slave_fd = pty.openpty()
+        ws = struct.pack("HHHH", child_lines, child_cols, 0, 0)
+        try:
+            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, ws)
+        except Exception:
+            pass
+
+        old_termios = None
+        try:
+            old_termios = termios.tcgetattr(sys.stdin.fileno())
+        except Exception:
+            pass
+
+        old_sigwinch = None
+        proc = None
+
+        try:
+            if status_bar:
+                status_bar.set_scroll_region()
+                status_bar.render(at_bottom=True, force=True, q_msg=q_msg)
+
+            proc = subprocess.Popen(
+                cmd,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=str(ROOT),
+                close_fds=True,
+                env=env,
+            )
+            os.close(slave_fd)
+
+            def handle_winch(signum, frame):
+                try:
+                    c, l = os.get_terminal_size()
+                    cl = max(5, l - 4)
+                    cc = max(10, c)
+                    new_ws = struct.pack("HHHH", cl, cc, 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, new_ws)
+                    if status_bar:
+                        status_bar.set_scroll_region()
+                        status_bar.render(at_bottom=True, force=True, q_msg=q_msg)
+                    if proc and proc.poll() is None:
+                        proc.send_signal(signal.SIGWINCH)
+                except Exception:
+                    pass
+
+            try:
+                old_sigwinch = signal.signal(signal.SIGWINCH, handle_winch)
+            except Exception:
+                pass
+
+            try:
+                tty.setraw(sys.stdin.fileno())
+            except Exception:
+                pass
+
+            while proc.poll() is None:
+                r, _, _ = select.select([sys.stdin.fileno(), master_fd], [], [], 0.05)
+                if sys.stdin.fileno() in r:
+                    try:
+                        data = os.read(sys.stdin.fileno(), 1024)
+                        if not data:
+                            break
+                        os.write(master_fd, data)
+                    except OSError:
+                        break
+
+                if master_fd in r:
+                    try:
+                        data = os.read(master_fd, 4096)
+                        if not data:
+                            break
+                        os.write(sys.stdout.fileno(), data)
+                    except OSError:
+                        break
+
+            # Flush remaining output from master_fd after child exits
+            try:
+                while True:
+                    r, _, _ = select.select([master_fd], [], [], 0.02)
+                    if master_fd in r:
+                        data = os.read(master_fd, 4096)
+                        if not data:
+                            break
+                        os.write(sys.stdout.fileno(), data)
+                    else:
+                        break
+            except Exception:
+                pass
+
+        finally:
+            if old_termios:
+                try:
+                    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_termios)
+                except Exception:
+                    pass
+            if old_sigwinch is not None:
+                try:
+                    signal.signal(signal.SIGWINCH, old_sigwinch)
+                except Exception:
+                    pass
+            try:
+                os.close(master_fd)
+            except Exception:
+                pass
+            if status_bar:
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
+                sys.stdout.write("\033[0m\r\n\033[K")
+                sys.stdout.flush()
+
+        return proc.wait() if proc else 0
+    except Exception:
+        res = subprocess.run(cmd, cwd=str(ROOT), env=env)
+        return res.returncode if hasattr(res, "returncode") else 0
+
+
 def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
     """Opens a conversational interface or launches an interactive LLM CLI session."""
     import shutil
@@ -5259,12 +5410,12 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     sub_env = os.environ.copy()
                     sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
                     sub_env.setdefault("GOOGLE_CLOUD_LOCATION", "us-central1")
-                    # Clear parent footer and reset scroll region so the interactive child CLI has full viewport control
-                    status_bar.clear_footer()
-                    status_bar.reset_scroll_region(force=True)
-                    sys.stdout.write("\033[r\033[?25h")
-                    sys.stdout.flush()
-                    subprocess.run(cmd, cwd=str(ROOT), env=sub_env)
+                    run_interactive_cli_with_framed_footer(
+                        cmd,
+                        env=sub_env,
+                        status_bar=status_bar,
+                        q_msg="Type /exit or Ctrl-D to return to Orchestrator",
+                    )
                 except Exception as e:
                     print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
                     input("\n\033[1;96mTap Enter to continue...\033[0m")

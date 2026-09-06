@@ -1500,9 +1500,21 @@ class AppFeatureTests_{i}: XCTestCase {{
             self.assertIn("All Passing", printed)
             self.assertIn("(All 25 suite tests)", printed)
 
+    @patch("dev_console.subprocess.run")
+    def test_run_interactive_cli_with_framed_footer_non_tty(self, mock_run):
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+        
+        status_bar = MagicMock()
+        ret = dev_console.run_interactive_cli_with_framed_footer(["echo", "hello"], status_bar=status_bar)
+        self.assertEqual(ret, 0)
+        mock_run.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
