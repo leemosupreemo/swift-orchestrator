@@ -4396,8 +4396,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
-            if ai_modified or ai_untracked:
-                inspect_options.append(("i", "[\033[1;96mI\033[0m] View AI Changes (Files)"))
+            if ai_modified or ai_untracked or job.get("builder_summary"):
+                inspect_options.append(("i", "[\033[1;96mI\033[0m] View AI Changes (Files & Synopsis)"))
                 
             context_options.append(("l", "[\033[93mL\033[0m] Link Logs (Update Context)"))
             context_options.append(("k", "[\033[93mK\033[0m] Attach UI Mockup / Reference"))
@@ -4582,23 +4582,59 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 print("\n  Tip: You can resume these in the Antigravity CLI using: antigravity --resume <ID>")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i" and "i" in actions:
-                open_action_screen("AI Modified Files")
+                open_action_screen("AI Changes & Synopsis")
                 ai_modified = job.get("ai_modified_files", [])
                 ai_untracked = job.get("ai_untracked_files", [])
                 
+                # Retrieve builder synopsis / summary
+                job_id = job.get("job_id", "")
+                summary_text = ""
+                if job_id:
+                    summary_file = OUTPUT_DIR / job_id / "builder_summary.md"
+                    if summary_file.exists():
+                        try:
+                            summary_text = summary_file.read_text(encoding="utf-8").strip()
+                        except Exception:
+                            pass
+                if not summary_text:
+                    summary_text = (job.get("builder_summary") or "").strip()
+                if not summary_text and isinstance(job.get("plan"), dict):
+                    summary_text = (job.get("plan", {}).get("summary") or "").strip()
+
+                hypothesis = (job.get("builder_hypothesis") or "").strip()
+
+                if summary_text:
+                    print("  \033[1;97m📝 Synopsis / Summary of Changes:\033[0m")
+                    for s_line in summary_text.splitlines():
+                        if s_line.strip():
+                            print(f"    \033[97m{s_line}\033[0m")
+                        else:
+                            print()
+                    print()
+
+                if hypothesis:
+                    print("  \033[1;93m💡 Hypothesis / Root Cause:\033[0m")
+                    for h_line in hypothesis.splitlines():
+                        if h_line.strip():
+                            print(f"    \033[93m{h_line}\033[0m")
+                        else:
+                            print()
+                    print()
+
                 if not ai_modified and not ai_untracked:
-                    print("  No AI-modified files recorded for this job.")
+                    if not summary_text and not hypothesis:
+                        print("  No AI-modified files or summary recorded for this job.")
                 else:
                     if ai_modified:
-                        print("  \033[93mModified Files:\033[0m")
+                        print("  \033[1;93m📂 Modified Files:\033[0m")
                         for f in sorted(ai_modified):
-                            print(f"    - {f}")
+                            print(f"    • {f}")
                     
                     if ai_untracked:
                         if ai_modified: print()
-                        print("  \033[92mUntracked (New) Files:\033[0m")
+                        print("  \033[1;92m✨ Untracked (New) Files:\033[0m")
                         for f in sorted(ai_untracked):
-                            print(f"    - {f}")
+                            print(f"    • {f}")
                             
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "f" and "f" in actions:
