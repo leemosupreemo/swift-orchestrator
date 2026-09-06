@@ -5111,9 +5111,10 @@ def run_interactive_cli_with_framed_footer(
 ) -> int:
     """Runs an interactive CLI in a pseudo-terminal (PTY) with an anchored Orchestrator footer.
 
-    By constraining the child PTY height to (terminal_lines - 4), the child process
-    (Codex, Claude, Antigravity, Gemini) renders its TUI strictly within the top rows,
-    while the bottom 4 rows remain pinned as the active Orchestrator status bar / footer.
+    By constraining the child PTY height to (terminal_lines - 4) and actively clamping
+    scroll margins and cursor addressing escape codes, the child process (Codex, Claude,
+    Antigravity, Gemini) is contained within the top viewport while the Orchestrator
+    footer remains permanently anchored at the bottom.
     """
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         res = subprocess.run(cmd, cwd=str(ROOT), env=env)
@@ -5122,6 +5123,7 @@ def run_interactive_cli_with_framed_footer(
     try:
         import fcntl
         import pty
+        import re
         import select
         import signal
         import struct
@@ -5151,6 +5153,44 @@ def run_interactive_cli_with_framed_footer(
 
         old_sigwinch = None
         proc = None
+        last_footer_redraw = time.monotonic()
+
+        def filter_child_bytes(data: bytes, max_rows: int) -> tuple[bytes, bool]:
+            """Filters and clamps ANSI terminal escape sequences to prevent footer eviction."""
+            text = data.decode("latin1", errors="replace")
+            needs_redraw = False
+
+            # Check for screen clearing / alt-screen triggers
+            if any(seq in text for seq in ["\x1b[2J", "\x1b[3J", "\x1b[H\x1b[J", "\x1b[1;1H\x1b[J", "\x1b[?1049h", "\x1b[?1049l", "\x1b[c"]):
+                needs_redraw = True
+
+            # 1. Clamp DECSTBM \x1b[top;bottom r
+            def fix_decstbm(match: re.Match) -> str:
+                top_str, bot_str = match.group(1), match.group(2)
+                if not top_str and not bot_str:
+                    return f"\x1b[1;{max_rows}r"
+                top = int(top_str) if top_str else 1
+                bot = int(bot_str) if bot_str else max_rows
+                return f"\x1b[{min(top, max_rows)};{min(bot, max_rows)}r"
+
+            text = re.sub(r"\x1b\[(\d*);?(\d*)r", fix_decstbm, text)
+
+            # 2. Clamp cursor positioning \x1b[row;colH and \x1b[row;colf
+            def fix_cursor(match: re.Match) -> str:
+                row_str, col_str, cmd_char = match.group(1), match.group(2), match.group(3)
+                row = int(row_str) if row_str else 1
+                col = int(col_str) if col_str else 1
+                return f"\x1b[{min(row, max_rows)};{col}{cmd_char}"
+
+            text = re.sub(r"\x1b\[(\d+);(\d+)([Hf])", fix_cursor, text)
+
+            # 3. Intercept Alt Screen to maintain scroll region
+            if "\x1b[?1049h" in text:
+                text = text.replace("\x1b[?1049h", f"\x1b[?1049h\x1b[1;{max_rows}r")
+            if "\x1b[?1049l" in text:
+                text = text.replace("\x1b[?1049l", f"\x1b[?1049l\x1b[1;{max_rows}r")
+
+            return text.encode("latin1"), needs_redraw
 
         try:
             if status_bar:
@@ -5169,11 +5209,12 @@ def run_interactive_cli_with_framed_footer(
             os.close(slave_fd)
 
             def handle_winch(signum, frame):
+                nonlocal child_lines, child_cols
                 try:
                     c, l = os.get_terminal_size()
-                    cl = max(5, l - 4)
-                    cc = max(10, c)
-                    new_ws = struct.pack("HHHH", cl, cc, 0, 0)
+                    child_lines = max(5, l - 4)
+                    child_cols = max(10, c)
+                    new_ws = struct.pack("HHHH", child_lines, child_cols, 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, new_ws)
                     if status_bar:
                         status_bar.set_scroll_region()
@@ -5209,7 +5250,15 @@ def run_interactive_cli_with_framed_footer(
                         data = os.read(master_fd, 4096)
                         if not data:
                             break
-                        os.write(sys.stdout.fileno(), data)
+                        filtered, needs_redraw = filter_child_bytes(data, child_lines)
+                        os.write(sys.stdout.fileno(), filtered)
+                        sys.stdout.flush()
+
+                        now = time.monotonic()
+                        if needs_redraw or (now - last_footer_redraw > 1.5):
+                            if status_bar:
+                                status_bar.render(at_bottom=True, force=True, q_msg=q_msg)
+                            last_footer_redraw = now
                     except OSError:
                         break
 
@@ -5221,7 +5270,9 @@ def run_interactive_cli_with_framed_footer(
                         data = os.read(master_fd, 4096)
                         if not data:
                             break
-                        os.write(sys.stdout.fileno(), data)
+                        filtered, _ = filter_child_bytes(data, child_lines)
+                        os.write(sys.stdout.fileno(), filtered)
+                        sys.stdout.flush()
                     else:
                         break
             except Exception:
