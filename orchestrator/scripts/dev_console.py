@@ -4355,8 +4355,6 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 elif phase == "verify":
                     workflow_options.append(("d", "[\033[92mD\033[0m] Verify Fix (Pass/Fail Result)"))
 
-                workflow_options.append(("f", "[\033[93mF\033[0m] Guide AI Debugger (Provide Hint / Clue)"))
-
                 # Only show Resume if this is a multi-task feature with remaining tasks
                 if not is_bug_job and tasks and len(completed) < len(tasks):
                     workflow_options.append(("u", "[\033[93mU\033[0m] Resume Feature (Advance to Next Task)"))
@@ -4400,7 +4398,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 
             context_options.append(("l", "[\033[93mL\033[0m] Link Logs (Update Context)"))
             context_options.append(("k", "[\033[93mK\033[0m] Attach UI Mockup / Reference"))
-            context_options.append(("q", "[\033[93mQ\033[0m] Ask AI (Questions about changes)"))
+            context_options.append(("q", "[\033[93mQ\033[0m] Ask AI / Follow Up (Questions, Clues & Interactive Chat)"))
 
             inspect_options.append(("o", "[\033[93mO\033[0m] Select LLM Models (Override)"))
             inspect_options.append(("y", "[\033[93mY\033[0m] Export Context (Logs, Progress, Plan)"))
@@ -4602,7 +4600,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                             
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "f" and "f" in actions:
-                if status == "designing" or status == "planned" or status == "debugging":
+                if status == "designing" or status == "planned":
                     open_action_screen()
                     revised_job = handle_tweak_revise(job)
                     if revised_job:
@@ -5474,14 +5472,15 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                 for idx, (cli_key, cli_label, _) in enumerate(other_clis, 2):
                     print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m")
                 print()
-            elif not rec_cli:
-                print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
-                print("  \033[90m(No local AI CLIs detected in PATH)\033[0m\n")
+            # 3. Direct AI Guidance / Hint Option
+            print("\033[1;93m💡 STEER / PROVIDE GUIDANCE TO AI\033[0m")
+            print("  [\033[1;93mG\033[0m] Provide Hint / Clue to AI (Re-plan with Guidance)")
+            print("      \033[90mProvide domain requirements, clues, or instructions to guide the autonomous fixer.\033[0m\n")
 
-            # 3. Navigation
+            # 4. Navigation
             print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
 
-            placeholder = "1 (Enter for recommended), or B" if ordered_clis else "B"
+            placeholder = "1 (Enter for recommended), G for clue, or B" if ordered_clis else "G for clue, or B"
             choice = prompt_input("Select Option:", placeholder=placeholder, field_below=True).strip().lower()
             if not choice:
                 if ordered_clis:
@@ -5490,6 +5489,12 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     break
             elif choice == "b":
                 break
+            elif choice == "g":
+                clear_screen()
+                revised_job = handle_tweak_revise(job)
+                if revised_job:
+                    job = revised_job
+                continue
 
             # Check if user picked an interactive CLI
             if choice.isdigit() and 1 <= int(choice) <= len(ordered_clis):
@@ -5601,6 +5606,8 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
 
                 time.sleep(2.0)
                 continue
+    return job
+
 
 def handle_api_keys(session_allowed_machines, session_allowed_models):
     settings_path = CONFIG_DIR / "settings.json"

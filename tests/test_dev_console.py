@@ -1344,6 +1344,22 @@ class AppFeatureTests_{i}: XCTestCase {{
         self.assertTrue(len(claude_calls) > 0)
         self.assertIn("Job #999: Refactor router", claude_calls[0][1])
 
+    @patch("dev_console.prompt_input", side_effect=["g", "b"])
+    @patch("dev_console.handle_tweak_revise")
+    @patch("dev_console.clear_screen")
+    def test_handle_ask_ai_guidance_option(self, _mock_clear, mock_tweak, _mock_prompt_input):
+        job = {
+            "job_id": "test-job-clue",
+            "issue_number": 88,
+            "title": "Fix token decoding",
+            "status": "debugging",
+        }
+        revised = {**job, "status": "planned"}
+        mock_tweak.return_value = revised
+        result = dev_console.handle_ask_ai(job, ["gemini"])
+        mock_tweak.assert_called_once_with(job)
+        self.assertEqual(result["status"], "planned")
+
     def test_generate_chat_context_bundles_investigations_and_diff(self):
         job = {
             "job_id": "test-job-ctx-1",
