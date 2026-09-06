@@ -339,6 +339,191 @@ def format_investigation_history(job_or_investigations: dict[str, Any] | list[di
     return "\n".join(lines)
 
 
+def count_created_tests_in_diff(branch: str | None, base: str = "main") -> int:
+    """Counts newly added test methods or @Test functions in the job branch."""
+    if not branch:
+        return 0
+    try:
+        res = subprocess.run(
+            ["git", "diff", f"{base}...{branch}", "-U0"],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT)
+        )
+        if res.returncode != 0:
+            return 0
+        count = 0
+        for line in res.stdout.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                stripped = line[1:].strip()
+                # Swift test function, Python test function, or swift-testing @Test
+                if (stripped.startswith("func test") or
+                    stripped.startswith("func Test") or
+                    stripped.startswith("def test_") or
+                    stripped.startswith("@Test")):
+                    count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def parse_test_output(test_output_text: str) -> dict[str, Any]:
+    """Parses unit test execution output (Swift SPM, xcodebuild, unittest, pytest) for counts and failures."""
+    if not test_output_text:
+        return {
+            "total_run": 0,
+            "passed_count": 0,
+            "failed_count": 0,
+            "failing_tests": [],
+        }
+
+    total = 0
+    failed = 0
+    failing_tests: list[str] = []
+
+    # 1. Swift SPM format: 'Executed 14 tests, with 2 failures'
+    spm_match = re.search(r"Executed (\d+) tests?, with (\d+) failures?", test_output_text)
+    if spm_match:
+        total = int(spm_match.group(1))
+        failed = int(spm_match.group(2))
+
+    # 2. Python unittest / pytest format: 'Ran 55 tests in 1.845s'
+    unit_match = re.search(r"Ran (\d+) tests?", test_output_text)
+    if unit_match and total == 0:
+        total = int(unit_match.group(1))
+        fail_match = re.search(r"FAILED \((?:failures=(\d+))?(?:,\s*)?(?:errors=(\d+))?\)", test_output_text)
+        if fail_match:
+            failed = int(fail_match.group(1) or 0) + int(fail_match.group(2) or 0)
+
+    # 3. Extract individual failing test names
+    # Swift / Xcode pattern: Test Case '-[PackageTests.ViewModelTests testMethod]' failed
+    for m in re.finditer(r"Test [Cc]ase '(?:-\[)?([^\s'\]]+)(?:\s+([^\s'\]]+))?\]?' failed", test_output_text):
+        cls_name = m.group(1)
+        mth_name = m.group(2)
+        full_name = f"{cls_name}.{mth_name}" if mth_name else cls_name
+        parts = full_name.split(".")
+        clean_name = ".".join(parts[-2:]) if len(parts) >= 2 else full_name
+        if clean_name not in failing_tests:
+            failing_tests.append(clean_name)
+
+    # Python unittest pattern: FAIL: test_feature (test_file.TestCase)
+    for m in re.finditer(r"(?:FAIL|ERROR): ([^\s]+)(?: \(([^\)]+)\))?", test_output_text):
+        mth = m.group(1)
+        cls_info = m.group(2)
+        if cls_info:
+            parts = cls_info.split(".")
+            if len(parts) >= 2 and parts[-1] == mth:
+                cls_name = parts[-2]
+            else:
+                cls_name = parts[-1]
+            name = f"{cls_name}.{mth}"
+        else:
+            name = mth
+        if name not in failing_tests:
+            failing_tests.append(name)
+
+    # If failed count wasn't parsed from summary line but failing_tests were found
+    if failed == 0 and failing_tests:
+        failed = len(failing_tests)
+        if total < failed:
+            total = failed
+
+    passed = max(0, total - failed)
+
+    return {
+        "total_run": total,
+        "passed_count": passed,
+        "failed_count": failed,
+        "failing_tests": failing_tests,
+    }
+
+
+def get_job_test_summary(job: dict[str, Any]) -> dict[str, Any]:
+    """Derives a comprehensive test metrics summary for a job."""
+    branch = job.get("branch")
+    base = job.get("base_branch", "main")
+    created_count = job.get("created_test_count")
+    if created_count is None:
+        created_count = count_created_tests_in_diff(branch, base)
+
+    recs = job.get("plan", {}).get("test_recommendations", [])
+    planned_count = len(recs) if isinstance(recs, list) else 0
+
+    job_id = job.get("job_id", "")
+    out_dir = OUTPUT_DIR / job_id if job_id else None
+
+    # Check cached summary first
+    cached = job.get("test_summary")
+    if cached and isinstance(cached, dict):
+        total_run = cached.get("total_run", 0)
+        passed_count = cached.get("passed_count", 0)
+        failed_count = cached.get("failed_count", 0)
+        failing_tests = list(cached.get("failing_tests", []))
+        build_ok = cached.get("build_ok", True)
+        tests_ok = cached.get("tests_ok", failed_count == 0)
+    else:
+        total_run = 0
+        passed_count = 0
+        failed_count = 0
+        failing_tests = []
+        build_ok = True
+        tests_ok = True
+
+        # Check debug history
+        debug_history = job.get("debug_history", [])
+        if debug_history:
+            last = debug_history[-1]
+            res = last.get("result")
+            if isinstance(res, dict):
+                build_ok = res.get("build_ok", True)
+                tests_ok = res.get("tests_ok", True)
+
+        # Parse test.log if available
+        if out_dir and out_dir.exists():
+            test_log = out_dir / "test.log"
+            build_log = out_dir / "build.log"
+            if build_log.exists():
+                b_text = build_log.read_text(encoding="utf-8", errors="replace")
+                if "** BUILD FAILED **" in b_text or ("error:" in b_text and "** BUILD SUCCEEDED **" not in b_text):
+                    build_ok = False
+            if test_log.exists():
+                parsed = parse_test_output(test_log.read_text(encoding="utf-8", errors="replace"))
+                total_run = parsed["total_run"]
+                passed_count = parsed["passed_count"]
+                failed_count = parsed["failed_count"]
+                failing_tests = parsed["failing_tests"]
+                if failed_count > 0:
+                    tests_ok = False
+
+    # Derive overall status
+    job_status = job.get("status", "planned")
+    if not build_ok or job.get("last_error_type") == "build":
+        status_label = "build-failed"
+    elif not tests_ok or failed_count > 0 or job_status == "debugging":
+        status_label = "failing"
+    elif job_status in ["review-needed", "completed"]:
+        status_label = "passing"
+    elif total_run > 0 and failed_count == 0:
+        status_label = "passing"
+    elif job_status in ["planned", "scheduled", "designing"]:
+        status_label = "pending"
+    else:
+        status_label = "untested"
+
+    return {
+        "created_count": created_count,
+        "planned_count": planned_count,
+        "status": status_label,
+        "total_run": total_run,
+        "passed_count": passed_count,
+        "failed_count": failed_count,
+        "failing_tests": failing_tests,
+        "build_ok": build_ok,
+        "tests_ok": tests_ok,
+    }
+
+
+
 
 def find_latest_runtime_log(job_id: Optional[str] = None) -> Optional[str]:
     """Finds the most recent log file from output/job_id, logs/, or output/manual."""

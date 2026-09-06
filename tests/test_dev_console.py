@@ -1427,8 +1427,83 @@ class AppFeatureTests_{i}: XCTestCase {{
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("Fixed bug", printed)
 
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_renders_test_bullet_and_failing_action(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh
+    ):
+        job = {
+            "job_id": "test-job-fail-1",
+            "status": "debugging",
+            "debug_phase": "propose",
+            "type": "bug",
+            "issue_number": 79,
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "failing",
+            "created_count": 3,
+            "planned_count": 3,
+            "failed_count": 1,
+            "passed_count": 14,
+            "total_run": 15,
+            "failing_tests": ["ThemisTests.RiskViewModelTests.testTabSelection"],
+            "tests_ok": False,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("3 created", printed)
+            self.assertIn("1 failing (14 passing)", printed)
+            self.assertIn("ThemisTests.RiskViewModelTests.testTabSelection", printed)
+            self.assertIn("Fix Failing Tests", printed)
+            self.assertIn("(1 failing)", printed)
+
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_renders_all_passing_tests(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh
+    ):
+        job = {
+            "job_id": "test-job-pass-1",
+            "status": "review-needed",
+            "type": "feature-plan",
+            "issue_number": 80,
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "passing",
+            "created_count": 2,
+            "planned_count": 2,
+            "failed_count": 0,
+            "passed_count": 25,
+            "total_run": 25,
+            "failing_tests": [],
+            "tests_ok": True,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("2 created", printed)
+            self.assertIn("All Passing", printed)
+            self.assertIn("(All 25 suite tests)", printed)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

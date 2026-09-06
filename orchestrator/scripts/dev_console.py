@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, record_interactive_investigation, format_investigation_history
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -3927,6 +3927,42 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 
             print(f"Status: {job.get('status')}")
 
+            # QUICK BULLET: TESTS CREATED & PASS/FAIL METRICS
+            test_summary = get_job_test_summary(job)
+            created_cnt = test_summary["created_count"]
+            planned_cnt = test_summary["planned_count"]
+            failed_cnt = test_summary["failed_count"]
+            passed_cnt = test_summary["passed_count"]
+            total_cnt = test_summary["total_run"]
+            f_tests = test_summary["failing_tests"]
+            t_status = test_summary["status"]
+
+            if created_cnt > 0:
+                created_str = f"\033[1;97m{created_cnt} created\033[0m"
+            elif planned_cnt > 0:
+                created_str = f"\033[90m{planned_cnt} planned\033[0m"
+            else:
+                created_str = "\033[90m0 created\033[0m"
+
+            if t_status == "failing":
+                pass_part = f" ({passed_cnt} passing)" if passed_cnt > 0 else ""
+                fail_badge = f"\033[1;91m❌ {failed_cnt} failing{pass_part}\033[0m"
+                print(f"Tests:  {created_str} for job | {fail_badge}")
+                for ft in f_tests[:3]:
+                    print(f"  \033[1;91m└─ ❌ {ft}\033[0m")
+                if len(f_tests) > 3:
+                    print(f"  \033[90m└─ ... and {len(f_tests) - 3} more\033[0m")
+            elif t_status == "build-failed":
+                print(f"Tests:  {created_str} for job | \033[1;91m❌ Build / Compilation Failed\033[0m")
+            elif t_status == "passing":
+                suite_part = f" (All {total_cnt} suite tests)" if total_cnt > 0 else ""
+                print(f"Tests:  {created_str} for job | \033[1;92m✅ All Passing{suite_part}\033[0m")
+            elif t_status == "pending":
+                print(f"Tests:  {created_str} for job | \033[90m⚙️ Pending execution\033[0m")
+            else:
+                print(f"Tests:  {created_str} for job | \033[90mUntested\033[0m")
+
+
             # LLM SESSIONS
             sessions = job.get("llm_sessions", [])
             # Fallback to old format for compatibility during transition
@@ -4229,7 +4265,12 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 workflow_options.append(("e", "[\033[92mE\033[0m] Execute (Worker Run)"))
             elif status == "debugging":
                 if phase == "propose" or phase == "paused":
-                    workflow_options.append(("d", "[\033[92mD\033[0m] Fix Failing Tests (Debug Loop)"))
+                    if failed_cnt > 0:
+                        workflow_options.append(("d", f"[\033[1;92mD\033[0m] Fix Failing Tests \033[1;91m({failed_cnt} failing)\033[0m \033[90m(Debug Loop)\033[0m"))
+                    elif t_status == "build-failed":
+                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Fix Build / Compilation Errors \033[90m(Debug Loop)\033[0m"))
+                    else:
+                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Fix Failing Tests \033[90m(Debug Loop)\033[0m"))
                 elif phase == "verify":
                     workflow_options.append(("d", "[\033[92mD\033[0m] Verify Fix (Pass/Fail Result)"))
                 
@@ -4262,7 +4303,12 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             # Global actions available for most non-archived states
             if status not in ["completed", "discarded", "planned"]:
                 if status != "debugging":
-                    workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous TDD Test Loop)"))
+                    if t_status == "failing" and failed_cnt > 0:
+                        workflow_options.append(("d", f"[\033[1;93mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} failing)\033[0m"))
+                    elif t_status == "build-failed":
+                        workflow_options.append(("d", "[\033[1;93mD\033[0m] Auto-Fix Build Errors"))
+                    else:
+                        workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous TDD Test Loop)"))
                 workflow_options.append(("r", "[\033[1;91mR\033[0m] Reset & Rerun \033[1;91m(Stashes changes & resets to Planned)\033[0m"))
             
             ai_modified = job.get("ai_modified_files", [])

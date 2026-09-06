@@ -681,6 +681,72 @@ class ClarificationHelperTests(unittest.TestCase):
         self.assertEqual(common.format_investigation_history([]), "")
         self.assertEqual(common.format_investigation_history(None), "")
 
+    def test_parse_test_output_spm_format(self) -> None:
+        spm_output = """
+Test Suite 'All tests' passed at 2026-09-06 14:00:00.000.
+Test Suite 'ThemisTests.xctest' started at 2026-09-06 14:00:00.001.
+Test Case '-[ThemisTests.RiskViewModelTests testTabSelection]' failed (0.012 seconds).
+Test Case '-[ThemisTests.RiskViewModelTests testActiveFilter]' passed (0.005 seconds).
+Executed 15 tests, with 1 failure (0 unexpected) in 0.234 (0.234) seconds
+"""
+        parsed = common.parse_test_output(spm_output)
+        self.assertEqual(parsed["total_run"], 15)
+        self.assertEqual(parsed["failed_count"], 1)
+        self.assertEqual(parsed["passed_count"], 14)
+        self.assertEqual(parsed["failing_tests"], ["RiskViewModelTests.testTabSelection"])
+
+    def test_parse_test_output_unittest_format(self) -> None:
+        unit_output = """
+FAIL: test_auth_recovery (tests.test_auth.AuthTests.test_auth_recovery)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  ...
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 42 tests in 1.250s
+
+FAILED (failures=1)
+"""
+        parsed = common.parse_test_output(unit_output)
+        self.assertEqual(parsed["total_run"], 42)
+        self.assertEqual(parsed["failed_count"], 1)
+        self.assertEqual(parsed["passed_count"], 41)
+        self.assertEqual(parsed["failing_tests"], ["AuthTests.test_auth_recovery"])
+
+    def test_get_job_test_summary_derives_metrics_and_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            output_dir = tmp_root / ".orchestrator" / "output"
+            job_output = output_dir / "test-job-999"
+            job_output.mkdir(parents=True)
+
+            test_log = job_output / "test.log"
+            test_log.write_text("Executed 10 tests, with 2 failures (0 unexpected)\nTest Case '-[AppTests.ViewTests testRender]' failed\nTest Case '-[AppTests.ViewTests testClick]' failed", encoding="utf-8")
+
+            job = {
+                "job_id": "test-job-999",
+                "status": "debugging",
+                "created_test_count": 3,
+                "plan": {
+                    "test_recommendations": ["Test render", "Test click", "Test scroll"]
+                }
+            }
+
+            with patch.object(common, "OUTPUT_DIR", output_dir):
+                summary = common.get_job_test_summary(job)
+
+            self.assertEqual(summary["created_count"], 3)
+            self.assertEqual(summary["planned_count"], 3)
+            self.assertEqual(summary["status"], "failing")
+            self.assertEqual(summary["total_run"], 10)
+            self.assertEqual(summary["failed_count"], 2)
+            self.assertEqual(summary["passed_count"], 8)
+            self.assertFalse(summary["tests_ok"])
+            self.assertIn("ViewTests.testRender", summary["failing_tests"])
+            self.assertIn("ViewTests.testClick", summary["failing_tests"])
+
+
 
 
 class FollowupAndLogTests(unittest.TestCase):
