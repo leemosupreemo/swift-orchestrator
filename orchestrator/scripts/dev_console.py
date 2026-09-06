@@ -5081,92 +5081,103 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
 
     while True:
         clear_screen()
-        print_header("Ask AI / Interactive Investigation")
-        print("\033[90mInspect code modifications, ask clarifying questions, and test hypotheses.\033[0m\n")
+        status_ctx = {
+            "allowed_models": session_allowed_models,
+            **job
+        }
+        with StatusBar(status_ctx, sub_menu=True) as status_bar:
+            status_bar.set_scroll_region()
 
-        # 1. Prominently Highlighted Recommended Session
-        if rec_cli:
-            rec_key, rec_label, _ = rec_cli
-            rec_badge = f" \033[1;92m⭐️ ({rec_reason})\033[0m" if rec_reason else " \033[1;92m⭐️ (Recommended)\033[0m"
-            print("\033[1;92m⭐️ RECOMMENDED LLM SESSION\033[0m")
-            print(f"  [\033[1;92m1\033[0m] Launch \033[1;97;42m {rec_label} \033[0m{rec_badge}")
-            print(f"      \033[90mPreloads job brief, builder summary & full git diff into interactive session.\033[0m\n")
+            print_header("Ask AI / Interactive Investigation")
+            print("\033[90mInspect code modifications, ask clarifying questions, and test hypotheses.\033[0m\n")
 
-        # 2. Other Available AI CLI Sessions
-        if other_clis:
-            print("\033[1;95m🚀 OTHER AI CLI SESSIONS\033[0m")
-            for idx, (cli_key, cli_label, _) in enumerate(other_clis, 2):
-                print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m \033[90m(Interactive Multi-Turn Session)\033[0m")
-            print()
-        elif not rec_cli:
-            print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
-            print("  \033[90m(No local AI CLIs detected in PATH)\033[0m\n")
+            # 1. Prominently Highlighted Recommended Session
+            if rec_cli:
+                rec_key, rec_label, _ = rec_cli
+                rec_badge = f" \033[1;92m⭐️ ({rec_reason})\033[0m" if rec_reason else " \033[1;92m⭐️ (Recommended)\033[0m"
+                print("\033[1;92m⭐️ RECOMMENDED LLM SESSION\033[0m")
+                print(f"  [\033[1;92m1\033[0m] Launch \033[1;97;42m {rec_label} \033[0m{rec_badge}")
+                print(f"      \033[90mPreloads job brief, builder summary & full git diff into interactive session.\033[0m\n")
 
-        # 3. In-Console Mode & Navigation
-        print("\033[1;95m💬 IN-CONSOLE MODE\033[0m")
-        print("  [\033[1;93mQ\033[0m] Quick Question in Console (Single Turn)")
-        print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
+            # 2. Other Available AI CLI Sessions
+            if other_clis:
+                print("\033[1;95m🚀 OTHER AI CLI SESSIONS\033[0m")
+                for idx, (cli_key, cli_label, _) in enumerate(other_clis, 2):
+                    print(f"  [\033[1;96m{idx}\033[0m] Launch \033[1;97m{cli_label}\033[0m \033[90m(Interactive Multi-Turn Session)\033[0m")
+                print()
+            elif not rec_cli:
+                print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
+                print("  \033[90m(No local AI CLIs detected in PATH)\033[0m\n")
 
-        placeholder = "1 (Enter for recommended), Q, or B" if ordered_clis else "Q or B"
-        choice = prompt_input("Select Option:", placeholder=placeholder, field_below=True).strip().lower()
-        if not choice:
-            if ordered_clis:
-                choice = "1"
-            else:
+            # 3. In-Console Mode & Navigation
+            print("\033[1;95m💬 IN-CONSOLE MODE\033[0m")
+            print("  [\033[1;93mQ\033[0m] Quick Question in Console (Single Turn)")
+            print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
+
+            placeholder = "1 (Enter for recommended), Q, or B" if ordered_clis else "Q or B"
+            choice = prompt_input("Select Option:", placeholder=placeholder, field_below=True).strip().lower()
+            if not choice:
+                if ordered_clis:
+                    choice = "1"
+                else:
+                    break
+            elif choice == "b":
                 break
-        elif choice == "b":
-            break
 
-        # Check if user picked an interactive CLI
-        if choice.isdigit() and 1 <= int(choice) <= len(ordered_clis):
-            cli_key, cli_label, bin_name = ordered_clis[int(choice) - 1]
-            clear_screen()
-            print_header(f"🤖 Orchestrator AI Session ({cli_label})")
-            display_ctx = context_file.name
-            try:
-                if context_file.is_relative_to(ROOT):
-                    display_ctx = str(context_file.relative_to(ROOT))
-            except:
-                pass
-            print(f"  • \033[1;36mTarget Job:\033[0m   \033[1;97m#{issue_num} ({title})\033[0m")
-            print(f"  • \033[1;36mContext:\033[0m      {display_ctx}")
-            print(f"  • \033[1;36mExit to Menu:\033[0m Type \033[1;92m/exit\033[0m or press \033[1;92mCtrl-D\033[0m anytime to return to Orchestrator.\n")
-            print("-" * 75 + "\n")
+            # Check if user picked an interactive CLI
+            if choice.isdigit() and 1 <= int(choice) <= len(ordered_clis):
+                cli_key, cli_label, bin_name = ordered_clis[int(choice) - 1]
+                clear_screen()
+                print_header(f"🤖 Orchestrator AI Session ({cli_label})")
+                display_ctx = context_file.name
+                try:
+                    if context_file.is_relative_to(ROOT):
+                        display_ctx = str(context_file.relative_to(ROOT))
+                except:
+                    pass
+                print(f"  • \033[1;36mTarget Job:\033[0m   \033[1;97m#{issue_num} ({title})\033[0m")
+                print(f"  • \033[1;36mContext:\033[0m      {display_ctx}")
+                print(f"  • \033[1;36mExit to Menu:\033[0m Type \033[1;92m/exit\033[0m or press \033[1;92mCtrl-D\033[0m anytime to return to Orchestrator.\n")
+                print("-" * 75 + "\n")
 
-            intro_prompt = f"I am reviewing Job #{issue_num}: {title}. Please inspect the diff, brief, and notes in {context_file} to help me understand what changes were made and answer any questions."
-            
-            cmd = []
-            if cli_key == "opencode":
-                cmd = ["opencode", "--prompt", intro_prompt]
-            elif cli_key == "agy":
-                cmd = [bin_name, "--prompt-interactive", intro_prompt]
-            elif cli_key == "gemini":
-                cmd = ["gemini", "-i", intro_prompt]
-            elif cli_key == "claude":
-                cmd = ["claude", intro_prompt]
-            elif cli_key == "codex":
-                cmd = ["codex", intro_prompt]
-            else:
-                cmd = [bin_name, intro_prompt]
+                intro_prompt = f"I am reviewing Job #{issue_num}: {title}. Please inspect the diff, brief, and notes in {context_file} to help me understand what changes were made and answer any questions."
+                
+                cmd = []
+                if cli_key == "opencode":
+                    cmd = ["opencode", "--prompt", intro_prompt]
+                elif cli_key == "agy":
+                    cmd = [bin_name, "--prompt-interactive", intro_prompt]
+                elif cli_key == "gemini":
+                    cmd = ["gemini", "-i", intro_prompt]
+                elif cli_key == "claude":
+                    cmd = ["claude", intro_prompt]
+                elif cli_key == "codex":
+                    cmd = ["codex", "--no-alt-screen", intro_prompt]
+                else:
+                    cmd = [bin_name, intro_prompt]
 
-            try:
-                sub_env = os.environ.copy()
-                sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
-                sub_env.setdefault("GOOGLE_CLOUD_LOCATION", "us-central1")
-                # Reset terminal scroll region and show cursor before handing over
-                sys.stdout.write("\033[r\033[?25h")
-                sys.stdout.flush()
-                subprocess.run(cmd, cwd=str(ROOT), env=sub_env)
-            except Exception as e:
-                print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
-                input("\n\033[1;96mTap Enter to continue...\033[0m")
-            finally:
-                # Clean up terminal state upon return
-                sys.stdout.write("\033[r\033[?25h")
-                sys.stdout.flush()
-            continue
+                try:
+                    sub_env = os.environ.copy()
+                    sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
+                    sub_env.setdefault("GOOGLE_CLOUD_LOCATION", "us-central1")
+                    # Render Orchestrator footer at bottom and keep scroll region active
+                    status_bar.set_scroll_region()
+                    status_bar.render(at_bottom=True, force=True, q_msg="Type /exit or Ctrl-D to return to Orchestrator")
+                    sys.stdout.write("\033[?25h")
+                    sys.stdout.flush()
+                    subprocess.run(cmd, cwd=str(ROOT), env=sub_env)
+                except Exception as e:
+                    print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
+                    input("\n\033[1;96mTap Enter to continue...\033[0m")
+                finally:
+                    # Clean up terminal state upon return
+                    status_bar.clear_footer()
+                    status_bar.reset_scroll_region(force=True)
+                continue
 
-        elif choice == "q":
+            elif choice == "q":
+                status_bar.clear_footer()
+                status_bar.reset_scroll_region(force=True)
             print_header("Quick Question (In-Console)")
             print("\033[90mAsk a quick question without leaving the console.\033[0m\n")
             system_prompt = """You are an expert technical consultant. You are helping a developer understand changes made by an AI coding agent.

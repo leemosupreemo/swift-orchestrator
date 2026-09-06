@@ -1303,7 +1303,8 @@ class AppFeatureTests_{i}: XCTestCase {{
         # Verify codex
         codex_calls = [cmd for cmd in called_cmds if isinstance(cmd, list) and cmd[0] == "codex"]
         self.assertTrue(len(codex_calls) > 0)
-        self.assertIn("Job #789: Fix memory leak", codex_calls[0][1])
+        self.assertEqual(codex_calls[0][1], "--no-alt-screen")
+        self.assertIn("Job #789: Fix memory leak", codex_calls[0][2])
 
     @patch("dev_console.shutil.which", side_effect=lambda x: f"/usr/local/bin/{x}" if x in ["opencode", "claude"] else None)
     @patch("dev_console.prompt_input", side_effect=["", "b"])  # Empty input = hit Enter for default
