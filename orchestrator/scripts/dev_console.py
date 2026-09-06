@@ -4389,7 +4389,10 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         workflow_options.append(("d", f"[\033[1;93mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} {'test' if failed_cnt == 1 else 'tests'} failing)\033[0m"))
                     elif t_status == "build-failed":
                         workflow_options.append(("d", "[\033[1;93mD\033[0m] Auto-Fix Build Errors"))
+                workflow_options.append(("q", "[\033[93mQ\033[0m] Ask AI (Questions about changes)"))
                 workflow_options.append(("r", "[\033[1;91mR\033[0m] Reset & Rerun \033[1;91m(Stashes changes)\033[0m"))
+            elif status in ["planned", "completed"]:
+                workflow_options.append(("q", "[\033[93mQ\033[0m] Ask AI (Questions about changes)"))
             
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
@@ -4398,7 +4401,6 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 
             context_options.append(("l", "[\033[93mL\033[0m] Link Logs (Update Context)"))
             context_options.append(("k", "[\033[93mK\033[0m] Attach UI Mockup / Reference"))
-            context_options.append(("q", "[\033[93mQ\033[0m] Ask AI / Follow Up (Questions, Clues & Interactive Chat)"))
 
             inspect_options.append(("o", "[\033[93mO\033[0m] Select LLM Models (Override)"))
             inspect_options.append(("y", "[\033[93mY\033[0m] Export Context (Logs, Progress, Plan)"))
