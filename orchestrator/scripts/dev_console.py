@@ -4393,7 +4393,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         workflow_options.append(("d", "[\033[1;93mD\033[0m] Auto-Fix Build Errors"))
                     else:
                         workflow_options.append(("d", "[\033[93mD\033[0m] Auto-Fix Failing Tests (Autonomous TDD Test Loop)"))
-                workflow_options.append(("r", "[\033[1;91mR\033[0m] Reset & Rerun \033[1;91m(Stashes changes & resets to Planned)\033[0m"))
+                workflow_options.append(("r", "[\033[1;91mR\033[0m] Reset & Rerun \033[1;91m(Stashes changes)\033[0m"))
             
             ai_modified = job.get("ai_modified_files", [])
             ai_untracked = job.get("ai_untracked_files", [])
