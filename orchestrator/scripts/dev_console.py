@@ -3209,7 +3209,7 @@ def handle_manage_tests(session_allowed_machines: list[str], session_allowed_mod
                 print("    \033[90mNo test suites found in " + PROJECT_CONFIG.test_target + ".\033[0m")
 
             print_header("Actions")
-            print("[\033[1;92mA\033[0m] Run Unit Tests (All or Specific Suites)")
+            print("[\033[1;92mA\033[0m] Run Unit Tests (All / Partial)")
             print("[\033[1;96mC\033[0m] Calculate / Refresh Code Coverage")
             print("[\033[1;96mE\033[0m] Expand Unit Test Coverage (AI Job)")
             print("[\033[1;96mF\033[0m] Test Frameworks & Canaries")
