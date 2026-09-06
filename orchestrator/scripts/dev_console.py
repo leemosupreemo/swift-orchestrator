@@ -5086,7 +5086,10 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                 cmd = [bin_name]
 
             try:
-                subprocess.run(cmd, cwd=str(ROOT))
+                sub_env = os.environ.copy()
+                sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
+                sub_env.setdefault("GOOGLE_CLOUD_LOCATION", "us-central1")
+                subprocess.run(cmd, cwd=str(ROOT), env=sub_env)
             except Exception as e:
                 print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
                 input("\n\033[1;96mTap Enter to continue...\033[0m")
