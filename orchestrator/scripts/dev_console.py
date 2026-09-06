@@ -5109,12 +5109,10 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                 print("\033[1;95m🚀 INTERACTIVE LLM CLI SESSIONS\033[0m")
                 print("  \033[90m(No local AI CLIs detected in PATH)\033[0m\n")
 
-            # 3. In-Console Mode & Navigation
-            print("\033[1;95m💬 IN-CONSOLE MODE\033[0m")
-            print("  [\033[1;93mQ\033[0m] Quick Question in Console (Single Turn)")
+            # 3. Navigation
             print("  [\033[1;91mB\033[0m] Back to Job Menu\n")
 
-            placeholder = "1 (Enter for recommended), Q, or B" if ordered_clis else "Q or B"
+            placeholder = "1 (Enter for recommended), or B" if ordered_clis else "B"
             choice = prompt_input("Select Option:", placeholder=placeholder, field_below=True).strip().lower()
             if not choice:
                 if ordered_clis:
@@ -5174,35 +5172,6 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     status_bar.clear_footer()
                     status_bar.reset_scroll_region(force=True)
                 continue
-
-            elif choice == "q":
-                status_bar.clear_footer()
-                status_bar.reset_scroll_region(force=True)
-            print_header("Quick Question (In-Console)")
-            print("\033[90mAsk a quick question without leaving the console.\033[0m\n")
-            system_prompt = """You are an expert technical consultant. You are helping a developer understand changes made by an AI coding agent.
-Your goal is to answer questions about the code modifications, the rationale behind them, and how the new logic works.
-You MUST NOT propose or perform any code changes. Be concise, accurate, and focus on the provided diff and job context."""
-            
-            while True:
-                question = prompt_input("Question:", placeholder="(or Enter to go back)", field_below=True)
-                if not question:
-                    break
-                full_prompt = f"{system_prompt}\n\n{context_bundle}\n\n### USER QUESTION\n{question}"
-                model = job.get("builder", "gemini-3.1-pro-preview")
-                try:
-                    print_phase("agent_thinking")
-                    output, actual_model, session_id = run_llm(model, full_prompt, allowed_models=session_allowed_models)
-                    if job:
-                        if "llm_sessions" not in job:
-                            job["llm_sessions"] = []
-                        job["llm_sessions"].append({"id": session_id, "model": actual_model})
-                    print(f"\n\033[1;97mAI Response ({actual_model}):\033[0m")
-                    print("-" * 60)
-                    print(output)
-                    print("-" * 60)
-                except Exception as e:
-                    print(f"\n\033[1;91mError calling AI: {e}\033[0m")
 
 def handle_api_keys(session_allowed_machines, session_allowed_models):
     settings_path = CONFIG_DIR / "settings.json"

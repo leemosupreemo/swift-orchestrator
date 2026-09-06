@@ -84,7 +84,7 @@ class ConsoleSmokeTests(unittest.TestCase):
         mock_read.return_value = job
         
         mock_get_key.side_effect = self._mock_get_key_side_effect(["j", "q", "b"])
-        mock_prompt_input.side_effect = ["q", "Tell me a joke", "", "b"]
+        mock_prompt_input.side_effect = ["b"]
         mock_input.return_value = ""
         
         # Mock run_llm for Ask AI

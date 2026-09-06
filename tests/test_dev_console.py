@@ -1327,26 +1327,6 @@ class AppFeatureTests_{i}: XCTestCase {{
         self.assertTrue(len(claude_calls) > 0)
         self.assertIn("Job #999: Refactor router", claude_calls[0][1])
 
-    @patch("dev_console.shutil.which", return_value=None)
-    @patch("dev_console.prompt_input", side_effect=["q", "Why was this changed?", "", "b"])
-    @patch("dev_console.run_llm", return_value=("Because of a nil check error.", "gemini", "session-1"))
-    @patch("dev_console.clear_screen")
-    def test_handle_ask_ai_quick_question_mode(self, _mock_clear, mock_llm, _mock_prompt_input, _mock_which):
-        job = {
-            "job_id": "test-job-456",
-            "issue_number": 456,
-            "title": "Fix crash",
-            "status": "review-needed",
-        }
-
-        dev_console.handle_ask_ai(job, ["gemini"])
-
-        mock_llm.assert_called_once()
-        prompt_passed = mock_llm.call_args[0][1]
-        self.assertIn("Why was this changed?", prompt_passed)
-        self.assertEqual(job["llm_sessions"], [{"id": "session-1", "model": "gemini"}])
-
-
 if __name__ == "__main__":
     unittest.main()
 
