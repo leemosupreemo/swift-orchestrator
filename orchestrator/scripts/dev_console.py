@@ -5057,17 +5057,17 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
         if choice.isdigit() and 1 <= int(choice) <= len(available_clis):
             cli_key, cli_label, bin_name = available_clis[int(choice) - 1]
             clear_screen()
-            print_header(f"Launching {cli_label}")
+            print_header(f"🤖 Orchestrator AI Session ({cli_label})")
             display_ctx = context_file.name
             try:
                 if context_file.is_relative_to(ROOT):
                     display_ctx = str(context_file.relative_to(ROOT))
             except:
                 pass
-            print(f"  • \033[1;36mJob:\033[0m        #{issue_num} ({title})")
-            print(f"  • \033[1;36mContext:\033[0m    {display_ctx}")
-            print(f"  • \033[1;36mReturn:\033[0m     Type \033[97m/exit\033[0m or press \033[97mCtrl-D\033[0m anytime to return to Orchestrator.\n")
-            print("-" * 70)
+            print(f"  • \033[1;36mTarget Job:\033[0m   \033[1;97m#{issue_num} ({title})\033[0m")
+            print(f"  • \033[1;36mContext:\033[0m      {display_ctx}")
+            print(f"  • \033[1;36mExit to Menu:\033[0m Type \033[1;92m/exit\033[0m or press \033[1;92mCtrl-D\033[0m anytime to return to Orchestrator.\n")
+            print("-" * 75 + "\n")
 
             intro_prompt = f"I am reviewing Job #{issue_num}: {title}. Please inspect the diff, brief, and notes in {context_file} to help me understand what changes were made and answer any questions."
             
@@ -5089,10 +5089,17 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                 sub_env = os.environ.copy()
                 sub_env.setdefault("GOOGLE_VERTEX_LOCATION", "us-central1")
                 sub_env.setdefault("GOOGLE_CLOUD_LOCATION", "us-central1")
+                # Reset terminal scroll region and show cursor before handing over
+                sys.stdout.write("\033[r\033[?25h")
+                sys.stdout.flush()
                 subprocess.run(cmd, cwd=str(ROOT), env=sub_env)
             except Exception as e:
                 print(f"\n\033[1;91m❌ Error running {cli_label}: {e}\033[0m")
                 input("\n\033[1;96mTap Enter to continue...\033[0m")
+            finally:
+                # Clean up terminal state upon return
+                sys.stdout.write("\033[r\033[?25h")
+                sys.stdout.flush()
             continue
 
         elif choice == "q":
