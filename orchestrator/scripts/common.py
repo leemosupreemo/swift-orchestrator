@@ -967,8 +967,8 @@ def prompt_input(label: str, placeholder: str = "", default: str = "", allow_bac
             cols, _ = os.get_terminal_size()
         except Exception:
             cols = 80
-        # Keep a little margin so the field does not wrap on narrow terminals.
-        return max(12, cols - 8)
+        # Keep safe margin (4 spaces indent + 2 padding + 10 safety) so the field never wraps on narrow terminals.
+        return max(12, cols - 16)
 
     def trim_text(text: str, limit: int) -> str:
         if len(text) <= limit:

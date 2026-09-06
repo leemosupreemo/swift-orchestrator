@@ -5226,6 +5226,8 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     # Clean up terminal state upon return
                     status_bar.clear_footer()
                     status_bar.reset_scroll_region(force=True)
+                    sys.stdout.write("\033[0m\r\n\033[K")
+                    sys.stdout.flush()
 
                 # Post-session calculation and context capture
                 end_time = datetime.now()
@@ -5247,9 +5249,9 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
                     except Exception:
                         pass
 
-                print(f"\n\033[1;92m✓ {cli_label} session ended\033[0m \033[90m({duration_str})\033[0m")
+                print(f"\033[1;92m✓ {cli_label} session ended\033[0m \033[90m({duration_str})\033[0m")
                 if new_commits:
-                    print(f"  \033[1;93mNew Commits Detected:\033[0m {len(new_commits)} commit(s)")
+                    print(f"  \033[1;93mNew Commits:\033[0m {len(new_commits)} detected")
                     for c in new_commits[:3]:
                         print(f"    \033[90m• {c}\033[0m")
                     if len(new_commits) > 3:
@@ -5257,9 +5259,9 @@ def handle_ask_ai(job: dict[str, Any], session_allowed_models: list[str]):
 
                 note = ""
                 if sys.stdin.isatty():
-                    print("\n\033[1;97mCapture findings or technical notes from this session into the job context?\033[0m")
+                    print("\n\033[1;97mCapture findings / technical notes for this job:\033[0m")
                     note = prompt_input(
-                        "Investigation Finding / Note (Enter to skip):",
+                        "Note (Enter to skip):",
                         placeholder="e.g. Verified root cause in RiskTab.swift",
                         field_below=True
                     ).strip()
