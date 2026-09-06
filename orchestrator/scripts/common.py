@@ -499,12 +499,14 @@ def get_job_test_summary(job: dict[str, Any]) -> dict[str, Any]:
     job_status = job.get("status", "planned")
     if not build_ok or job.get("last_error_type") == "build":
         status_label = "build-failed"
-    elif not tests_ok or failed_count > 0 or job_status == "debugging":
+    elif failed_count > 0 or not tests_ok:
         status_label = "failing"
-    elif job_status in ["review-needed", "completed"]:
-        status_label = "passing"
     elif total_run > 0 and failed_count == 0:
         status_label = "passing"
+    elif job_status in ["review-needed", "completed"]:
+        status_label = "passing"
+    elif job_status == "debugging":
+        status_label = "failing"
     elif job_status in ["planned", "scheduled", "designing"]:
         status_label = "pending"
     else:

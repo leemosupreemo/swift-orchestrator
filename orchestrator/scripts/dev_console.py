@@ -3893,41 +3893,40 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             status_bar.set_scroll_region()
 
             print_job_header(job)
-            print(f"Job ID: {format_job_id(job.get('job_id', 'unknown'))}")
-            
-            # Display Linked Logs
-            logs = job.get("last_manual_log_paths", [])
-            if logs:
-                from common import format_log_path
-                log_display = ", ".join([format_log_path(Path(l).stem) for l in logs[:3]])
-                print(f"\033[92mLinked Logs: {log_display}\033[0m")
-            
-            # TASK PROGRESS TRACKER
-            tasks = job.get("plan", {}).get("tasks", [])
-            if tasks:
-                completed = job.get("completed_task_indices", [])
-                count = len(tasks)
-                done = len(completed)
-                percent = int((done / count) * 100) if count > 0 else 0
-                
-                # Progress Bar [####------] 40%
-                bar_width = 20
-                filled = int(bar_width * done / count)
-                bar = "█" * filled + "░" * (bar_width - filled)
-                
-                yolo_status = "\033[1;93m[YOLO MODE ON]\033[0m" if job.get("is_yolo") else "\033[90m[Manual Step Mode]\033[0m"
-                print(f"Progress: \033[1;96m{bar}\033[0m {done}/{count} tasks ({percent}%) | {yolo_status}")
-                
-                # Show active/next task
-                if done < count:
-                    next_task = tasks[done]
-                    print(f"Next: \033[97m{next_task.get('name', f'Task {done+1}')}\033[0m")
-                else:
-                    print("\033[92mStatus: Feature complete!\033[0m")
-                
-            print(f"Status: {job.get('status')}")
 
-            # QUICK BULLET: TESTS CREATED & PASS/FAIL METRICS
+            # 1. Job ID & Issue Number
+            issue_num = job.get("issue_number")
+            job_id_str = str(job.get("job_id", "unknown"))
+            if issue_num:
+                id_display = f"\033[1;97m#{issue_num}\033[0m \033[90m({job_id_str})\033[0m"
+            else:
+                id_display = f"\033[1;97m{job_id_str}\033[0m"
+            print(f"\033[1;96mJob ID:\033[0m       {id_display}")
+
+            # 2. Status Badge
+            status_badges = {
+                "planned": "\033[1;96m📝 Planned\033[0m",
+                "executing": "\033[1;93m⚙️  Executing\033[0m",
+                "debugging": "\033[1;95m🐞 Debugging\033[0m",
+                "review-needed": "\033[1;92m🏁 Ready for Review\033[0m",
+                "human-needed": "\033[1;91m🚨 Action Required\033[0m",
+                "completed": "\033[1;92m✅ Completed\033[0m",
+                "designing": "\033[1;96m🎨 Designing\033[0m",
+            }
+            badge = status_badges.get(status, f"\033[97m{status}\033[0m")
+            if status == "debugging":
+                iter_num = job.get("iteration", 1)
+                max_iter = job.get("max_iterations", 8)
+                badge += f" \033[90m(Attempt {iter_num}/{max_iter})\033[0m"
+            print(f"\033[1;96mStatus:\033[0m       {badge}")
+
+            # 3. Branch & Base
+            branch = job.get("branch")
+            base_branch = job.get("base_branch", PROJECT_CONFIG.base_branch)
+            if branch:
+                print(f"\033[1;96mBranch:\033[0m       \033[97m{branch}\033[0m \033[90m(base: {base_branch})\033[0m")
+
+            # 4. Tests Status Summary
             test_summary = get_job_test_summary(job)
             created_cnt = test_summary["created_count"]
             planned_cnt = test_summary["planned_count"]
@@ -3944,74 +3943,116 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             else:
                 created_str = "\033[90m0 created\033[0m"
 
-            if t_status == "failing":
+            if t_status == "failing" and failed_cnt > 0:
                 pass_part = f" ({passed_cnt} passing)" if passed_cnt > 0 else ""
                 fail_badge = f"\033[1;91m❌ {failed_cnt} failing{pass_part}\033[0m"
-                print(f"Tests:  {created_str} for job | {fail_badge}")
+                print(f"\033[1;96mTests:\033[0m        {created_str} for job | {fail_badge}")
                 for ft in f_tests[:3]:
                     print(f"  \033[1;91m└─ ❌ {ft}\033[0m")
                 if len(f_tests) > 3:
                     print(f"  \033[90m└─ ... and {len(f_tests) - 3} more\033[0m")
             elif t_status == "build-failed":
-                print(f"Tests:  {created_str} for job | \033[1;91m❌ Build / Compilation Failed\033[0m")
-            elif t_status == "passing":
-                suite_part = f" (All {total_cnt} suite tests)" if total_cnt > 0 else ""
-                print(f"Tests:  {created_str} for job | \033[1;92m✅ All Passing{suite_part}\033[0m")
+                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[1;91m❌ Build / Compilation Failed\033[0m")
+            elif t_status == "passing" or (failed_cnt == 0 and passed_cnt > 0):
+                suite_part = f" (All {total_cnt} suite tests)" if total_cnt > 0 else (f" ({passed_cnt} passing)" if passed_cnt > 0 else "")
+                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[1;92m✅ All Passing{suite_part}\033[0m")
             elif t_status == "pending":
-                print(f"Tests:  {created_str} for job | \033[90m⚙️ Pending execution\033[0m")
+                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[90m⚙️ Pending execution\033[0m")
             else:
-                print(f"Tests:  {created_str} for job | \033[90mUntested\033[0m")
+                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[90mUntested\033[0m")
 
+            # 5. Linked Logs
+            logs = job.get("last_manual_log_paths", [])
+            if logs:
+                from common import format_log_path
+                log_display = ", ".join([format_log_path(Path(l).name) for l in logs[:2]])
+                if len(logs) > 2:
+                    log_display += f" \033[90m(+{len(logs)-2} more)\033[0m"
+                print(f"\033[1;96mLinked Logs:\033[0m  \033[92m{log_display}\033[0m")
 
-            # LLM SESSIONS
+            # 6. AI Sessions & Interactive CLI Investigations
             sessions = job.get("llm_sessions", [])
-            # Fallback to old format for compatibility during transition
             if not sessions and "llm_session_ids" in job:
                 sessions = [{"id": sid, "model": "unknown"} for sid in job["llm_session_ids"]]
-                
-            if sessions:
-                print(f"\033[1;96mLLM Sessions:\033[0m {', '.join([s['id'][:8] for s in sessions])}")
+
+            investigations = job.get("interactive_investigations", [])
+
+            models_used = []
+            for s in sessions:
+                m = s.get("model") or s.get("tool")
+                if m and m not in models_used and m != "unknown":
+                    models_used.append(m)
+
+            if investigations:
+                for inv in investigations:
+                    t = inv.get("tool")
+                    if t and t not in models_used:
+                        models_used.append(t)
+
+            if sessions or investigations:
+                total_sess_count = len(sessions) if sessions else len(investigations)
+                summary_models = ", ".join(models_used[:3]) if models_used else "AI Agents"
+                if len(models_used) > 3:
+                    summary_models += f" +{len(models_used)-3}"
+
+                j_hint = " \033[90m| [\033[1;96mJ\033[0;90m] View Logs\033[0m" if len(sessions) > 1 else ""
+                print(f"\033[1;96mAI Sessions:\033[0m  \033[97m{total_sess_count} recorded\033[0m \033[90m({summary_models})\033[0m{j_hint}")
                 if len(sessions) > 1:
-                    print("[\033[1;96mJ\033[0m] List all LLM session IDs")
-                    actions.append("j")
+                    if "j" not in actions: actions.append("j")
 
+                if investigations:
+                    last_inv = investigations[-1]
+                    t = last_inv.get("tool", "AI CLI")
+                    d = last_inv.get("duration", "")
+                    c = len(last_inv.get("new_commits", []))
+                    n = last_inv.get("notes", "") or last_inv.get("note", "")
+                    detail_parts = [d] if d else []
+                    if c: detail_parts.append(f"{c} commit{'s' if c > 1 else ''}")
+                    meta_str = f" \033[90m({', '.join(detail_parts)})\033[0m" if detail_parts else ""
+                    note_str = f": \033[97m{n[:50]}..\033[0m" if len(n) > 50 else (f": \033[97m{n}\033[0m" if n else "")
+                    print(f"  \033[90m└─ 🤖 Latest CLI:\033[0m \033[1;97m{t}\033[0m{meta_str}{note_str}")
+
+            # 7. Task Progress Tracker (for multi-task plans)
+            tasks = job.get("plan", {}).get("tasks", [])
+            if tasks:
+                completed = job.get("completed_task_indices", [])
+                count = len(tasks)
+                done = len(completed)
+                percent = int((done / count) * 100) if count > 0 else 0
+
+                bar_width = 16
+                filled = int(bar_width * done / count)
+                bar = "█" * filled + "░" * (bar_width - filled)
+
+                yolo_status = " \033[1;93m[YOLO]\033[0m" if job.get("is_yolo") else ""
+                print(f"\033[1;96mTasks:\033[0m        \033[1;96m{bar}\033[0m {done}/{count} ({percent}%){yolo_status}")
+                if done < count:
+                    next_task = tasks[done]
+                    print(f"  \033[90m└─ Next: \033[97m{next_task.get('name', f'Task {done+1}')}\033[0m")
+                else:
+                    print("  \033[92m└─ Status: Feature complete!\033[0m")
+
+            # 8. References & Clarifications
             references = job.get("reference_artifacts", [])
-
             if references:
-                print(f"References: \033[92m{len(references)} attached\033[0m")
-                for ref in references[:3]:
+                print(f"\033[1;96mReferences:\033[0m   \033[92m{len(references)} attached\033[0m")
+                for ref in references[:2]:
                     label = ref.get("url") or ref.get("path") or ref.get("source") or ref.get("type", "reference")
                     note = ref.get("note")
                     suffix = f" \033[90m- {note}\033[0m" if note else ""
-                    print(f"  - {label}{suffix}")
-                if len(references) > 3:
-                    print(f"  \033[90m...and {len(references) - 3} more\033[0m")
-            
+                    print(f"  \033[90m└─ {label}{suffix}\033[0m")
+                if len(references) > 2:
+                    print(f"  \033[90m└─ ... and {len(references) - 2} more\033[0m")
+
             clarifications = job.get("clarification_history", [])
             if clarifications:
-                print(f"Clarifications: \033[92m{len(clarifications)} recorded\033[0m")
-                for item in clarifications[-2:]:
+                print(f"\033[1;96mClarifications:\033[0m \033[92m{len(clarifications)} recorded\033[0m")
+                for item in clarifications[-1:]:
                     q = item.get("question", "")
                     a = item.get("answer", "")
-                    if len(q) > 60: q = q[:57] + "..."
-                    if len(a) > 60: a = a[:57] + "..."
-                    print(f"  \033[90m- Q: {q}\033[0m")
-                    print(f"  \033[92m  A: {a}\033[0m")
-
-            investigations = job.get("interactive_investigations", [])
-            if investigations:
-                print(f"Investigations: \033[92m{len(investigations)} session(s) recorded\033[0m")
-                for item in investigations[-2:]:
-                    tool = item.get("tool", "AI CLI")
-                    dur = item.get("duration", "")
-                    note = item.get("notes", "") or item.get("note", "")
-                    commits = item.get("new_commits", [])
-                    dur_str = f" ({dur})" if dur else ""
-                    commit_str = f" [{len(commits)} commit(s)]" if commits else ""
-                    if note and len(note) > 60:
-                        note = note[:57] + "..."
-                    note_str = f": \033[97m{note}\033[0m" if note else ""
-                    print(f"  \033[90m- \033[1;96m{tool}\033[0m{dur_str}{commit_str}{note_str}")
+                    if len(q) > 50: q = q[:47] + "..."
+                    if len(a) > 50: a = a[:47] + "..."
+                    print(f"  \033[90m└─ Q: {q} | \033[92mA: {a}\033[0m")
 
             
             # PROACTIVE STATUS CONTEXT (What should the user do?)
@@ -4092,28 +4133,29 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print(f" \033[1;96m->\033[0m Wait for completion or monitor progress in the status bar below.")
                 
             elif status == "debugging":
+                iter_val = job.get("iteration", 1)
+                max_iter = job.get("max_iterations", 8)
                 if phase == "paused":
-                    print("\033[1;93m ⏸️  PAUSED: Max Iterations Reached\033[0m")
-                    print(f" Attempt:  \033[97m{job.get('iteration')} / {job.get('max_iterations')}\033[0m")
-                    print(f" \033[1;96m->\033[0m AI reached its limit. Tests are still failing.")
+                    print(f"\033[1;93m ⏸️  PAUSED: Max Iterations Reached (Attempt {iter_val}/{max_iter})\033[0m")
+                    print(f" \033[1;96m->\033[0m AI reached its iteration limit. Tests require attention.")
 
                     history = job.get("debug_history", [])
                     if history:
                         last = history[-1]
-                        print(f"\n  \033[1;97mFailure Hypothesis:\033[0m \033[90m{last.get('hypothesis')}\033[0m")
-                        print(f"  \033[1;97mNext Action:\033[0m \033[93m{last.get('action')}\033[0m")
+                        if last.get("hypothesis"):
+                            print(f"\n  \033[1;97mFailure Hypothesis:\033[0m \033[90m{last.get('hypothesis')}\033[0m")
+                        if last.get("action"):
+                            print(f"  \033[1;97mNext Action:\033[0m        \033[93m{last.get('action')}\033[0m")
                     print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to increase limits and resume, or \033[1;96m'R'\033[0m to reset.")
                 else:
-                    print("\033[1;95m 🔍 FIXING: Auto-Debug Loop\033[0m")
-                    iter_val = job.get("iteration", 1)
-                    max_iter = job.get("max_iterations", 8)
-                    print(f" Attempt:  \033[97m{iter_val} / {max_iter}\033[0m")
+                    print(f"\033[1;95m 🔍 FIXING: Auto-Debug Loop\033[0m \033[90m(Attempt {iter_val}/{max_iter})\033[0m")
                     if job.get("debug_history"):
-                       last = job["debug_history"][-1]
-                       print(f" Latest Hypothesis: \033[90m{last.get('hypothesis', 'Analyzing failure...')}\033[0m")
-                       if last.get("evidence"):
-                           print(f" Evidence Proof:   \033[3;90m\"{last.get('evidence')}\"\033[0m")
+                        last = job["debug_history"][-1]
+                        print(f" Latest Hypothesis: \033[90m{last.get('hypothesis', 'Analyzing failure...')}\033[0m")
+                        if last.get("evidence"):
+                            print(f" Evidence Proof:   \033[3;90m\"{last.get('evidence')}\"\033[0m")
                     print(f" \033[1;96m->\033[0m AI is currently auto-patching code to pass tests.")
+
                 # Succinct Debug History Summary
                 history = job.get("debug_history", [])
                 if history:
@@ -4130,9 +4172,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         else:
                             res_str = f"\033[90m{res}\033[0m"
                         
-                        # Show Hypothesis (the 'Why') instead of just Action (the 'How')
                         desc = entry.get("hypothesis") or entry.get("action", "unknown")
-                        if len(desc) > 60: desc = desc[:57] + "..."
+                        if len(desc) > 55: desc = desc[:52] + "..."
                         print(f"    #{entry.get('iteration')}: {res_str:12} | {desc}")
                     if len(history) > 3:
                         print(f"    \033[90m(+ {len(history)-3} older trials)\033[0m")
@@ -4266,16 +4307,19 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             elif status == "debugging":
                 if phase == "propose" or phase == "paused":
                     if failed_cnt > 0:
-                        workflow_options.append(("d", f"[\033[1;92mD\033[0m] Fix Failing Tests \033[1;91m({failed_cnt} failing)\033[0m \033[90m(Debug Loop)\033[0m"))
+                        workflow_options.append(("d", f"[\033[1;92mD\033[0m] Auto-Fix Failing Tests \033[1;91m({failed_cnt} failing)\033[0m \033[90m(Autonomous TDD Loop)\033[0m"))
                     elif t_status == "build-failed":
-                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Fix Build / Compilation Errors \033[90m(Debug Loop)\033[0m"))
+                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Auto-Fix Build Errors \033[90m(Autonomous Compiler Loop)\033[0m"))
                     else:
-                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Fix Failing Tests \033[90m(Debug Loop)\033[0m"))
+                        workflow_options.append(("d", "[\033[1;92mD\033[0m] Auto-Fix Failing Tests \033[90m(Autonomous TDD Loop)\033[0m"))
                 elif phase == "verify":
                     workflow_options.append(("d", "[\033[92mD\033[0m] Verify Fix (Pass/Fail Result)"))
-                
-                workflow_options.append(("u", "[\033[93mU\033[0m] Resume Job (Next Task)"))
-                workflow_options.append(("f", "[\033[93mF\033[0m] Tweak / Give Hint (Debug Guidance)"))
+
+                workflow_options.append(("f", "[\033[93mF\033[0m] Guide AI Debugger (Provide Hint / Clue)"))
+
+                # Only show Resume if this is a multi-task feature with remaining tasks
+                if not is_bug_job and tasks and len(completed) < len(tasks):
+                    workflow_options.append(("u", "[\033[93mU\033[0m] Resume Feature (Advance to Next Task)"))
                 
             elif status == "review-needed" or status == "completed":
                 if status == "review-needed":
