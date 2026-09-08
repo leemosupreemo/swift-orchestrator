@@ -106,6 +106,54 @@ func test() {
             self.assertIn("Verified root cause", manifest_text)
             self.assertIn("Codex CLI", manifest_text)
 
+    def test_export_job_destination_icloud(self):
+        """Verify export_job exports to iCloud Drive path when destination='icloud'."""
+        mock_icloud_dir = self.temp_root / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+        mock_icloud_dir.mkdir(parents=True, exist_ok=True)
+
+        job_file = self.temp_root / "job-2.json"
+        job_file.write_text(json.dumps({"job_id": "job-2", "title": "iCloud Test Job"}))
+
+        with patch("pathlib.Path.home", return_value=self.temp_root):
+            out_path = export_job.export_job(str(job_file), destination="icloud")
+            self.assertIsNotNone(out_path)
+            self.assertTrue(out_path.exists())
+            self.assertIn("com~apple~CloudDocs", str(out_path))
+            self.assertIn("Orchestrator", str(out_path))
+
+    def test_export_job_destination_gdrive(self):
+        """Verify export_job exports to Google Drive path when destination='gdrive'."""
+        mock_gdrive_dir = self.temp_root / "Library" / "CloudStorage" / "GoogleDrive-test@gmail.com" / "My Drive"
+        mock_gdrive_dir.mkdir(parents=True, exist_ok=True)
+
+        job_file = self.temp_root / "job-3.json"
+        job_file.write_text(json.dumps({"job_id": "job-3", "title": "GDrive Test Job"}))
+
+        with patch("pathlib.Path.home", return_value=self.temp_root):
+            out_path = export_job.export_job(str(job_file), destination="gdrive")
+            self.assertIsNotNone(out_path)
+            self.assertTrue(out_path.exists())
+            self.assertIn("GoogleDrive-test@gmail.com", str(out_path))
+            self.assertIn("Orchestrator", str(out_path))
+
+    @patch("export_job.prompt_radio")
+    @patch("export_job.sys.stdin.isatty", return_value=True)
+    def test_export_job_interactive_prompt_selection(self, mock_isatty, mock_prompt_radio):
+        """Verify interactive prompt_radio allows picking destination."""
+        mock_downloads_dir = self.temp_root / "Downloads"
+        mock_downloads_dir.mkdir(parents=True, exist_ok=True)
+
+        job_file = self.temp_root / "job-4.json"
+        job_file.write_text(json.dumps({"job_id": "job-4", "title": "Interactive Test Job"}))
+
+        mock_prompt_radio.return_value = "📥 macOS Downloads (~/Downloads/)"
+
+        with patch("pathlib.Path.home", return_value=self.temp_root):
+            out_path = export_job.export_job(str(job_file))
+            self.assertIsNotNone(out_path)
+            self.assertTrue(out_path.exists())
+            self.assertIn("Downloads", str(out_path))
+
     def test_make_brief_includes_investigation_history(self):
         """Verify make_brief injects interactive investigation history into briefs."""
         import run_builder

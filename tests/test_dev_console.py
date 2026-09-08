@@ -302,6 +302,46 @@ class DevConsoleTests(unittest.TestCase):
         self.assertIn("Ship the feature.", printed)
         self.assertIn("Build UI", printed)
 
+    def test_format_risk_mitigation_pair(self):
+        """Verify format_risk_mitigation_pair crafts appropriate strategies for various risk types."""
+        r1, m1 = dev_console.format_risk_mitigation_pair(
+            "A superficial UI binding fix could make the tab appear active while showing no risks.",
+            "Trace full path from processing output to model to ViewModel."
+        )
+        self.assertEqual(r1, "A superficial UI binding fix could make the tab appear active while showing no risks.")
+        self.assertEqual(m1, "Trace full path from processing output to model to ViewModel.")
+
+        # Inferred strategy for async race conditions
+        r2, m2 = dev_console.format_risk_mitigation_pair("Risk generation may be asynchronous, creating a race condition.")
+        self.assertIn("async", m2.lower())
+
+        # Inferred strategy for schema decoding differences
+        r3, m3 = dev_console.format_risk_mitigation_pair("New documents may use a different schema or decoding structure.")
+        self.assertIn("schema", m3.lower())
+
+    @patch("dev_console.print_header")
+    def test_view_job_brief_summary_renders_risks_with_mitigations(self, mock_header):
+        job = {
+            "job_id": "risk-mitigation-job",
+            "verification": {
+                "risks_identified": [
+                    "A superficial UI binding fix could make the tab appear active while showing no risks.",
+                    "Risk generation may be asynchronous, creating a race condition."
+                ],
+                "suggested_additions": [
+                    "Trace the full data flow from processor to persisted model to ViewModel.",
+                    "Check async report generation state transitions with loading/error states."
+                ]
+            }
+        }
+        with patch("builtins.print") as mock_print:
+            dev_console.view_job_brief_summary(job)
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Identified Risks & Mitigation Strategies", [call.args[0] for call in mock_header.call_args_list if call.args])
+            self.assertIn("Risk #1:", printed)
+            self.assertIn("Mitigation / Test Strategy:", printed)
+            self.assertIn("persisted model to ViewModel", printed)
+
     @patch("dev_console.refresh_job")
     @patch("dev_console.run_script")
     @patch("dev_console.prompt_input")
@@ -429,7 +469,7 @@ class DevConsoleTests(unittest.TestCase):
         printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
         self.assertIn("The AI will inspect the current job", printed)
         self.assertIn("Optional guidance examples", printed)
-        self.assertIn("Guidance (Optional)", printed)
+        self.assertIn("When to use", printed)
         first_prompt = _mock_prompt_input.call_args_list[0]
         self.assertEqual(first_prompt.args[0], "Guidance (Optional)")
         self.assertTrue(first_prompt.kwargs["field_below"])
@@ -511,6 +551,7 @@ class DevConsoleTests(unittest.TestCase):
                     stack.enter_context(patch("dev_console.prompt_autofix_iteration_settings", return_value=(None, 8)))
                     mock_loading = stack.enter_context(patch("dev_console.run_with_loading_screen", return_value=(["Gemini"], {"Gemini": "gemini"}, {}, [])))
                     mock_checkbox = stack.enter_context(patch("dev_console.prompt_checkbox", return_value=[]))
+                    mock_radio = stack.enter_context(patch("dev_console.prompt_radio", return_value="Open Pull Request #456 in browser"))
                     mock_subprocess_run = stack.enter_context(patch("dev_console.subprocess.run"))
                     mock_project_config = stack.enter_context(patch("dev_console.PROJECT_CONFIG"))
                     mock_project_config.base_branch = "main"
@@ -549,7 +590,7 @@ class DevConsoleTests(unittest.TestCase):
                 elif key == "v":
                     mock_view.assert_called_once_with(job)
                 elif key == "g":
-                    mock_subprocess_run.assert_any_call(["gh", "pr", "view", "456", "--web"], cwd=str(dev_console.ROOT))
+                    mock_subprocess_run.assert_any_call(["gh", "pr", "view", "456", "--web"], cwd=str(dev_console.ROOT), check=False)
                 elif key == "c":
                     mock_confirm.assert_called()
                 elif key == "x":
@@ -1490,8 +1531,11 @@ class AppFeatureTests_{i}: XCTestCase {{
             dev_console.handle_job_selection(job, [], [])
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("3 created", printed)
-            self.assertIn("1 failing (14 passing)", printed)
+            self.assertIn("1 failing", printed)
+            self.assertIn("(14 passing)", printed)
             self.assertIn("ThemisTests.RiskViewModelTests.testTabSelection", printed)
+            self.assertIn("FIX REQUIRED: Auto-Debug", printed)
+            self.assertIn("to run Auto-Fix", printed)
             self.assertIn("Fix Failing Tests", printed)
             self.assertIn("(1 test failing)", printed)
 
@@ -1528,7 +1572,97 @@ class AppFeatureTests_{i}: XCTestCase {{
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("2 created", printed)
             self.assertIn("All Passing", printed)
-            self.assertIn("(All 25 suite tests)", printed)
+            self.assertIn("(25 suite tests)", printed)
+
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_renders_linked_logs_bulleted_list(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh
+    ):
+        job = {
+            "job_id": "test-job-logs-1",
+            "status": "debugging",
+            "last_manual_log_paths": ["logs/build.log", "logs/test.log"],
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "untested",
+            "created_count": 0,
+            "planned_count": 0,
+            "failed_count": 0,
+            "passed_count": 0,
+            "total_run": 0,
+            "failing_tests": [],
+            "tests_ok": True,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Linked Logs:", printed)
+            self.assertIn("2 attached", printed)
+            self.assertIn("build.log", printed)
+            self.assertIn("test.log", printed)
+            self.assertIn("file://", printed)
+
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_renders_ai_sessions_with_clean_subbullets(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh
+    ):
+        job = {
+            "job_id": "test-job-ai-1",
+            "status": "debugging",
+            "llm_sessions": [
+                {"id": "sid-1", "model": "gemini-3.1-pro-preview"},
+                {"id": "sid-2", "model": "gpt-5.5"},
+                {"id": "sid-3", "model": "opencode/big-pickle"},
+                {"id": "sid-4", "model": "claude-sonnet-4-6"},
+            ],
+            "interactive_investigations": [
+                {
+                    "tool": "Codex CLI",
+                    "duration": "10s",
+                    "new_commits": ["abc1234"],
+                    "notes": "fixed tab selection",
+                }
+            ],
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "untested",
+            "created_count": 0,
+            "planned_count": 0,
+            "failed_count": 0,
+            "passed_count": 0,
+            "total_run": 0,
+            "failing_tests": [],
+            "tests_ok": True,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("AI Sessions:", printed)
+            self.assertIn("4 recorded", printed)
+            self.assertIn("View History", printed)
+            self.assertIn("Models:", printed)
+            self.assertIn("gemini-3.1-pro-preview", printed)
+            self.assertIn("+2 more", printed)
+            self.assertIn("Latest CLI:", printed)
+            self.assertIn("Codex CLI", printed)
+            self.assertIn("(10s, 1 commit)", printed)
+            self.assertIn("fixed tab selection", printed)
 
     @patch("dev_console.subprocess.run")
     def test_run_interactive_cli_with_framed_footer_non_tty(self, mock_run):
@@ -1540,6 +1674,239 @@ class AppFeatureTests_{i}: XCTestCase {{
         ret = dev_console.run_interactive_cli_with_framed_footer(["echo", "hello"], status_bar=status_bar)
         self.assertEqual(ret, 0)
         mock_run.assert_called_once()
+
+
+    def test_render_ai_changes_synopsis_parses_json_payload_into_clean_sections(self):
+        json_payload = json.dumps({
+            "hypothesis": "The risk tab failed because RiskDetailsView page was omitted.",
+            "summary": "Root cause: omitted page. Fix: always render page. Verified: 21 tests pass.",
+            "implementation_plan": "1. Trace data flow.\n2. Add DocumentRiskAnalysisState.\n3. Add unit tests.",
+            "files_changed": [
+                "ThemisPlayground/DocumentDetailView.swift",
+                "ThemisPlayground/Models.swift"
+            ],
+            "test_command": "-only-testing:ThemisPlaygroundTests/DocumentLogicTests",
+            "risks": "UI-level tab selection is covered only indirectly."
+        })
+        job = {
+            "job_id": "test-job-synopsis",
+            "builder_summary": json_payload,
+            "ai_untracked_files": ["ThemisPlaygroundTests/NewTests.swift"],
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.render_ai_changes_synopsis(job)
+            printed = "\n".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Hypothesis / Root Cause:", printed)
+            self.assertIn("The risk tab failed because", printed)
+            self.assertIn("Summary of Changes:", printed)
+            self.assertIn("Root cause:", printed)
+            self.assertIn("Fix:", printed)
+            self.assertIn("Implementation Steps:", printed)
+            self.assertIn("1.", printed)
+            self.assertIn("Trace data flow.", printed)
+            self.assertIn("2.", printed)
+            self.assertIn("Add DocumentRiskAnalysisState.", printed)
+            self.assertIn("Risks & Considerations:", printed)
+            self.assertIn("UI-level tab selection", printed)
+            self.assertIn("Modified Files:", printed)
+            self.assertIn("DocumentDetailView.swift", printed)
+            self.assertIn("Untracked (New) Files:", printed)
+            self.assertIn("NewTests.swift", printed)
+            self.assertIn("Verification Test Filter:", printed)
+            self.assertIn("-only-testing:ThemisPlaygroundTests/DocumentLogicTests", printed)
+            # Ensure raw JSON braces are not dumped
+            self.assertNotIn('{\n      "hypothesis"', printed)
+
+    def test_render_ai_changes_synopsis_handles_plain_text(self):
+        job = {
+            "job_id": "test-job-plain",
+            "builder_summary": "Applied targeted fix to RiskViewModel.",
+            "builder_hypothesis": "Risk tab state binding was disconnected.",
+            "ai_modified_files": ["RiskViewModel.swift"],
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.render_ai_changes_synopsis(job)
+            printed = "\n".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Synopsis / Summary of Changes:", printed)
+            self.assertIn("Applied targeted fix to RiskViewModel.", printed)
+            self.assertIn("Hypothesis / Root Cause:", printed)
+            self.assertIn("Risk tab state binding was disconnected.", printed)
+            self.assertIn("Modified Files:", printed)
+            self.assertIn("RiskViewModel.swift", printed)
+
+    @patch("os.get_terminal_size", return_value=(50, 24))
+    def test_print_wrapped_bullet_hanging_indent_on_small_screens(self, mock_term):
+        with patch("builtins.print") as mock_print:
+            dev_console.print_wrapped_bullet(
+                "  \033[90m└─ 🤖 Models:\033[0m ",
+                "\033[97mgemini-3.1-pro-preview, gpt-5.5, opencode/big-pickle (+1 more)\033[0m"
+            )
+            printed_lines = [call.args[0] for call in mock_print.call_args_list]
+            self.assertGreater(len(printed_lines), 1)
+            # First line should start with the bullet prefix
+            self.assertTrue(printed_lines[0].startswith("  \033[90m└─ 🤖 Models:\033[0m "))
+            # All wrapped continuation lines must start with 15 spaces of hanging indent (matching prefix length)
+            for line in printed_lines[1:]:
+                self.assertTrue(line.startswith(" " * 15), f"Wrapped line should have 15 spaces indent: {repr(line)}")
+
+    @patch("os.get_terminal_size", return_value=(40, 24))
+    def test_print_wrapped_bullet_with_osc8_hyperlink_on_small_screens(self, mock_term):
+        with patch("builtins.print") as mock_print:
+            link = "\033]8;;file:///Users/leemosupreemo/distribution.log\033\\\033[92mdistribution_2026-09-05 13:05:59-bug-79.log\033[0m\033]8;;\033\\"
+            dev_console.print_wrapped_bullet("  \033[90m└─ 📄\033[0m ", link)
+            printed_lines = [call.args[0] for call in mock_print.call_args_list]
+            self.assertGreater(len(printed_lines), 1)
+            # Continuation lines must have 7 spaces of hanging indent
+            for line in printed_lines[1:]:
+                self.assertTrue(line.startswith(" " * 7), f"Wrapped line should have 7 spaces indent: {repr(line)}")
+
+    @patch("os.get_terminal_size", return_value=(55, 24))
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_sub_bullets_wrap_with_hanging_indent(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh, mock_term
+    ):
+        job = {
+            "job_id": "test-job-narrow",
+            "status": "debugging",
+            "last_manual_log_paths": ["logs/distribution_2026-09-05 13:05:59-bug-79.log"],
+            "llm_sessions": [
+                {"id": "sid-1", "model": "gemini-3.1-pro-preview"},
+                {"id": "sid-2", "model": "gpt-5.5"},
+                {"id": "sid-3", "model": "opencode/big-pickle"},
+            ],
+            "interactive_investigations": [
+                {
+                    "tool": "Codex CLI",
+                    "duration": "10s",
+                    "notes": "investigated and confirmed the issue across all pages",
+                }
+            ],
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "failing",
+            "created_count": 0,
+            "planned_count": 3,
+            "failed_count": 1,
+            "passed_count": 2,
+            "total_run": 3,
+            "failing_tests": ["ThemisPlaygroundTests/DocumentLogicTests/testDeepLinkNavigationWithInvalidState"],
+            "tests_ok": False,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed_lines = [call.args[0] for call in mock_print.call_args_list if call.args]
+            
+            # Check failing test wrap
+            failing_lines = [l for l in printed_lines if "DocumentLogicTests" in l or "testDeepLink" in l]
+            self.assertTrue(len(failing_lines) >= 1)
+            
+            # Check models wrap
+            models_lines = [l for l in printed_lines if "Models:" in l or "gemini-3.1-pro-preview" in l]
+            self.assertTrue(len(models_lines) >= 1)
+
+            # Check logs wrap
+            logs_lines = [l for l in printed_lines if "distribution_2026-09-05" in l]
+            self.assertTrue(len(logs_lines) >= 1)
+
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_debugging_shows_attempt_budget_and_pending_state(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh
+    ):
+        job = {
+            "job_id": "test-job-debug-pending",
+            "status": "debugging",
+            "iteration": 1,
+            "max_iterations": 8,
+            "debug_history": [
+                {
+                    "iteration": 1,
+                    "hypothesis": "User reported bug is still happening.",
+                    "action": "Iterate fix based on user feedback.",
+                    "result": "pending",
+                }
+            ],
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "untested",
+            "created_count": 0,
+            "planned_count": 0,
+            "failed_count": 0,
+            "passed_count": 0,
+            "total_run": 0,
+            "failing_tests": [],
+            "tests_ok": True,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Budget: Up to 8 Automated Fix Attempts", printed)
+            self.assertIn("Ready for Attempt #1 of 8", printed)
+            self.assertIn("User reported bug is still happening.", printed)
+            self.assertIn("to run Auto-Fix (starts Attempt #1)", printed)
+
+    @patch("dev_console.refresh_job")
+    @patch("dev_console.get_job_test_summary")
+    @patch("dev_console.StatusBar")
+    @patch("dev_console.clear_screen")
+    @patch("dev_console.input", return_value="")
+    @patch("dev_console.get_key", side_effect=["b"])
+    def test_handle_job_selection_debugging_shows_prior_failure_reason_and_next_attempt(
+        self, _mock_key, _mock_input, _mock_clear, _mock_status, mock_get_test_summary, mock_refresh
+    ):
+        job = {
+            "job_id": "test-job-debug-failed",
+            "status": "debugging",
+            "iteration": 2,
+            "max_iterations": 8,
+            "debug_history": [
+                {
+                    "iteration": 1,
+                    "hypothesis": "Risk tab was omitted from PageTabView.",
+                    "action": "Added DocumentRiskAnalysisState in Models.swift",
+                    "result": {"build_ok": True, "tests_ok": False},
+                }
+            ],
+            "_path": "test.json",
+        }
+        mock_refresh.return_value = job
+        mock_get_test_summary.return_value = {
+            "status": "failing",
+            "created_count": 3,
+            "planned_count": 3,
+            "failed_count": 1,
+            "passed_count": 2,
+            "total_run": 3,
+            "failing_tests": ["DocumentLogicTests.testTabSelection"],
+            "tests_ok": False,
+        }
+
+        with patch("builtins.print") as mock_print:
+            dev_console.handle_job_selection(job, [], [])
+            printed = " ".join(str(c) for c in mock_print.call_args_list)
+            self.assertIn("Attempt #1 Failed", printed)
+            self.assertIn("1 suite test failing", printed)
+            self.assertIn("Attempt #2 of 8", printed)
+            self.assertIn("Added DocumentRiskAnalysisState", printed)
+            self.assertIn("DocumentLogicTests.testTabSelection", printed)
+            self.assertIn("to run Auto-Fix (starts Attempt #2)", printed)
 
 
 if __name__ == "__main__":

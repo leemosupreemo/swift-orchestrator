@@ -22,3 +22,5 @@ test_onboarding_proj/
 # Swift build artifacts and module cache
 .build/
 *.pcm
+exports/
+*.zip

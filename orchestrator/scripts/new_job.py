@@ -405,8 +405,9 @@ def main(args_override: list[str] | None = None) -> None:
     elif args.allowed_models:
         allowed_models = args.allowed_models.split(",")
     else:
-        print("\nLLM Model Selection (restrict workflow to these models):")
-        footer = "[\033[1;91mB\033[0m] Back"
+        footer = (
+            "[\033[1;96mA\033[0m] Select All  [\033[1;92mF\033[0m] Free Only  [\033[1;93mN\033[0m] Deselect All  [\033[1;91mB\033[0m] Back"
+        )
         allowed_models = prompt_checkbox("select models", all_models, DEFAULT_FALLBACKS, footer=footer)
     
     if not allowed_models:

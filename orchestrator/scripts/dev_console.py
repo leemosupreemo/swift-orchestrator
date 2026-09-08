@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, get_github_links, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -84,8 +84,8 @@ def print_box_line_rich(label: str, rich_text: str) -> None:
     available_width = cols - prefix_len - 4
     
     import re
-    # Tokenize ANSI codes, whitespace, or non-whitespace words
-    token_pattern = re.compile(r'(\x1b\[[0-9;]*[mK])|(\s+)|([^\s\x1b]+)')
+    # Tokenize ANSI codes (CSI & OSC sequences), whitespace, or non-whitespace words
+    token_pattern = re.compile(r'(\x1b(?:\][^\x1b\x07]*(?:\x1b\\|\x07)|\[[0-9;?]*[a-zA-Z]|.))|(\s+)|([^\s\x1b]+)')
     tokens = [m.group(0) for m in token_pattern.finditer(rich_text)]
     
     lines = []
@@ -98,7 +98,7 @@ def print_box_line_rich(label: str, rich_text: str) -> None:
             current_line_parts.append(token)
             if token == '\x1b[0m':
                 active_ansi_state = ""
-            else:
+            elif token.startswith('\x1b['):
                 active_ansi_state = token
         elif token.isspace():
             if current_line_parts:
@@ -140,16 +140,14 @@ def print_wrapped_kv(label: str, rich_text: str, indent_size: int | None = None)
     
     import re
     # Strip ANSI to measure the label length
-    plain_label = re.sub(r"\033\[[0-9;]*m", "", label)
+    plain_label = re.sub(r"\x1b(?:\][^\x1b\x07]*(?:\x1b\\|\x07)|\[[0-9;?]*[a-zA-Z])", "", label)
     label_len = len(plain_label)
     
     actual_indent = indent_size if indent_size is not None else label_len
-    available_width = cols - actual_indent - 4
-    if available_width < 10:
-        available_width = 10
+    available_width = max(cols - actual_indent - 1, 10)
         
-    # Tokenize ANSI codes, whitespace, or non-whitespace words
-    token_pattern = re.compile(r'(\x1b\[[0-9;]*[mK])|(\s+)|([^\s\x1b]+)')
+    # Tokenize ANSI codes (CSI & OSC sequences), whitespace, or non-whitespace words
+    token_pattern = re.compile(r'(\x1b(?:\][^\x1b\x07]*(?:\x1b\\|\x07)|\[[0-9;?]*[a-zA-Z]|.))|(\s+)|([^\s\x1b]+)')
     tokens = [m.group(0) for m in token_pattern.finditer(rich_text)]
     
     lines = []
@@ -162,7 +160,7 @@ def print_wrapped_kv(label: str, rich_text: str, indent_size: int | None = None)
             current_line_parts.append(token)
             if token == '\x1b[0m':
                 active_ansi_state = ""
-            else:
+            elif token.startswith('\x1b['):
                 active_ansi_state = token
         elif token.isspace():
             if current_line_parts:
@@ -187,11 +185,18 @@ def print_wrapped_kv(label: str, rich_text: str, indent_size: int | None = None)
     if current_line_parts:
         lines.append("".join(current_line_parts))
         
-    for i, line in enumerate(lines):
-        if i == 0:
-            print(f"{label}{line}")
-        else:
-            print(f"{' ' * actual_indent}{line}")
+    if not lines:
+        print(label)
+    else:
+        for i, line in enumerate(lines):
+            if i == 0:
+                print(f"{label}{line}")
+            else:
+                print(f"{' ' * actual_indent}{line}")
+
+def print_wrapped_bullet(label: str, rich_text: str, indent_size: int | None = None) -> None:
+    """Prints a bulleted list item, wrapping value text and applying hanging indent."""
+    print_wrapped_kv(label, rich_text, indent_size=indent_size)
 
 FLEET_AVAILABILITY: dict[str, bool] = {}
 FLEET_DETAILS: dict[str, dict[str, Any]] = {}
@@ -735,6 +740,29 @@ def script_failure_summary(output_log: str) -> str | None:
         return "\n".join(error_lines[:5])
     return None
 
+def format_trial_result(res: Any, test_summary: dict[str, Any] | None = None) -> tuple[str, str]:
+    """Returns (badge, detail_str) for a debug trial result."""
+    if isinstance(res, dict):
+        if res.get("build_ok") and res.get("tests_ok"):
+            return "\033[92m✅ PASS\033[0m", "All tests passed"
+        elif not res.get("build_ok"):
+            return "\033[1;91m❌ FAIL (Build)\033[0m", "Compilation / build failed"
+        else:
+            fc = test_summary.get("failed_count", 0) if test_summary else 0
+            if fc > 0:
+                return "\033[1;91m❌ FAIL (Tests)\033[0m", f"{fc} suite test{'s' if fc != 1 else ''} failing"
+            return "\033[1;91m❌ FAIL (Tests)\033[0m", "Test assertion failed"
+    elif isinstance(res, str):
+        if res.lower() in ("pass", "passed", "ok"):
+            return "\033[92m✅ PASS\033[0m", "Passed"
+        elif res.lower() in ("fail", "failed"):
+            return "\033[1;91m❌ FAIL\033[0m", "Validation failed"
+        elif res == "pending":
+            return "\033[93m⏳ PENDING\033[0m", "Pending execution"
+        else:
+            return f"\033[90m{res}\033[0m", str(res)
+    return "\033[90mUNKNOWN\033[0m", "Unknown result"
+
 def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub_menu: bool = False, session_machines: list[str] | None = None, session_models: list[str] | None = None, label: str | None = None) -> tuple[int, str]:
     if job:
         job["online_machines"] = get_online_machines(job.get("allowed_machines", []))
@@ -921,7 +949,7 @@ def run_script(script_name: str, args: list[str], job: dict[str, Any] | None = N
 
         # Special case: interactive, nested, or simple local scripts should take over
         # the terminal directly instead of fighting the parent streaming footer.
-        if script_name in ["new_job.py", "check_setup.py", "discover_machines.py", "smoke_test_delivery.py"]:
+        if script_name in ["new_job.py", "check_setup.py", "discover_machines.py", "smoke_test_delivery.py", "export_job.py"]:
             sub_env = os.environ.copy()
             if sub_menu and script_name != "check_setup.py":
                 sub_env["AI_PROGRESS_SILENT"] = "1"
@@ -3984,31 +4012,37 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 created_str = "\033[90m0 created\033[0m"
 
             if t_status == "failing" and failed_cnt > 0:
-                pass_part = f" ({passed_cnt} passing)" if passed_cnt > 0 else ""
-                fail_badge = f"\033[1;91m❌ {failed_cnt} failing{pass_part}\033[0m"
-                print(f"\033[1;96mTests:\033[0m        {created_str} for job | {fail_badge}")
+                pass_part = f" \033[90m({passed_cnt} passing)\033[0m" if passed_cnt > 0 else ""
+                fail_badge = f"\033[1;91m❌ {failed_cnt} failing\033[0m{pass_part}"
+                print(f"\033[1;96mTests:\033[0m        {fail_badge} \033[90m|\033[0m {created_str}")
                 for ft in f_tests[:3]:
-                    print(f"  \033[1;91m└─ ❌ {ft}\033[0m")
+                    print_wrapped_bullet("  \033[1;91m└─ ❌\033[0m ", f"\033[1;91m{ft}\033[0m")
                 if len(f_tests) > 3:
                     print(f"  \033[90m└─ ... and {len(f_tests) - 3} more\033[0m")
             elif t_status == "build-failed":
-                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[1;91m❌ Build / Compilation Failed\033[0m")
+                print(f"\033[1;96mTests:\033[0m        \033[1;91m❌ Build / Compilation Failed\033[0m \033[90m|\033[0m {created_str}")
             elif t_status == "passing" or (failed_cnt == 0 and passed_cnt > 0):
-                suite_part = f" (All {total_cnt} suite tests)" if total_cnt > 0 else (f" ({passed_cnt} passing)" if passed_cnt > 0 else "")
-                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[1;92m✅ All Passing{suite_part}\033[0m")
+                test_noun = "suite test" if total_cnt == 1 else "suite tests"
+                suite_part = f" \033[90m({total_cnt} {test_noun})\033[0m" if total_cnt > 0 else (f" \033[90m({passed_cnt} passing)\033[0m" if passed_cnt > 0 else "")
+                print(f"\033[1;96mTests:\033[0m        \033[1;92m✅ All Passing\033[0m{suite_part} \033[90m|\033[0m {created_str}")
             elif t_status == "pending":
-                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[90m⚙️ Pending execution\033[0m")
+                print(f"\033[1;96mTests:\033[0m        \033[90m⚙️ Pending execution\033[0m \033[90m|\033[0m {created_str}")
             else:
-                print(f"\033[1;96mTests:\033[0m        {created_str} for job | \033[90mUntested\033[0m")
+                print(f"\033[1;96mTests:\033[0m        \033[90mUntested\033[0m \033[90m|\033[0m {created_str}")
 
             # 5. Linked Logs
             logs = job.get("last_manual_log_paths", [])
             if logs:
-                from common import format_log_path
-                log_display = ", ".join([format_log_path(Path(l).name) for l in logs[:2]])
-                if len(logs) > 2:
-                    log_display += f" \033[90m(+{len(logs)-2} more)\033[0m"
-                print(f"\033[1;96mLinked Logs:\033[0m  \033[92m{log_display}\033[0m")
+                from common import format_log_path, format_file_link
+                count_str = f"{len(logs)} attached" if len(logs) > 1 else "1 attached"
+                print(f"\033[1;96mLinked Logs:\033[0m  \033[92m{count_str}\033[0m")
+                for l in logs[:3]:
+                    p = Path(l) if Path(l).is_absolute() else (ROOT / l)
+                    log_label = format_log_path(Path(l).name)
+                    link_str = format_file_link(p, label=f"\033[92m{log_label}\033[0m")
+                    print_wrapped_bullet("  \033[90m└─ 📄\033[0m ", link_str)
+                if len(logs) > 3:
+                    print(f"  \033[90m└─ ... and {len(logs) - 3} more\033[0m")
 
             # 6. AI Sessions & Interactive CLI Investigations
             sessions = job.get("llm_sessions", [])
@@ -4031,14 +4065,18 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
 
             if sessions or investigations:
                 total_sess_count = len(sessions) if sessions else len(investigations)
-                summary_models = ", ".join(models_used[:3]) if models_used else "AI Agents"
-                if len(models_used) > 3:
-                    summary_models += f" +{len(models_used)-3}"
 
-                j_hint = " \033[90m| [\033[1;96mJ\033[0;90m] View Logs\033[0m" if len(sessions) > 1 else ""
-                print(f"\033[1;96mAI Sessions:\033[0m  \033[97m{total_sess_count} recorded\033[0m \033[90m({summary_models})\033[0m{j_hint}")
-                if len(sessions) > 1:
+                j_hint = " \033[90m| [\033[1;96mJ\033[0;90m] View History\033[0m" if (len(sessions) > 0 or len(investigations) > 0) else ""
+                print(f"\033[1;96mAI Sessions:\033[0m  \033[97m{total_sess_count} recorded\033[0m{j_hint}")
+                if len(sessions) > 0 or len(investigations) > 0:
                     if "j" not in actions: actions.append("j")
+
+                if models_used:
+                    if len(models_used) <= 3:
+                        models_str = ", ".join(models_used)
+                    else:
+                        models_str = f"{', '.join(models_used[:3])} \033[90m(+{len(models_used) - 3} more)\033[0m"
+                    print_wrapped_bullet("  \033[90m└─ 🤖 Models:\033[0m ", f"\033[97m{models_str}\033[0m")
 
                 if investigations:
                     last_inv = investigations[-1]
@@ -4050,7 +4088,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     if c: detail_parts.append(f"{c} commit{'s' if c > 1 else ''}")
                     meta_str = f" \033[90m({', '.join(detail_parts)})\033[0m" if detail_parts else ""
                     note_str = f": \033[97m{n[:50]}..\033[0m" if len(n) > 50 else (f": \033[97m{n}\033[0m" if n else "")
-                    print(f"  \033[90m└─ 🤖 Latest CLI:\033[0m \033[1;97m{t}\033[0m{meta_str}{note_str}")
+                    print_wrapped_bullet("  \033[90m└─ 💬 Latest CLI:\033[0m ", f"\033[1;97m{t}\033[0m{meta_str}{note_str}")
 
             # 7. Task Progress Tracker (for multi-task plans)
             tasks = job.get("plan", {}).get("tasks", [])
@@ -4080,7 +4118,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     label = ref.get("url") or ref.get("path") or ref.get("source") or ref.get("type", "reference")
                     note = ref.get("note")
                     suffix = f" \033[90m- {note}\033[0m" if note else ""
-                    print(f"  \033[90m└─ {label}{suffix}\033[0m")
+                    print_wrapped_bullet("  \033[90m└─\033[0m ", f"\033[90m{label}{suffix}\033[0m")
                 if len(references) > 2:
                     print(f"  \033[90m└─ ... and {len(references) - 2} more\033[0m")
 
@@ -4092,7 +4130,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     a = item.get("answer", "")
                     if len(q) > 50: q = q[:47] + "..."
                     if len(a) > 50: a = a[:47] + "..."
-                    print(f"  \033[90m└─ Q: {q} | \033[92mA: {a}\033[0m")
+                    print_wrapped_bullet("  \033[90m└─\033[0m ", f"\033[90mQ: {q} | \033[92mA: {a}\033[0m")
 
             
             # PROACTIVE STATUS CONTEXT (What should the user do?)
@@ -4175,53 +4213,87 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             elif status == "debugging":
                 iter_val = job.get("iteration", 1)
                 max_iter = job.get("max_iterations", 8)
-                if phase == "paused":
-                    print(f"\033[1;93m ⏸️  PAUSED: Max Iterations Reached (Attempt {iter_val}/{max_iter})\033[0m")
-                    print(f" \033[1;96m->\033[0m AI reached its iteration limit. Tests require attention.")
-
-                    history = job.get("debug_history", [])
-                    if history:
-                        last = history[-1]
-                        if last.get("hypothesis"):
-                            print(f"\n  \033[1;97mFailure Hypothesis:\033[0m \033[90m{last.get('hypothesis')}\033[0m")
-                        if last.get("action"):
-                            print(f"  \033[1;97mNext Action:\033[0m        \033[93m{last.get('action')}\033[0m")
-                    print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to increase limits and resume, or \033[1;96m'R'\033[0m to reset.")
-                else:
-                    print(f"\033[1;95m 🔍 FIXING: Auto-Debug Loop\033[0m \033[90m(Attempt {iter_val}/{max_iter})\033[0m")
-                    if job.get("debug_history"):
-                        last = job["debug_history"][-1]
-                        print(f" Latest Hypothesis: \033[90m{last.get('hypothesis', 'Analyzing failure...')}\033[0m")
-                        if last.get("evidence"):
-                            print(f" Evidence Proof:   \033[3;90m\"{last.get('evidence')}\"\033[0m")
-                    print(f" \033[1;96m->\033[0m AI is currently auto-patching code to pass tests.")
-
-                # Succinct Debug History Summary
                 history = job.get("debug_history", [])
-                if history:
-                    print("\n  \033[1;97mDebug Trials:\033[0m")
-                    for entry in history[-3:]: # Show last 3 trials
-                        res = entry.get("result", "pending")
-                        if isinstance(res, dict):
-                            if res.get("build_ok") and res.get("tests_ok"):
-                                res_str = "\033[92mPASS\033[0m"
-                            elif not res.get("build_ok"):
-                                res_str = "\033[1;91mFAIL (Build)\033[0m"
-                            else:
-                                res_str = "\033[1;91mFAIL (Tests)\033[0m"
-                        else:
-                            res_str = f"\033[90m{res}\033[0m"
-                        
+
+                completed_trials = [e for e in history if e.get("result") not in ("pending", None)]
+                has_completed = len(completed_trials) > 0
+
+                if phase == "paused":
+                    print(f"\033[1;93m ⏸️  PAUSED: Max Iterations Reached ({iter_val}/{max_iter} Attempts Used)\033[0m")
+                    print_wrapped_kv(" Reason:        ", f"\033[97mAutomated repair reached the budget limit of {max_iter} attempts without passing all tests.\033[0m")
+                    if completed_trials:
+                        last_t = completed_trials[-1]
+                        badge, detail = format_trial_result(last_t.get("result"), test_summary)
+                        print_wrapped_kv(" Last Trial:    ", f"\033[97m#{last_t.get('iteration', iter_val)} {badge} \033[90m({detail})\033[0m")
+                        if last_t.get("hypothesis"):
+                            print_wrapped_kv(" Hypothesis:    ", f"\033[90m{last_t.get('hypothesis')}\033[0m")
+                        if last_t.get("action"):
+                            print_wrapped_kv(" Last Action:   ", f"\033[93m{last_t.get('action')}\033[0m")
+                    if test_summary.get("failing_tests"):
+                        ft_str = ", ".join(test_summary["failing_tests"][:2])
+                        if len(test_summary["failing_tests"]) > 2:
+                            ft_str += f" (+{len(test_summary['failing_tests']) - 2} more)"
+                        print_wrapped_kv(" Failing Tests: ", f"\033[1;91m{ft_str}\033[0m")
+                    print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to increase attempt limits & resume Auto-Fix, \033[1;96m'Q'\033[0m to Ask AI, or \033[1;96m'R'\033[0m to reset.")
+
+                elif not has_completed:
+                    # Initial state before Attempt #1 is run
+                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop (Budget: Up to {max_iter} Automated Fix Attempts)\033[0m")
+                    print_wrapped_kv(" Current State: ", f"\033[93m⏳ Ready for Attempt #1 of {max_iter}\033[0m \033[90m(Not yet executed — press 'D' to start)\033[0m")
+                    if history:
+                        target = history[-1].get("hypothesis") or history[-1].get("action") or "Investigate and resolve issue"
+                        print_wrapped_kv(" Target Issue:  ", f"\033[97m{target}\033[0m")
+                        if history[-1].get("evidence"):
+                            print_wrapped_kv(" Evidence:      ", f"\033[3;90m\"{history[-1].get('evidence')}\"\033[0m")
+                    if test_summary.get("failing_tests"):
+                        ft_str = ", ".join(test_summary["failing_tests"][:2])
+                        if len(test_summary["failing_tests"]) > 2:
+                            ft_str += f" (+{len(test_summary['failing_tests']) - 2} more)"
+                        print_wrapped_kv(" Failing Tests: ", f"\033[1;91m{ft_str}\033[0m")
+                    print_wrapped_kv(" Next Action:   ", "\033[90mAI will analyze failures, propose code changes, and verify with tests.\033[0m")
+                    print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to run Auto-Fix (starts Attempt #1), \033[1;96m'Q'\033[0m to Ask AI, or \033[1;96m'R'\033[0m to reset.")
+
+                else:
+                    # One or more prior attempts failed, ready for next iteration
+                    last_t = completed_trials[-1]
+                    last_num = last_t.get("iteration", 1)
+                    next_num = max(iter_val, last_num + 1)
+                    badge, detail = format_trial_result(last_t.get("result"), test_summary)
+
+                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop (Budget: Up to {max_iter} Automated Fix Attempts)\033[0m")
+                    print_wrapped_kv(" Current State: ", f"\033[1;91m⚠️  Attempt #{last_num} Failed\033[0m \033[90m({detail})\033[0m \033[1;96m-> Ready for Attempt #{next_num} of {max_iter}\033[0m")
+                    if last_t.get("action"):
+                        print_wrapped_kv(" Last Action:   ", f"\033[90m#{last_num}: {last_t.get('action')}\033[0m")
+                    if last_t.get("hypothesis"):
+                        print_wrapped_kv(" Last Hypo:     ", f"\033[90m{last_t.get('hypothesis')}\033[0m")
+                    if test_summary.get("failing_tests"):
+                        ft_str = ", ".join(test_summary["failing_tests"][:2])
+                        if len(test_summary["failing_tests"]) > 2:
+                            ft_str += f" (+{len(test_summary['failing_tests']) - 2} more)"
+                        print_wrapped_kv(" Failing Tests: ", f"\033[1;91m{ft_str}\033[0m")
+                    print_wrapped_kv(" Next Action:   ", f"\033[90mAI will analyze why Attempt #{last_num} failed, refine hypothesis, and patch code.\033[0m")
+                    print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to run Auto-Fix (starts Attempt #{next_num}), \033[1;96m'Q'\033[0m to Ask AI, or \033[1;96m'R'\033[0m to reset.")
+
+                # Show trial history list if there are completed trials
+                if completed_trials:
+                    print("\n  \033[1;97mPrior Completed Trials:\033[0m")
+                    for entry in completed_trials[-4:]:
+                        b, d = format_trial_result(entry.get("result"), test_summary)
                         desc = entry.get("hypothesis") or entry.get("action", "unknown")
                         if len(desc) > 55: desc = desc[:52] + "..."
-                        print(f"    #{entry.get('iteration')}: {res_str:12} | {desc}")
-                    if len(history) > 3:
-                        print(f"    \033[90m(+ {len(history)-3} older trials)\033[0m")
+                        print(f"    #{entry.get('iteration')}: {b} \033[90m|\033[0m {desc}")
+                    if len(completed_trials) > 4:
+                        print(f"    \033[90m(+ {len(completed_trials) - 4} older trials)\033[0m")
                 
             elif status == "review-needed":
                 print("\033[1;92m 🏁 CODE COMPLETE: Ready to Merge\033[0m")
-                print(f" PR: \033[97m#{job.get('pr_number')}\033[0m | Status: \033[92mALL TESTS PASSING\033[0m")
-                print(f" \033[1;96m->\033[0m Press \033[1;96m'G'\033[0m to view PR on GitHub or \033[1;96m'M'\033[0m to Merge & Finish.")
+                if job.get("pr_number"):
+                    print(f" PR: \033[97m#{job.get('pr_number')}\033[0m | Status: \033[92mALL TESTS PASSING\033[0m")
+                elif job.get("issue_number"):
+                    print(f" Issue: \033[97m#{job.get('issue_number')}\033[0m | Status: \033[92mALL TESTS PASSING\033[0m")
+                else:
+                    print(f" Status: \033[92mALL TESTS PASSING\033[0m")
+                print(f" \033[1;96m->\033[0m Press \033[1;96m'G'\033[0m to view on GitHub or \033[1;96m'M'\033[0m to Merge & Finish.")
             
             print("-" * 60)
 
@@ -4325,7 +4397,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     files_str = ", ".join([Path(f).name for f in display_files])
                     if len(all_impacted) > 5:
                         files_str += f" \033[90m(+{len(all_impacted)-5} more)\033[0m"
-                    print(f"    \033[90m└─\033[0m \033[90m{files_str}\033[0m")
+                    print_wrapped_bullet("    \033[90m└─\033[0m ", f"\033[90m{files_str}\033[0m")
 
             workflow_options = []
             context_options = []
@@ -4486,7 +4558,10 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     curr_defaults = resolve_model_selection_defaults(curr_allowed_ids, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        footer = (
+                            "[\033[1;96mA\033[0m] Select All  [\033[1;92mF\033[0m] Free Only  [\033[1;93mN\033[0m] Deselect All\n"
+                            "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        )
                         menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m."
                         new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:
@@ -4583,59 +4658,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i" and "i" in actions:
                 open_action_screen("AI Changes & Synopsis")
-                ai_modified = job.get("ai_modified_files", [])
-                ai_untracked = job.get("ai_untracked_files", [])
-                
-                # Retrieve builder synopsis / summary
-                job_id = job.get("job_id", "")
-                summary_text = ""
-                if job_id:
-                    summary_file = OUTPUT_DIR / job_id / "builder_summary.md"
-                    if summary_file.exists():
-                        try:
-                            summary_text = summary_file.read_text(encoding="utf-8").strip()
-                        except Exception:
-                            pass
-                if not summary_text:
-                    summary_text = (job.get("builder_summary") or "").strip()
-                if not summary_text and isinstance(job.get("plan"), dict):
-                    summary_text = (job.get("plan", {}).get("summary") or "").strip()
-
-                hypothesis = (job.get("builder_hypothesis") or "").strip()
-
-                if summary_text:
-                    print("  \033[1;97m📝 Synopsis / Summary of Changes:\033[0m")
-                    for s_line in summary_text.splitlines():
-                        if s_line.strip():
-                            print(f"    \033[97m{s_line}\033[0m")
-                        else:
-                            print()
-                    print()
-
-                if hypothesis:
-                    print("  \033[1;93m💡 Hypothesis / Root Cause:\033[0m")
-                    for h_line in hypothesis.splitlines():
-                        if h_line.strip():
-                            print(f"    \033[93m{h_line}\033[0m")
-                        else:
-                            print()
-                    print()
-
-                if not ai_modified and not ai_untracked:
-                    if not summary_text and not hypothesis:
-                        print("  No AI-modified files or summary recorded for this job.")
-                else:
-                    if ai_modified:
-                        print("  \033[1;93m📂 Modified Files:\033[0m")
-                        for f in sorted(ai_modified):
-                            print(f"    • {f}")
-                    
-                    if ai_untracked:
-                        if ai_modified: print()
-                        print("  \033[1;92m✨ Untracked (New) Files:\033[0m")
-                        for f in sorted(ai_untracked):
-                            print(f"    • {f}")
-                            
+                render_ai_changes_synopsis(job)
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "f" and "f" in actions:
                 if status == "designing" or status == "planned":
@@ -4860,23 +4883,61 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 run_script("export_job.py", [str(job["_path"])], sub_menu=True)
             elif choice == "g":
                 open_action_screen("View in GitHub")
-                label, url = get_github_url(job)
+                links = get_github_links(job)
 
-                if url and (url.startswith("http://") or url.startswith("https://")):
-                    clickable_url = f"\033]8;;{url}\033\\{url}\033]8;;\033\\"
-                    print(f"🔗 {label}:")
-                    print(f"   \033[4;96m{clickable_url}\033[0m\n")
-                elif label:
-                    print(f"🔗 {label}\n")
-
-                if job.get("pr_number"):
-                    print(f"Opening PR #{job['pr_number']} in browser...")
-                    subprocess.run(["gh", "pr", "view", str(job["pr_number"]), "--web"], cwd=str(ROOT))
-                elif job.get("issue_number"):
-                    print(f"Opening Issue #{job['issue_number']} in browser...")
-                    subprocess.run(["gh", "issue", "view", str(job["issue_number"]), "--web"], cwd=str(ROOT))
+                if not links:
+                    print("  \033[90mNo Pull Request or Issue associated with this job.\033[0m")
                 else:
-                    print("No PR or Issue associated with this job.")
+                    for item in links:
+                        u = item["url"]
+                        lbl = item["label"]
+                        if u and (u.startswith("http://") or u.startswith("https://")):
+                            clickable_url = f"\033]8;;{u}\033\\{u}\033]8;;\033\\"
+                            print(f"🔗 \033[1;97m{lbl}:\033[0m")
+                            print(f"   \033[4;96m{clickable_url}\033[0m\n")
+                        else:
+                            print(f"🔗 \033[1;97m{lbl}\033[0m\n")
+
+                    open_target = None
+                    if len(links) == 1:
+                        open_target = links[0]
+                    else:
+                        options = [f"Open {item['label']} in browser" for item in links]
+                        options.append("Open All in browser")
+                        options.append("Return to menu")
+                        try:
+                            sel = prompt_radio("Select GitHub item to open in browser:", options)
+                            if sel == "Return to menu":
+                                open_target = None
+                            elif sel == "Open All in browser":
+                                open_target = "all"
+                            else:
+                                for item in links:
+                                    if item["label"] in sel:
+                                        open_target = item
+                                        break
+                        except BackException:
+                            open_target = None
+
+                    def _open_link(item_to_open: dict[str, Any]) -> None:
+                        t = item_to_open["type"]
+                        num = item_to_open["number"]
+                        url_to_open = item_to_open["url"]
+                        print(f"Opening {item_to_open['label']} in browser...")
+                        opened = False
+                        if shutil.which("gh"):
+                            res = subprocess.run(["gh", t, "view", str(num), "--web"], cwd=str(ROOT), check=False)
+                            if res.returncode == 0:
+                                opened = True
+                        if not opened and url_to_open and (url_to_open.startswith("http://") or url_to_open.startswith("https://")):
+                            import webbrowser
+                            webbrowser.open(url_to_open)
+
+                    if open_target == "all":
+                        for item in links:
+                            _open_link(item)
+                    elif isinstance(open_target, dict):
+                        _open_link(open_target)
 
                 # Clear any leaking output from gh
                 sys.stdout.write("\r\033[K")
@@ -4964,109 +5025,471 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 
                 job = refresh_job(job)
 
+def format_risk_mitigation_pair(risk: str, mitigation_candidate: str | None = None) -> tuple[str, str]:
+    """Given a risk statement, finds or crafts a concrete mitigation / test strategy."""
+    import re
+    r_clean = risk.strip()
+    r_clean = re.sub(r'^(?:⚠️|\*|-|•|\d+\.)\s*', '', r_clean).strip()
+    
+    if mitigation_candidate:
+        m_clean = re.sub(r'^(?:🛡️|\*|-|•|\d+\.)\s*', '', mitigation_candidate.strip()).strip()
+        return r_clean, m_clean
+        
+    r_lower = r_clean.lower()
+    if "async" in r_lower or "race" in r_lower or "timing" in r_lower or "delayed" in r_lower:
+        strategy = "Verify state machine explicitly handles .loading/.empty/.failed states with async transition tests."
+    elif "schema" in r_lower or "decoding" in r_lower or "contract" in r_lower or "format" in r_lower:
+        strategy = "Add unit tests covering both legacy and new payload schemas with optional field defaults."
+    elif "ui" in r_lower or "binding" in r_lower or "tab" in r_lower or "tap" in r_lower or "view" in r_lower:
+        strategy = "Trace data binding from model to ViewModel to View; verify with deterministic ViewModel unit tests."
+    elif "regress" in r_lower or "existing" in r_lower or "backward" in r_lower or "compat" in r_lower:
+        strategy = "Add regression tests ensuring unchanged behavior for existing document types and tab routes."
+    elif "flaky" in r_lower or "mock" in r_lower or "test" in r_lower:
+        strategy = "Isolate dependencies with deterministic test fixtures and mock backend responses."
+    else:
+        strategy = "Add targeted unit tests and boundary condition assertions to verify correct behavior."
+    
+    return r_clean, strategy
+
+
+def render_risks_and_mitigations(job: dict[str, Any], parsed_json: dict[str, Any] | None = None) -> None:
+    """Renders all identified risks paired with their corresponding test & mitigation strategies."""
+    import re
+    import textwrap
+
+    risks_list: list[str] = []
+    mitigations_list: list[str] = []
+
+    # 1. Verification risks and suggested additions
+    verification = job.get("verification")
+    if isinstance(verification, dict):
+        v_risks = verification.get("risks_identified")
+        if isinstance(v_risks, list):
+            for r in v_risks:
+                if r and str(r).strip() not in risks_list:
+                    risks_list.append(str(r).strip())
+        v_additions = verification.get("suggested_additions")
+        if isinstance(v_additions, list):
+            for a in v_additions:
+                if a and str(a).strip() not in mitigations_list:
+                    mitigations_list.append(str(a).strip())
+
+    # 2. Plan risks
+    plan = job.get("plan")
+    if isinstance(plan, dict):
+        p_risks = plan.get("risks")
+        if isinstance(p_risks, list):
+            for r in p_risks:
+                if r and str(r).strip() not in risks_list:
+                    risks_list.append(str(r).strip())
+        elif isinstance(p_risks, str) and p_risks.strip():
+            for line in p_risks.splitlines():
+                line = line.strip()
+                if line and line not in risks_list:
+                    risks_list.append(line)
+        p_tests = plan.get("test_recommendations")
+        if isinstance(p_tests, list):
+            for t in p_tests:
+                if t and str(t).strip() not in mitigations_list:
+                    mitigations_list.append(str(t).strip())
+
+    # 3. Parsed JSON risks
+    if isinstance(parsed_json, dict):
+        b_risks = parsed_json.get("risks")
+        if isinstance(b_risks, list):
+            for r in b_risks:
+                if r and str(r).strip() not in risks_list:
+                    risks_list.append(str(r).strip())
+        elif isinstance(b_risks, str) and b_risks.strip():
+            sentences = [s.strip() for s in re.split(r'(?<=[.?!])\s+', b_risks) if s.strip()]
+            for s in sentences:
+                if len(s) > 20 and s not in risks_list:
+                    risks_list.append(s)
+
+    if not risks_list:
+        return
+
+    print_header("Identified Risks & Mitigation Strategies")
+    
+    for idx, risk_text in enumerate(risks_list, 1):
+        candidate_mitigation = None
+        r_words = set(re.findall(r'\w{4,}', risk_text.lower()))
+        best_score = 0
+        for mit in mitigations_list:
+            m_words = set(re.findall(r'\w{4,}', mit.lower()))
+            common = len(r_words.intersection(m_words))
+            if common > best_score:
+                best_score = common
+                candidate_mitigation = mit
+        
+        if not candidate_mitigation and idx - 1 < len(mitigations_list):
+            candidate_mitigation = mitigations_list[idx - 1]
+
+        risk_clean, mit_clean = format_risk_mitigation_pair(risk_text, candidate_mitigation)
+
+        r_wrapped = textwrap.fill(risk_clean, width=74, initial_indent=f"  ⚠️  \033[1;93mRisk #{idx}:\033[0m \033[93m", subsequent_indent="     \033[93m") + "\033[0m"
+        m_wrapped = textwrap.fill(mit_clean, width=74, initial_indent="     \033[1;92m🛡️  Mitigation / Test Strategy:\033[0m \033[97m", subsequent_indent="        \033[97m") + "\033[0m"
+        print(r_wrapped)
+        print(m_wrapped)
+        print()
+
+
 def view_job_brief_summary(job: dict[str, Any]) -> None:
+    import json
+    import re
+    import textwrap
+
     job_id = job.get("job_id", "unknown")
     brief_file = OUTPUT_DIR / job_id / "brief.md"
     summary_file = OUTPUT_DIR / job_id / "builder_summary.md"
+    inv_file = OUTPUT_DIR / job_id / "investigations.md"
     rendered_any = False
 
+    parsed_json = None
+    summary_text = ""
+    if summary_file.exists():
+        try:
+            summary_text = summary_file.read_text(encoding="utf-8").strip()
+            if "{" in summary_text and "}" in summary_text:
+                from llm import extract_json_block
+                json_str = extract_json_block(summary_text)
+                parsed_json = json.loads(json_str)
+        except Exception:
+            try:
+                parsed_json = json.loads(summary_text)
+            except Exception:
+                parsed_json = None
+
+    # 1. Summary of Changes (Rendered cleanly if parsed JSON, or markdown if text)
+    if summary_file.exists():
+        if isinstance(parsed_json, dict):
+            print_header("Summary of Changes")
+            hypo = (parsed_json.get("hypothesis") or "").strip()
+            summ = (parsed_json.get("summary") or "").strip()
+            plan_steps = parsed_json.get("implementation_plan")
+            files_list = parsed_json.get("files_changed") or []
+            test_cmd = parsed_json.get("test_command")
+
+            if hypo:
+                print("  \033[1;93m💡 Hypothesis / Root Cause:\033[0m")
+                for paragraph in hypo.split("\n\n"):
+                    if paragraph.strip():
+                        wrapped = textwrap.fill(paragraph.strip(), width=76, initial_indent="    ", subsequent_indent="    ")
+                        print(f"\033[93m{wrapped}\033[0m\n")
+
+            if summ:
+                print("  \033[1;97m📝 Summary & Resolution:\033[0m")
+                if any(marker in summ for marker in ["Root cause:", "Fix:", "Verified:"]):
+                    parts = re.split(r'(?=(?:Root cause|Fix|Verified):)', summ, flags=re.IGNORECASE)
+                    for p in parts:
+                        if p.strip():
+                            wrapped = textwrap.fill(p.strip(), width=74, initial_indent="    • ", subsequent_indent="      ")
+                            highlighted = re.sub(r'^(    •\s*)(Root cause|Fix|Verified)(:)', r'\1\033[1;97m\2\3\033[0m\033[97m', wrapped, flags=re.IGNORECASE)
+                            print(f"\033[97m{highlighted}\033[0m")
+                    print()
+                else:
+                    wrapped = textwrap.fill(summ, width=76, initial_indent="    ", subsequent_indent="    ")
+                    print(f"\033[97m{wrapped}\033[0m\n")
+
+            if plan_steps:
+                print("  \033[1;96m🛠️  Implementation Steps:\033[0m")
+                if isinstance(plan_steps, list):
+                    for idx, step in enumerate(plan_steps, 1):
+                        wrapped = textwrap.fill(str(step).strip(), width=74, initial_indent=f"    {idx}. ", subsequent_indent="       ")
+                        print(f"\033[97m{wrapped}\033[0m")
+                elif isinstance(plan_steps, str):
+                    numbered = re.split(r'(?:^|\s+)(?=\d+\.\s+)', plan_steps.strip())
+                    if len(numbered) > 1:
+                        for step in numbered:
+                            if step.strip():
+                                m = re.match(r'^(\d+\.\s+)(.*)$', step.strip(), re.DOTALL)
+                                if m:
+                                    prefix = m.group(1)
+                                    body = m.group(2).strip()
+                                    wrapped = textwrap.fill(body, width=76 - len(prefix) - 4)
+                                    w_lines = wrapped.splitlines()
+                                    print(f"    \033[1;96m{prefix}\033[0m\033[97m{w_lines[0]}\033[0m")
+                                    for wl in w_lines[1:]:
+                                        print(f"       \033[97m{wl}\033[0m")
+                                else:
+                                    print(f"    • \033[97m{step.strip()}\033[0m")
+                    else:
+                        for p_line in plan_steps.splitlines():
+                            if p_line.strip():
+                                print(f"    • \033[97m{p_line.strip()}\033[0m")
+                print()
+
+            if files_list and isinstance(files_list, list):
+                print("  \033[1;93m📂 Modified Files:\033[0m")
+                for f in files_list:
+                    print(f"    • \033[97m{f}\033[0m")
+                print()
+
+            if test_cmd:
+                print("  \033[1;96m🧪 Verification Test Filter:\033[0m")
+                print(f"    \033[90m{test_cmd}\033[0m\n")
+        else:
+            print_header("Summary")
+            print(format_markdown_for_terminal(summary_text))
+        rendered_any = True
+
+    # 2. Brief & Acceptance Criteria
     if brief_file.exists():
         print_header("Brief")
         print(format_markdown_for_terminal(brief_file.read_text(encoding="utf-8")))
         rendered_any = True
 
-    if summary_file.exists():
-        print_header("Summary")
-        print(format_markdown_for_terminal(summary_file.read_text(encoding="utf-8")))
-        rendered_any = True
-
-    inv_file = OUTPUT_DIR / job_id / "investigations.md"
+    # 3. Investigations
     if inv_file.exists():
         print_header("Investigations & Notes")
         print(format_markdown_for_terminal(inv_file.read_text(encoding="utf-8")))
         rendered_any = True
 
+    # 4. Fallback if no files generated yet
     if not rendered_any:
         print_header("Brief / Summary")
         print("No brief.md or builder_summary.md file has been generated for this job yet.")
+        plan = job.get("plan")
+        if isinstance(plan, dict):
+            summary = plan.get("summary")
+            tasks = plan.get("tasks")
+            constraints = plan.get("constraints")
 
-    plan = job.get("plan")
-    if isinstance(plan, dict):
-        summary = plan.get("summary")
-        tasks = plan.get("tasks")
-        risks = plan.get("risks")
-        impact = plan.get("impact_analysis")
-        decisions = plan.get("architecture_decisions")
-        assumptions = plan.get("assumptions")
-        constraints = plan.get("constraints")
+            if summary:
+                print_header("Plan Summary")
+                print(format_markdown_for_terminal(str(summary)))
 
-        if summary:
-            print_header("Plan Summary")
-            print(format_markdown_for_terminal(str(summary)))
+            if constraints and isinstance(constraints, list):
+                print_header("Constraints")
+                for item in constraints:
+                    print(f"  • {item}")
 
-        if impact:
-            print_header("Impact Analysis")
-            print(format_markdown_for_terminal(str(impact)))
+            if isinstance(tasks, list) and tasks:
+                print_header("Tasks")
+                for idx, task in enumerate(tasks, start=1):
+                    if isinstance(task, dict):
+                        name = task.get("name") or task.get("title") or f"Task {idx}"
+                        detail = task.get("description") or task.get("summary")
+                        print(f"{idx}. {name}")
+                        if detail:
+                            print(f"   {detail}")
+                    else:
+                        print(f"{idx}. {task}")
 
-        if decisions and isinstance(decisions, list):
-            print_header("Architecture Decisions")
-            for item in decisions:
-                print(f"  • {item}")
+    # 5. Risks & Mitigation Strategies (Always cleanly rendered with mitigation pairings)
+    render_risks_and_mitigations(job, parsed_json=parsed_json)
 
-        if assumptions and isinstance(assumptions, list):
-            print_header("Assumptions")
-            for item in assumptions:
-                print(f"  • {item}")
+def render_ai_changes_synopsis(job: dict[str, Any]) -> None:
+    """Renders the AI Changes & Synopsis screen with structured formatting, bullets, and line breaks."""
+    import json
+    import re
+    import textwrap
+    from common import OUTPUT_DIR
 
-        if constraints and isinstance(constraints, list):
-            print_header("Constraints")
-            for item in constraints:
-                print(f"  • {item}")
+    ai_modified = job.get("ai_modified_files", [])
+    ai_untracked = job.get("ai_untracked_files", [])
+    
+    # Retrieve builder synopsis / summary
+    job_id = job.get("job_id", "")
+    summary_text = ""
+    if job_id:
+        summary_file = OUTPUT_DIR / job_id / "builder_summary.md"
+        if summary_file.exists():
+            try:
+                summary_text = summary_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+    if not summary_text:
+        summary_text = (job.get("builder_summary") or "").strip()
+    if not summary_text and isinstance(job.get("plan"), dict):
+        summary_text = (job.get("plan", {}).get("summary") or "").strip()
 
-        if isinstance(tasks, list) and tasks:
-            print_header("Tasks")
-            for idx, task in enumerate(tasks, start=1):
-                if isinstance(task, dict):
-                    name = task.get("name") or task.get("title") or f"Task {idx}"
-                    detail = task.get("description") or task.get("summary")
-                    print(f"{idx}. {name}")
-                    if detail:
-                        print(f"   {detail}")
-                else:
-                    print(f"{idx}. {task}")
+    hypothesis = (job.get("builder_hypothesis") or "").strip()
 
-        if risks:
-            print_header("Risks & Edge Cases")
-            if isinstance(risks, list):
-                for item in risks:
-                    print(f"  ⚠️  {item}")
+    parsed_json = None
+    if summary_text:
+        try:
+            if "{" in summary_text and "}" in summary_text:
+                json_str = extract_json_block(summary_text)
+                parsed_json = json.loads(json_str)
+        except Exception:
+            try:
+                parsed_json = json.loads(summary_text)
+            except Exception:
+                parsed_json = None
+
+    if isinstance(parsed_json, dict):
+        hypo = (parsed_json.get("hypothesis") or hypothesis).strip()
+        summ = (parsed_json.get("summary") or "").strip()
+        plan_steps = parsed_json.get("implementation_plan")
+        risks_text = parsed_json.get("risks")
+        test_cmd = parsed_json.get("test_command") or job.get("test_command_override")
+        files_list = parsed_json.get("files_changed") or []
+
+        # 1. Hypothesis / Root Cause
+        if hypo:
+            print("  \033[1;93m💡 Hypothesis / Root Cause:\033[0m")
+            for paragraph in hypo.split("\n\n"):
+                p_clean = paragraph.strip()
+                if p_clean:
+                    wrapped = textwrap.fill(p_clean, width=76, initial_indent="    ", subsequent_indent="    ")
+                    print(f"\033[93m{wrapped}\033[0m\n")
+
+        # 2. Summary of Changes
+        if summ:
+            print("  \033[1;97m📝 Summary of Changes:\033[0m")
+            if any(marker in summ for marker in ["Root cause:", "Fix:", "Verified:"]):
+                parts = re.split(r'(?=(?:Root cause|Fix|Verified):)', summ, flags=re.IGNORECASE)
+                for p in parts:
+                    p_clean = p.strip()
+                    if p_clean:
+                        wrapped = textwrap.fill(p_clean, width=74, initial_indent="    • ", subsequent_indent="      ")
+                        highlighted = re.sub(r'^(    •\s*)(Root cause|Fix|Verified)(:)', r'\1\033[1;97m\2\3\033[0m\033[97m', wrapped, flags=re.IGNORECASE)
+                        print(f"\033[97m{highlighted}\033[0m")
+                print()
             else:
-                print(format_markdown_for_terminal(str(risks)))
+                for s_line in summ.splitlines():
+                    s_line = s_line.strip()
+                    if s_line:
+                        wrapped = textwrap.fill(s_line, width=76, initial_indent="    ", subsequent_indent="    ")
+                        print(f"\033[97m{wrapped}\033[0m")
+                print()
 
-    verification = job.get("verification")
-    if isinstance(verification, dict):
-        v_risks = verification.get("risks_identified")
-        if v_risks and isinstance(v_risks, list):
-            print_header("Architect Verification Risks")
-            for item in v_risks:
-                print(f"  ⚠️  {item}")
+        # 3. Implementation Steps
+        if plan_steps:
+            print("  \033[1;96m🛠️  Implementation Steps:\033[0m")
+            if isinstance(plan_steps, list):
+                for idx, step in enumerate(plan_steps, 1):
+                    wrapped = textwrap.fill(str(step).strip(), width=74, initial_indent=f"    {idx}. ", subsequent_indent="       ")
+                    print(f"\033[97m{wrapped}\033[0m")
+            elif isinstance(plan_steps, str):
+                numbered_steps = re.split(r'(?:^|\s+)(?=\d+\.\s+)', plan_steps.strip())
+                if len(numbered_steps) > 1:
+                    for step in numbered_steps:
+                        step_clean = step.strip()
+                        if step_clean:
+                            m = re.match(r'^(\d+\.\s+)(.*)$', step_clean, re.DOTALL)
+                            if m:
+                                num_prefix = m.group(1)
+                                body = m.group(2).strip()
+                                indent_spaces = " " * (len(num_prefix) + 4)
+                                wrapped = textwrap.fill(body, width=76 - len(num_prefix) - 4)
+                                wrapped_lines = wrapped.splitlines()
+                                print(f"    \033[1;96m{num_prefix}\033[0m\033[97m{wrapped_lines[0]}\033[0m")
+                                for w_line in wrapped_lines[1:]:
+                                    print(f"{indent_spaces}\033[97m{w_line}\033[0m")
+                            else:
+                                wrapped = textwrap.fill(step_clean, width=74, initial_indent="    • ", subsequent_indent="      ")
+                                print(f"\033[97m{wrapped}\033[0m")
+                else:
+                    for p_line in plan_steps.splitlines():
+                        p_line = p_line.strip()
+                        if p_line:
+                            wrapped = textwrap.fill(p_line, width=74, initial_indent="    • ", subsequent_indent="      ")
+                            print(f"\033[97m{wrapped}\033[0m")
+            print()
+
+        # 4. Risks & Considerations
+        if risks_text:
+            print("  \033[1;93m⚠️  Risks & Considerations:\033[0m")
+            if isinstance(risks_text, list):
+                for r in risks_text:
+                    wrapped = textwrap.fill(str(r).strip(), width=74, initial_indent="    • ", subsequent_indent="      ")
+                    print(f"\033[93m{wrapped}\033[0m")
+            elif isinstance(risks_text, str):
+                r_lines = [l.strip() for l in risks_text.splitlines() if l.strip()]
+                if len(r_lines) == 1 and len(r_lines[0]) > 100:
+                    sentences = [s.strip() for s in re.split(r'(?<=[.?!])\s+', r_lines[0]) if s.strip()]
+                    for s in sentences:
+                        wrapped = textwrap.fill(s, width=74, initial_indent="    • ", subsequent_indent="      ")
+                        print(f"\033[93m{wrapped}\033[0m")
+                else:
+                    for r_line in r_lines:
+                        wrapped = textwrap.fill(r_line, width=74, initial_indent="    • ", subsequent_indent="      ")
+                        print(f"\033[93m{wrapped}\033[0m")
+            print()
+
+        # 5. Modified & Created Files
+        combined_modified = list(ai_modified)
+        if isinstance(files_list, list):
+            for f in files_list:
+                if f not in combined_modified:
+                    combined_modified.append(f)
+
+        if combined_modified or ai_untracked:
+            if combined_modified:
+                print("  \033[1;93m📂 Modified Files:\033[0m")
+                for f in sorted(combined_modified):
+                    print(f"    • \033[97m{f}\033[0m")
+            if ai_untracked:
+                if combined_modified:
+                    print()
+                print("  \033[1;92m✨ Untracked (New) Files:\033[0m")
+                for f in sorted(ai_untracked):
+                    print(f"    • \033[92m{f}\033[0m")
+            print()
+
+        # 6. Test command
+        if test_cmd:
+            print("  \033[1;96m🧪 Verification Test Filter:\033[0m")
+            wrapped_cmd = textwrap.fill(str(test_cmd).strip(), width=76, initial_indent="    ", subsequent_indent="    ")
+            print(f"\033[90m{wrapped_cmd}\033[0m\n")
+
+    else:
+        # Non-JSON fallback: standard markdown / text formatting
+        if summary_text:
+            print("  \033[1;97m📝 Synopsis / Summary of Changes:\033[0m")
+            for s_line in summary_text.splitlines():
+                s_line = s_line.strip()
+                if s_line:
+                    wrapped = textwrap.fill(s_line, width=76, initial_indent="    ", subsequent_indent="    ")
+                    print(f"\033[97m{wrapped}\033[0m")
+                else:
+                    print()
+            print()
+
+        if hypothesis:
+            print("  \033[1;93m💡 Hypothesis / Root Cause:\033[0m")
+            for h_line in hypothesis.splitlines():
+                h_line = h_line.strip()
+                if h_line:
+                    wrapped = textwrap.fill(h_line, width=76, initial_indent="    ", subsequent_indent="    ")
+                    print(f"\033[93m{wrapped}\033[0m")
+                else:
+                    print()
+            print()
+
+        if not ai_modified and not ai_untracked:
+            if not summary_text and not hypothesis:
+                print("  No AI-modified files or summary recorded for this job.")
+        else:
+            if ai_modified:
+                print("  \033[1;93m📂 Modified Files:\033[0m")
+                for f in sorted(ai_modified):
+                    print(f"    • \033[97m{f}\033[0m")
+            
+            if ai_untracked:
+                if ai_modified:
+                    print()
+                print("  \033[1;92m✨ Untracked (New) Files:\033[0m")
+                for f in sorted(ai_untracked):
+                    print(f"    • \033[92m{f}\033[0m")
 
 def prompt_autofix_iteration_settings(job: dict[str, Any]) -> tuple[str | None, int]:
     print_header("Auto-Fix / Iterate")
-    print("\033[90mThe AI will inspect the current job, linked logs, and failing test output, apply a targeted fix, and rerun the job's TDD test suite to verify the fix.\033[0m")
-    print()
-    print("Use this when the implementation is close but still failing unit tests, review checks, or expected behavior.")
-    print()
-    print("Optional guidance examples:")
-    print("  - Focus on the checkout retry failure in the latest build log.")
-    print("  - The UI works, but the empty state still overlaps on small screens.")
-    print("  - Keep the public API unchanged; fix only the regression.")
-    print()
-    print("Leave the guidance field blank to run Auto-Fix with existing job context.")
-    print()
-    print("\033[1;97mGuidance (Optional)\033[0m")
-    print("\033[90mDescribe the specific failure, constraint, or expected result for this fix pass.\033[0m")
-    print()
+    print("\033[90mThe AI will inspect the current job, linked logs, and failing test output, apply a targeted fix, and rerun the job's TDD test suite to verify the fix.\033[0m\n")
+
+    print("  \033[1;97m🎯 When to use:\033[0m")
+    print("     \033[90mUse this when the implementation is close but still failing unit tests,\033[0m")
+    print("     \033[90mreview checks, or expected behavior.\033[0m\n")
+
+    print("  \033[1;97m💡 Optional guidance examples:\033[0m")
+    print("     \033[1;36m•\033[0m \033[97mFocus on the checkout retry failure in the latest build log.\033[0m")
+    print("     \033[1;36m•\033[0m \033[97mThe UI works, but the empty state still overlaps on small screens.\033[0m")
+    print("     \033[1;36m•\033[0m \033[97mKeep the public API unchanged; fix only the regression.\033[0m\n")
+
+    print("  \033[90mℹ️  Tip: Leave the guidance field blank to run Auto-Fix with existing job context.\033[0m")
+    print("  \033[90m" + ("─" * 60) + "\033[0m\n")
 
     current_total = job.get("max_iterations", 8)
     if current_total == 5:
@@ -5103,10 +5526,14 @@ def prompt_autofix_iteration_settings(job: dict[str, Any]) -> tuple[str | None, 
 def handle_tweak_revise(job: dict[str, Any]):
     print_header("Tweak / Revise")
     print("\033[90mDescribe the change you want in concrete terms. Leave the first field blank to cancel.\033[0m\n")
-    print("Examples:")
-    print("  - Change the onboarding copy to sound more direct and less promotional.")
-    print("  - Keep the current layout, but make the failed state show retry details.")
-    print("  - The implementation works, but split the helper into a smaller testable function.\n")
+
+    print("  \033[1;97m💡 Examples:\033[0m")
+    print("     \033[1;36m•\033[0m \033[97mChange the onboarding copy to sound more direct and less promotional.\033[0m")
+    print("     \033[1;36m•\033[0m \033[97mKeep the current layout, but make the failed state show retry details.\033[0m")
+    print("     \033[1;36m•\033[0m \033[97mThe implementation works, but split the helper into a smaller testable function.\033[0m\n")
+
+    print("  \033[90mℹ️  Tip: Leave the first field blank and press Enter to cancel.\033[0m")
+    print("  \033[90m" + ("─" * 60) + "\033[0m\n")
 
     requested_change = prompt_input(
         "Briefly describe what should change",
@@ -6363,7 +6790,10 @@ def handle_configuration_menu(session_allowed_machines: list[str], session_allow
                     curr_defaults = resolve_model_selection_defaults(session_allowed_models, value_map)
 
                     try:
-                        footer = "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        footer = (
+                            "[\033[1;96mA\033[0m] Select All  [\033[1;92mF\033[0m] Free Only  [\033[1;93mN\033[0m] Deselect All\n"
+                            "[\033[1;92mR\033[0m] Refresh Models  [\033[93mK\033[0m] API Keys  [\033[1;91mB\033[0m] Back"
+                        )
                         menu_label = f"Select LLM Models: \033[1;96m{service_summary} LLM services enabled\033[0m."
                         new_labels = prompt_checkbox(menu_label, options, curr_defaults, extra_keys=["r", "d", "k", "b"], footer=footer, details_map=details_map, details_title="Selected Model Details", status_bar=status_bar)
                         if new_labels:

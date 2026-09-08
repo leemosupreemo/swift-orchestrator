@@ -710,36 +710,135 @@ def update_issue_status(issue_number: int, labels_to_add: str | list[str], label
     run(cmd, cwd=ROOT, check=False)
 
 
-def get_github_url(job: dict[str, Any]) -> tuple[str, str]:
-    """Returns (kind, url) e.g. ('Pull Request #75', 'https://github.com/...') or ('Issue #123', 'https://github.com/...')"""
-    pr_number = job.get("pr_number")
-    issue_number = job.get("issue_number")
-
-    if pr_number:
-        if job.get("pr_url"):
-            return f"Pull Request #{pr_number}", job["pr_url"]
+def get_repo_github_base_url() -> str | None:
+    """Extracts the base GitHub web URL from git remote origin or upstream (e.g. 'https://github.com/owner/repo')."""
+    for remote in ["origin", "upstream"]:
         try:
-            url = gh_text("pr", "view", str(pr_number), "--json", "url", "--jq", ".url")
-            if url and (url.startswith("http://") or url.startswith("https://")):
-                job["pr_url"] = url
-                return f"Pull Request #{pr_number}", url
+            res = subprocess.run(
+                ["git", "remote", "get-url", remote],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                raw = res.stdout.strip()
+                if "github.com" in raw:
+                    if raw.endswith(".git"):
+                        raw = raw[:-4]
+                    if raw.startswith("git@github.com:"):
+                        path = raw.split("git@github.com:", 1)[1]
+                        return f"https://github.com/{path.strip('/')}"
+                    if raw.startswith("ssh://git@github.com/"):
+                        path = raw.split("ssh://git@github.com/", 1)[1]
+                        return f"https://github.com/{path.strip('/')}"
+                    if raw.startswith("https://github.com/"):
+                        return raw.rstrip("/")
+                    if raw.startswith("http://github.com/"):
+                        return f"https://{raw[7:]}".rstrip("/")
         except Exception:
             pass
-        return f"Pull Request #{pr_number}", f"gh pr view {pr_number} --web"
+
+    if shutil.which("gh"):
+        try:
+            url = gh_text("repo", "view", "--json", "url", "--jq", ".url")
+            if url and (url.startswith("http://") or url.startswith("https://")):
+                return url.rstrip("/")
+        except Exception:
+            pass
+
+    return None
+
+
+def get_github_links(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """Returns a list of dictionaries with info for associated GitHub items (issues and PRs).
+    Each dict contains: {'type': 'pr'|'issue', 'number': int, 'label': str, 'url': str, 'valid': bool}
+    """
+    links: list[dict[str, Any]] = []
+    base_url = get_repo_github_base_url()
+
+    issue_number = job.get("issue_number")
+    pr_number = job.get("pr_number")
 
     if issue_number:
-        if job.get("issue_url"):
-            return f"Issue #{issue_number}", job["issue_url"]
-        try:
-            url = gh_text("issue", "view", str(issue_number), "--json", "url", "--jq", ".url")
-            if url and (url.startswith("http://") or url.startswith("https://")):
-                job["issue_url"] = url
-                return f"Issue #{issue_number}", url
-        except Exception:
-            pass
-        return f"Issue #{issue_number}", f"gh issue view {issue_number} --web"
+        issue_url = job.get("issue_url")
+        issue_valid = True
+        if not issue_url and shutil.which("gh"):
+            try:
+                fetched = gh_text("issue", "view", str(issue_number), "--json", "url", "--jq", ".url")
+                if fetched and (fetched.startswith("http://") or fetched.startswith("https://")):
+                    issue_url = fetched
+                    job["issue_url"] = fetched
+            except Exception:
+                issue_valid = False
 
-    return "GitHub", ""
+        if not issue_url:
+            if base_url:
+                issue_url = f"{base_url}/issues/{issue_number}"
+            else:
+                issue_url = f"gh issue view {issue_number} --web"
+                issue_valid = False
+
+        links.append({
+            "type": "issue",
+            "number": issue_number,
+            "label": f"Issue #{issue_number}",
+            "url": issue_url,
+            "valid": issue_valid,
+        })
+
+    if pr_number:
+        pr_url = job.get("pr_url")
+        pr_valid = True
+        if not pr_url and shutil.which("gh"):
+            try:
+                fetched = gh_text("pr", "view", str(pr_number), "--json", "url", "--jq", ".url")
+                if fetched and (fetched.startswith("http://") or fetched.startswith("https://")):
+                    pr_url = fetched
+                    job["pr_url"] = fetched
+            except Exception:
+                pr_valid = False
+
+        if not pr_url:
+            if base_url:
+                pr_url = f"{base_url}/pull/{pr_number}"
+            else:
+                pr_url = f"gh pr view {pr_number} --web"
+                pr_valid = False
+
+        links.append({
+            "type": "pr",
+            "number": pr_number,
+            "label": f"Pull Request #{pr_number}",
+            "url": pr_url,
+            "valid": pr_valid,
+        })
+
+    return links
+
+
+def get_github_url(job: dict[str, Any]) -> tuple[str, str]:
+    """Returns (kind, url) e.g. ('Pull Request #75', 'https://github.com/...') or ('Issue #123', 'https://github.com/...')"""
+    links = get_github_links(job)
+    if not links:
+        return "GitHub", ""
+
+    # Prefer PR if valid
+    for link in links:
+        if link["type"] == "pr" and link["valid"]:
+            return link["label"], link["url"]
+
+    # Next check for valid issue
+    for link in links:
+        if link["type"] == "issue" and link["valid"]:
+            return link["label"], link["url"]
+
+    # Fallback to any link with an http/https URL
+    for link in links:
+        if link["url"].startswith("http://") or link["url"].startswith("https://"):
+            return link["label"], link["url"]
+
+    return links[0]["label"], links[0]["url"]
 
 
 @dataclass
@@ -1381,7 +1480,24 @@ def format_job_id(job_id: str) -> str:
 def format_index(i: int) -> str:
     return f"[\033[96m{i}\033[0m]"
 
-def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None = None, extra_keys: list[str] | None = None, footer: str | None = None, details_map: dict[str, list[str]] | None = None, status_bar: StatusBar | None = None, clear_screen: bool = True, max_selections: int | None = None, footer_actions: list[str] | None = None, details_title: str | None = None) -> list[str]:
+def _is_free_option(opt: str) -> bool:
+    clean = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", opt).lower().strip()
+    return "(free)" in clean or "[free]" in clean or ":free" in clean or "-free" in clean or clean.endswith("free") or clean.startswith("free")
+
+def _build_checkbox_hint(allow_bulk_select: bool, extra_keys: list[str], has_free: bool) -> str:
+    parts = ["Arrows: navigate", "Space: toggle"]
+    if allow_bulk_select:
+        if "a" not in extra_keys:
+            parts.append("A: all")
+        if "f" not in extra_keys and has_free:
+            parts.append("F: free")
+        if "n" not in extra_keys and "u" not in extra_keys:
+            parts.append("N: none")
+    parts.append("Enter: save")
+    parts.append("B: back")
+    return f"\033[1;90m({', '.join(parts)})\033[0m"
+
+def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None = None, extra_keys: list[str] | None = None, footer: str | None = None, details_map: dict[str, list[str]] | None = None, status_bar: StatusBar | None = None, clear_screen: bool = True, max_selections: int | None = None, footer_actions: list[str] | None = None, details_title: str | None = None, allow_bulk_select: bool = True) -> list[str]:
     """Displays interactive checkboxes navigated by arrow keys, toggled by space (vertical)."""
     if not sys.stdin.isatty():
         return defaults or []
@@ -1398,6 +1514,8 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
     sys.stdout.flush()
     
     error_msg = ""
+    has_free_options = any(not opt.startswith("---") and _is_free_option(opt) for opt in options)
+    instruction_hint = _build_checkbox_hint(allow_bulk_select, extra_keys, has_free_options)
     
     try:
         first_render = True
@@ -1420,7 +1538,7 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
             if desc:
                 formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
                 output.append(f"\033[93m💡 {formatted_desc}\033[0m")
-            output.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
+            output.append(instruction_hint)
             output.append("")
 
             
@@ -1521,8 +1639,12 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                     # Final render without blue highlight
                     sys.stdout.write(f"\r\033[{num_rendered_lines}A")
                     final_render = []
-                    final_render.append(get_header_string(label))
-                    final_render.append("\033[1;90m(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m")
+                    title, desc = split_title_description(label)
+                    final_render.append(get_header_string(title))
+                    if desc:
+                        formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
+                        final_render.append(f"\033[93m💡 {formatted_desc}\033[0m")
+                    final_render.append(instruction_hint)
                     final_render.append("")
                     if footer:
                         final_render.append(footer)
@@ -1558,6 +1680,25 @@ def prompt_checkbox(label: str, options: list[str], defaults: list[str] | None =
                 else:
                     sys.stdout.write("\n")
                 raise KeyInterruptException(key.lower(), index=idx, value=options[idx])
+            elif allow_bulk_select and len(key) == 1 and key.lower() == "a": # Select All
+                selectable = [i for i, opt in enumerate(options) if not opt.startswith("---")]
+                if max_selections and len(selectable) > max_selections:
+                    selected_indices = set(selectable[:max_selections])
+                    error_msg = f"Maximum of {max_selections} selections allowed."
+                else:
+                    selected_indices = set(selectable)
+            elif allow_bulk_select and len(key) == 1 and key.lower() == "f": # Select Free Only
+                free_indices = [i for i, opt in enumerate(options) if not opt.startswith("---") and _is_free_option(opt)]
+                if free_indices:
+                    if max_selections and len(free_indices) > max_selections:
+                        selected_indices = set(free_indices[:max_selections])
+                        error_msg = f"Maximum of {max_selections} selections allowed."
+                    else:
+                        selected_indices = set(free_indices)
+                else:
+                    error_msg = "No free options found in list."
+            elif allow_bulk_select and len(key) == 1 and key.lower() in ("n", "u"): # Deselect All
+                selected_indices.clear()
             elif key == "space": # Space
                 if idx in selected_indices:
                     selected_indices.remove(idx)
@@ -1916,10 +2057,10 @@ class ProgressIndicator:
         meta_candidates.append(timer_str)
         meta_candidates.append("")
 
-        chosen_meta = ""
+        chosen_meta = None
         final_label = label_text
 
-        # Try fitting the label and meta candidates
+        # 1. First preference: find the most verbose meta candidate where the ENTIRE label fits without truncation
         for meta in meta_candidates:
             meta_len = (len(meta) + 3) if meta else 0  # +3 for " (" and ")"
             avail = max_width - 2 - meta_len
@@ -1927,14 +2068,22 @@ class ProgressIndicator:
                 chosen_meta = meta
                 final_label = label_text
                 break
-            elif avail >= 10:
-                chosen_meta = meta
-                final_label = label_text[:avail - 3] + "..."
-                break
-        else:
-            chosen_meta = ""
-            avail = max(4, max_width - 2)
-            final_label = label_text[:avail - 3] + "..." if len(label_text) > avail else label_text
+
+        # 2. Second preference: if full label doesn't fit with full meta, pick a concise meta that leaves ample room for the label
+        if chosen_meta is None:
+            for meta in meta_candidates:
+                meta_len = (len(meta) + 3) if meta else 0
+                avail = max_width - 2 - meta_len
+                # Only use this meta if it leaves at least 18 chars for the label
+                if avail >= 18:
+                    chosen_meta = meta
+                    final_label = label_text[:avail - 3] + "..."
+                    break
+            else:
+                # Fallback to no meta at all to give the label maximum possible width
+                chosen_meta = ""
+                avail = max(4, max_width - 2)
+                final_label = label_text[:avail - 3] + "..." if len(label_text) > avail else label_text
 
         if chosen_meta:
             return f"\033[1;96m{spinner}\033[0m {final_label} \033[90m({chosen_meta})\033[0m"
@@ -2285,29 +2434,41 @@ def print_phase(phase: str, subtext: str | None = None):
         "execution": ("🏗️", "EXECUTION"),
         "verification": ("🧪", "VERIFICATION"),
         "review": ("👀", "REVIEW"),
-        "complete": ("✅", "COMPLETE")
+        "complete": ("✅", "COMPLETE"),
+        "exporting": ("📦", "EXPORTING"),
     }
-    icon, label = p_map.get(phase, ("⚙️", phase.upper()))
+    icon, label = p_map.get(phase.lower(), ("⚙️", phase.upper()))
     
-    header_text = f"{icon} {label}"
-    if subtext:
-        header_text += f": {subtext.upper()}"
-        
     try:
         cols, _ = os.get_terminal_size()
-    except:
+    except Exception:
         cols = 80
         
-    # Account for the fact that emojis like 🧠 might take 2 cells in some terminals 
-    # but Python len() might be different. Let's be conservative.
-    # visible_len = len(header_text) # This might be slightly off for emojis
-    # But for our purposes, a rough estimate is fine.
+    cols = max(30, cols)
     
-    # Safe width margin (cols - 2)
-    side_padding = (cols - len(header_text) - 8) // 2
-    if side_padding < 2: side_padding = 2
+    if subtext:
+        header_text = f"{icon} {label}: {subtext.strip().upper()}"
+    else:
+        header_text = f"{icon} {label}"
 
-    print(f"\n\033[1;96m{'=' * side_padding} {header_text} {'=' * side_padding}\033[0m")
+    # Emojis like 🧠, 📦, 🏗️ count as 1 char in len() but take 2 terminal cells
+    visual_len = len(header_text) + 1
+    max_visual_len = cols - 6
+    if visual_len > max_visual_len and subtext:
+        prefix = f"{icon} {label}: "
+        allowed_sub = max(6, max_visual_len - (len(prefix) + 1))
+        if len(subtext.strip()) > allowed_sub:
+            short_sub = subtext.strip()[:max(3, allowed_sub - 1)] + "…"
+            header_text = f"{prefix}{short_sub.upper()}"
+            visual_len = len(header_text) + 1
+
+    avail_space = max(2, cols - visual_len - 2)
+    left_padding = avail_space // 2
+    right_padding = avail_space - left_padding
+    left_pad = "=" * max(1, left_padding)
+    right_pad = "=" * max(1, right_padding)
+
+    print(f"\n\033[1;96m{left_pad} {header_text} {right_pad}\033[0m")
 
 
 def get_phase_name(phase: str) -> str:
@@ -2315,17 +2476,20 @@ def get_phase_name(phase: str) -> str:
 
 
 def extract_step_from_line(line: str) -> str | None:
-    """Parses step, phase, or sub-task description from stdout lines and returns a clean, user-friendly step label."""
+    """Parses step, phase, or sub-task description from stdout/stderr lines and returns a clean, user-friendly step label."""
     if not line:
         return None
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\^\[\[?[A-Za-z0-9_~]*')
     clean = ansi_escape.sub('', line).strip()
     if not clean:
         return None
 
+    # Strip logging / stream prefixes e.g. "[stderr] ", "[stdout] ", "[tool] ", "[action] ", "[Codex] ", etc.
+    payload = re.sub(r'^(?:\[(?:stderr|stdout|tool|action|progress|codex|claude|gemini|antigravity|opencode|error|info|log)\]\s*)+', '', clean, flags=re.IGNORECASE).strip()
+
     # 1. Match print_phase style: "=== 🧠 PLANNING ===" or "=== ⚙️ SUB-TASK 1/3: ADD AUTH SERVICE ==="
-    if clean.startswith("==") and clean.endswith("=="):
-        inner = clean.strip("= ")
+    if payload.startswith("==") and payload.endswith("=="):
+        inner = payload.strip("= ")
         # Remove emojis at start
         inner = re.sub(r'^[^\w\s:]+\s*', '', inner).strip()
         
@@ -2390,23 +2554,72 @@ def extract_step_from_line(line: str) -> str | None:
             return clean_name
 
     # 2. Match bracketed steps: "[1/4] Preparing git branch: ai/issue-123..."
-    bracket_match = re.match(r'^\[(\d+/\d+)\]\s*(.+)', clean)
+    bracket_match = re.match(r'^\[(\d+/\d+)\]\s*(.+)', payload)
     if bracket_match:
         step_num = bracket_match.group(1)
         rest = bracket_match.group(2).strip()
-        # Remove parenthesized flags e.g. "(Stitch AI Mode: Off)" or "(Stitch AI Mode: Enabled)"
         rest = re.sub(r'\(.*?\)', '', rest).strip()
-        # Remove "using model-name..." at end
         rest = re.sub(r'\s+using\s+[\w\-.]+', '', rest).strip()
-        # Remove trailing colon detail
         rest = re.sub(r':\s*.*$', '', rest).strip()
-        # Remove trailing dots
         rest = rest.rstrip('.').strip()
         if rest:
             return f"[{step_num}] {rest}"
 
-    # 3. Match specific test case / test suite execution lines (dynamic test feed)
-    tc_start = re.search(r"Test [Cc]ase '?(?:-\[)?([^\s'\]]+)(?:\s+([^\s'\]]+))?\]?'?\s+started", clean)
+    # 3. Match AI Tool Calls (Read, Edit, Write, Run, Grep, Search, List)
+    # E.g. "→ Read ThemisPlayground/ChatGPTAPI.swift [limit=60, offset=1]"
+    tool_read = re.search(r'(?:→\s*(?:Read|View)\s+|\b(?:view_file|read_file|read_url_content)\s+|(?:Read|Reading|View)\s+file\s+)([^\s\[\],:]+)', payload, re.IGNORECASE)
+    if tool_read:
+        target = tool_read.group(1).strip("'\":`")
+        name = Path(target).name
+        if name and not name.lower().startswith("limit="):
+            return f"Reading {name}"
+
+    tool_edit = re.search(r'(?:→\s*(?:Edit|Patch)\s+|\b(?:replace_file_content|edit_file|patch_file)\s+|(?:Edit|Editing|Patch|Patching)\s+file\s+)([^\s\[\],:]+)', payload, re.IGNORECASE)
+    if tool_edit:
+        target = tool_edit.group(1).strip("'\":`")
+        name = Path(target).name
+        if name:
+            return f"Editing {name}"
+
+    tool_write = re.search(r'(?:→\s*(?:Write|Create)\s+|\b(?:write_to_file|create_file)\s+|(?:Write|Writing)\s+file\s+)([^\s\[\],:]+)', payload, re.IGNORECASE)
+    if tool_write:
+        target = tool_write.group(1).strip("'\":`")
+        name = Path(target).name
+        if name:
+            return f"Writing {name}"
+
+    tool_cmd = re.search(r'(?:→\s*(?:Run|Execute|Bash)\s+(?:command|cmd|bash|shell)?[:\s]*|\b(?:run_command|execute_command)[:\s]+|(?:Run|Running)\s+command:?\s+)([^\n]+)', payload, re.IGNORECASE)
+    if tool_cmd:
+        raw_cmd = tool_cmd.group(1).strip("'\":` ")
+        tokens = raw_cmd.split()
+        if tokens:
+            cmd_name = Path(tokens[0]).name
+            if len(tokens) > 1 and tokens[1] in ["test", "build", "archive", "clean", "diff", "status", "push", "pull", "commit"]:
+                short_cmd = f"{cmd_name} {tokens[1]}"
+            elif len(tokens) > 1 and not tokens[1].startswith("-"):
+                short_cmd = f"{cmd_name} {tokens[1]}"
+            else:
+                short_cmd = cmd_name
+            if len(short_cmd) > 28:
+                short_cmd = short_cmd[:25] + "..."
+            return f"Running: {short_cmd}"
+
+    tool_search = re.search(r'(?:→\s*(?:Grep|Search)\s+|\b(?:grep_search|find_by_name|search_web)[:\s]+|(?:Search|Searching)\s+codebase:?\s+)([^\n]+)', payload, re.IGNORECASE)
+    if tool_search:
+        term = tool_search.group(1).strip()
+        term_clean = term.strip("'\":` ")
+        if len(term_clean) > 24:
+            term_clean = term_clean[:21] + "..."
+        return f"Searching: {term_clean}" if term_clean else "Searching codebase"
+
+    tool_list = re.search(r'(?:→\s*List\s*(?:directory|dir)?[:\s]+|\b(?:list_dir|list_directory)[:\s]+|(?:List|Listing)\s+directory:?\s+)([^\n]+)', payload, re.IGNORECASE)
+    if tool_list:
+        dir_target = tool_list.group(1).strip("'\":` ")
+        dir_name = Path(dir_target).name or dir_target
+        return f"Listing {dir_name}" if dir_name else "Listing directory"
+
+    # 4. Match specific test case / test suite execution lines (dynamic test feed)
+    tc_start = re.search(r"Test [Cc]ase '?(?:-\[)?([^\s'\]]+)(?:\s+([^\s'\]]+))?\]?'?\s+started", payload)
     if tc_start:
         cls_name = tc_start.group(1)
         mth_name = tc_start.group(2)
@@ -2418,12 +2631,12 @@ def extract_step_from_line(line: str) -> str | None:
             name = ".".join(parts[-2:]) if len(parts) >= 2 else cls_name
             return f"Testing: {name}"
 
-    st_start = re.search(r'Test "(?:-\[)?([^"]+)" started', clean)
+    st_start = re.search(r'Test "(?:-\[)?([^"]+)" started', payload)
     if st_start:
         name = st_start.group(1).replace("()", "")
         return f"Testing: {name}"
 
-    xc_pass = re.search(r"(?:Passing|✔)\s+(?:-\[)?([A-Za-z0-9_\.]+)(?:\s+([A-Za-z0-9_]+))?\]?", clean)
+    xc_pass = re.search(r"(?:Passing|✔)\s+(?:-\[)?([A-Za-z0-9_\.]+)(?:\s+([A-Za-z0-9_]+))?\]?", payload)
     if xc_pass:
         cls_name = xc_pass.group(1)
         mth_name = xc_pass.group(2)
@@ -2435,7 +2648,7 @@ def extract_step_from_line(line: str) -> str | None:
             name = ".".join(parts[-2:]) if len(parts) >= 2 else cls_name
             return f"Passed: {name}"
 
-    xc_fail = re.search(r"(?:Failing|✖|❌)\s+(?:-\[)?([A-Za-z0-9_\.]+)(?:\s+([A-Za-z0-9_]+))?\]?", clean)
+    xc_fail = re.search(r"(?:Failing|✖|❌)\s+(?:-\[)?([A-Za-z0-9_\.]+)(?:\s+([A-Za-z0-9_]+))?\]?", payload)
     if xc_fail:
         cls_name = xc_fail.group(1)
         mth_name = xc_fail.group(2)
@@ -2447,84 +2660,84 @@ def extract_step_from_line(line: str) -> str | None:
             name = ".".join(parts[-2:]) if len(parts) >= 2 else cls_name
             return f"Failed: {name}"
 
-    ts_start = re.search(r"Test Suite '([^']+)' started", clean) or re.search(r"Test Suite ([^\s]+) started", clean)
+    ts_start = re.search(r"Test Suite '([^']+)' started", payload) or re.search(r"Test Suite ([^\s]+) started", payload)
     if ts_start:
         suite = ts_start.group(1)
         if suite.lower() in ["all tests", "selected tests"] or suite.endswith(".xctest"):
             return "Running test suite"
         return f"Running suite: {suite}"
 
-    summary_match = re.search(r"Executed (\d+) tests?, with (\d+) failures?", clean)
+    summary_match = re.search(r"Executed (\d+) tests?, with (\d+) failures?", payload)
     if summary_match:
         tot = summary_match.group(1)
         fails = summary_match.group(2)
         return f"Finished {tot} tests ({fails} failures)"
 
-    test_dest = re.search(r"Testing on '([^']+)'", clean)
+    test_dest = re.search(r"Testing on '([^']+)'", payload)
     if test_dest:
         return f"Testing on {test_dest.group(1)}"
 
-    # 4. Match compiler, test, tool, and progress lines
-    if clean.startswith("CompileSwift normal") or clean.startswith("CompileSwift "):
-        swift_file_match = re.search(r'/([^/\s]+\.swift)\b', clean)
+    # 5. Match compiler, test, tool, and progress lines
+    if payload.startswith("CompileSwift normal") or payload.startswith("CompileSwift "):
+        swift_file_match = re.search(r'/([^/\s]+\.swift)\b', payload)
         if swift_file_match:
             return f"Compiling {swift_file_match.group(1)}"
         return "Compiling Swift sources"
-    elif clean.startswith("CompileSwiftSources"):
+    elif payload.startswith("CompileSwiftSources"):
         return "Compiling Swift sources"
-    elif clean.startswith("Compiling "):
-        file_match = re.search(r'Compiling\s+([^\s]+)', clean)
+    elif payload.startswith("Compiling "):
+        file_match = re.search(r'Compiling\s+([^\s]+)', payload)
         if file_match:
             return f"Compiling {Path(file_match.group(1)).name}"
         return "Compiling Swift sources"
-    elif clean.startswith("CompileAssetCatalog"):
+    elif payload.startswith("CompileAssetCatalog"):
         return "Compiling asset catalog"
-    elif clean.startswith("CompileStoryboard"):
+    elif payload.startswith("CompileStoryboard"):
         return "Compiling storyboards"
-    elif clean.startswith("ProcessInfoPlistFile"):
+    elif payload.startswith("ProcessInfoPlistFile"):
         return "Processing Info.plist"
-    elif clean.startswith("PhaseScriptExecution"):
+    elif payload.startswith("PhaseScriptExecution"):
         return "Running build scripts"
-    elif clean.startswith("CodeSign"):
+    elif payload.startswith("CodeSign"):
         return "Code signing application"
-    elif clean.startswith("Ld ") or clean.startswith("Linking "):
+    elif payload.startswith("Ld ") or payload.startswith("Linking "):
         return "Linking binaries"
-    elif clean.startswith("Fetching ") and ".git" in clean:
-        repo_name = clean.split("/")[-1].replace(".git", "").split()[0]
+    elif payload.startswith("Fetching ") and ".git" in payload:
+        repo_name = payload.split("/")[-1].replace(".git", "").split()[0]
         return f"Fetching {repo_name}"
-    elif clean.startswith("Resolving package ") or clean.startswith("Resolved source packages"):
+    elif payload.startswith("Resolving package ") or payload.startswith("Resolved source packages"):
         return "Resolving package dependencies"
-    elif "** TEST EXECUTE **" in clean or ("Test Suite" in clean and "started" in clean):
+    elif "** TEST EXECUTE **" in payload or ("Test Suite" in payload and "started" in payload):
         return "Running test suite"
-    elif "** TEST SUCCEEDED **" in clean or ("Test Suite" in clean and "passed" in clean):
+    elif "** TEST SUCCEEDED **" in payload or ("Test Suite" in payload and "passed" in payload):
         return "Tests succeeded"
-    elif "** TEST FAILED **" in clean or ("Test Suite" in clean and "failed" in clean):
+    elif "** TEST FAILED **" in payload or ("Test Suite" in payload and "failed" in payload):
         return "Tests failed"
-    elif "** BUILD SUCCEEDED **" in clean:
+    elif "** BUILD SUCCEEDED **" in payload:
         return "Build succeeded"
-    elif "** BUILD FAILED **" in clean:
+    elif "** BUILD FAILED **" in payload:
         return "Build failed"
-    elif "Generating (" in clean or ("received" in clean and "lines of response" in clean):
+    elif "Generating (" in payload or ("received" in payload and "lines of response" in payload):
         return "Generating code"
-    elif clean.startswith("Consulting "):
+    elif payload.startswith("Consulting "):
         return "Consulting AI model"
-    elif clean.startswith("Creating GitHub issue"):
+    elif payload.startswith("Creating GitHub issue"):
         return "Creating GitHub issue"
-    elif "Archiving project" in clean or clean.startswith("Archiving "):
+    elif "Archiving project" in payload or payload.startswith("Archiving "):
         return "Archiving project"
-    elif "Exporting IPA" in clean or "Exporting " in clean:
+    elif "Exporting IPA" in payload or "Exporting " in payload:
         return "Exporting app package"
-    elif "Uploading to Firebase" in clean or "Uploading " in clean:
+    elif "Uploading to Firebase" in payload or "Uploading " in payload:
         return "Uploading to Firebase"
-    elif "Committing " in clean:
+    elif "Committing " in payload:
         return "Committing changes"
-    elif "Syncing code to " in clean or "syncing code to" in clean.lower():
+    elif "Syncing code to " in payload or "syncing code to" in payload.lower():
         return "Syncing code to worker"
-    elif "Running build:" in clean:
+    elif "Running build:" in payload:
         return "Building project"
-    elif "Running tests:" in clean:
+    elif "Running tests:" in payload:
         return "Running test suite"
-    elif "Analyzing errors" in clean:
+    elif "Analyzing errors" in payload:
         return "Analyzing build/test errors"
 
     return None

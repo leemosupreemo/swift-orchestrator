@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PACKAGE_ROOT / "orchestrator" / "scripts"
@@ -319,8 +319,71 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
 
         written = "".join(call.args[0] for call in mock_write.call_args_list)
         self.assertGreater(written.index(footer), written.index("model-a"))
-        self.assertIn("(Arrows: navigate, Space: toggle, Enter: save, B: back)\033[0m\n\n", written)
+        self.assertIn("(Arrows: navigate, Space: toggle, A: all, N: none, Enter: save, B: back)\033[0m\n\n", written)
         self.assertIn(f"\n{footer}", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", side_effect=["a", "enter"])
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_select_all_hotkey(
+        self, _mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        options = ["--- Google ---", "gemini-flash", "gemini-pro", "--- Anthropic ---", "claude-sonnet"]
+        result = common.prompt_checkbox("select models", options, [])
+        self.assertEqual(result, ["gemini-flash", "gemini-pro", "claude-sonnet"])
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", side_effect=["f", "enter"])
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_select_free_only_hotkey(
+        self, _mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        options = [
+            "--- Google ---",
+            "gemini-2.5-flash \033[1;92m(Free)\033[0m",
+            "gemini-3.1-pro",
+            "--- OpenCode ---",
+            "opencode/qwen:free"
+        ]
+        result = common.prompt_checkbox("select models", options, ["gemini-3.1-pro"])
+        self.assertEqual(result, ["gemini-2.5-flash \033[1;92m(Free)\033[0m", "opencode/qwen:free"])
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", side_effect=["f", "enter"])
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_select_free_none_found(
+        self, mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        options = ["model-paid-1", "model-paid-2"]
+        result = common.prompt_checkbox("select models", options, ["model-paid-1"])
+        self.assertEqual(result, ["model-paid-1"])
+        written = "".join(call.args[0] for call in mock_write.call_args_list)
+        self.assertIn("No free options found in list.", written)
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", side_effect=["n", "enter"])
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_deselect_all_hotkey(
+        self, _mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        options = ["model-a", "model-b", "model-c"]
+        result = common.prompt_checkbox("select models", options, ["model-a", "model-b"])
+        self.assertEqual(result, [])
+
+    @patch("common.sys.stdin.isatty", return_value=True)
+    @patch("common.get_key", side_effect=["n"])
+    @patch("common.sys.stdout.flush")
+    @patch("common.sys.stdout.write")
+    def test_checkbox_extra_keys_precedence_over_bulk_keys(
+        self, _mock_write, _mock_flush, _mock_get_key, _mock_isatty
+    ) -> None:
+        with self.assertRaises(common.KeyInterruptException) as ctx:
+            common.prompt_checkbox("active machines", ["mac1", "mac2"], ["mac1"], extra_keys=["n"])
+        self.assertEqual(ctx.exception.key, "n")
 
     @patch("common.sys.stdin.isatty", return_value=True)
     @patch("common.get_key", return_value="enter")
@@ -558,6 +621,43 @@ class StepExtractorTests(unittest.TestCase):
             common.extract_step_from_line("Testing on 'iPhone 16' (id=12345)"),
             "Testing on iPhone 16"
         )
+
+    def test_extract_ai_tool_calls(self) -> None:
+        self.assertEqual(
+            common.extract_step_from_line("        ^[[Z        [stderr] → Read ThemisPlayground/ChatGPTAPI.swift [limit=60, offset=1]"),
+            "Reading ChatGPTAPI.swift"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("        [stderr] → Read ThemisPlayground/Models.swift [limit=120, offset=1]"),
+            "Reading Models.swift"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("        [stderr] → Edit ThemisPlayground/DocumentProcessorViewModel.swift"),
+            "Editing DocumentProcessorViewModel.swift"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("        [stderr] → Write ThemisPlayground/NewView.swift"),
+            "Writing NewView.swift"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("        [stderr] → Run command: xcodebuild test -scheme Themis -destination id=SIM"),
+            "Running: xcodebuild test"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("        [stderr] → Grep \"riskSummary\""),
+            "Searching: riskSummary"
+        )
+        self.assertEqual(
+            common.extract_step_from_line("        [tool] → List directory ThemisPlayground"),
+            "Listing ThemisPlayground"
+        )
+
+    @patch("os.get_terminal_size", return_value=(45, 24))
+    def test_progress_indicator_preserves_label_over_meta(self, _mock_size) -> None:
+        indicator = common.ProgressIndicator(label="Generating code changes", hint="Ctrl-C to abort")
+        line = indicator.get_line()
+        # Should not truncate "Generating code changes" to "Generating co..." on 45 column screen
+        self.assertIn("Generating code changes...", line)
 
 
 class StatusReportTests(unittest.TestCase):
@@ -948,6 +1048,70 @@ class FollowupAndLogTests(unittest.TestCase):
         label_issue, url_issue = common.get_github_url(job_issue)
         self.assertEqual(label_issue, "Issue #79")
         self.assertEqual(url_issue, "https://github.com/leemosupreemo/Themis/issues/79")
+
+    @patch("subprocess.run")
+    def test_get_repo_github_base_url(self, mock_run) -> None:
+        # Test SSH remote
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "git@github.com:leemosupreemo/Themis.git\n"
+        mock_run.return_value = mock_proc
+
+        base = common.get_repo_github_base_url()
+        self.assertEqual(base, "https://github.com/leemosupreemo/Themis")
+
+        # Test HTTPS remote
+        mock_proc.stdout = "https://github.com/leemosupreemo/Themis.git\n"
+        base_https = common.get_repo_github_base_url()
+        self.assertEqual(base_https, "https://github.com/leemosupreemo/Themis")
+
+    @patch("common.get_repo_github_base_url", return_value="https://github.com/leemosupreemo/Themis")
+    def test_get_github_links_multiple(self, _mock_base) -> None:
+        job = {
+            "job_id": "test-job",
+            "issue_number": 79,
+            "pr_number": 75,
+        }
+        with patch("common.gh_text", side_effect=lambda *args: "https://github.com/leemosupreemo/Themis/pull/75" if args[0] == "pr" else "https://github.com/leemosupreemo/Themis/issues/79"):
+            links = common.get_github_links(job)
+            self.assertEqual(len(links), 2)
+            self.assertEqual(links[0]["label"], "Issue #79")
+            self.assertEqual(links[0]["url"], "https://github.com/leemosupreemo/Themis/issues/79")
+            self.assertEqual(links[1]["label"], "Pull Request #75")
+            self.assertEqual(links[1]["url"], "https://github.com/leemosupreemo/Themis/pull/75")
+
+    @patch("common.get_repo_github_base_url", return_value="https://github.com/leemosupreemo/Themis")
+    def test_get_github_url_falls_back_to_issue_when_pr_invalid(self, _mock_base) -> None:
+        job = {
+            "job_id": "test-job",
+            "issue_number": 79,
+            "pr_number": 99999,
+        }
+        # PR view fails, issue view succeeds
+        def mock_gh(*args):
+            if args[0] == "pr":
+                raise subprocess.CalledProcessError(1, ["gh"])
+            return "https://github.com/leemosupreemo/Themis/issues/79"
+
+        with patch("common.gh_text", side_effect=mock_gh):
+            label, url = common.get_github_url(job)
+            self.assertEqual(label, "Issue #79")
+            self.assertEqual(url, "https://github.com/leemosupreemo/Themis/issues/79")
+
+    @patch("os.get_terminal_size", return_value=(36, 24))
+    def test_print_phase_narrow_screen_does_not_overflow(self, _mock_size) -> None:
+        import io
+        import re
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            common.print_phase("exporting", subtext="20260905-130559-bug-79")
+        output = captured.getvalue()
+        # Clean ansi codes
+        clean_lines = [re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", line) for line in output.split("\n") if line.strip()]
+        self.assertTrue(len(clean_lines) >= 1)
+        for line in clean_lines:
+            self.assertLessEqual(len(line), 36)
+        self.assertIn("EXPORTING", clean_lines[0])
 
 
 if __name__ == "__main__":
