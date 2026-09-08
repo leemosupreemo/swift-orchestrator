@@ -1113,6 +1113,76 @@ class FollowupAndLogTests(unittest.TestCase):
             self.assertLessEqual(len(line), 36)
         self.assertIn("EXPORTING", clean_lines[0])
 
+    def test_detector_detects_upstream_502_overload_error(self) -> None:
+        detector = common.LoopTroubleDetector(start_time=1000.0)
+        notices1 = detector.record_line("502 Upstream error from Nvidia: Service temporarily overloaded", now=1000.0)
+        self.assertTrue(len(notices1) >= 1)
+        self.assertIn("502 Upstream Error", notices1[0])
+        self.assertIn("Ctrl-C to abort", notices1[0])
+
+    def test_detector_detects_repeated_tool_access_loop(self) -> None:
+        detector = common.LoopTroubleDetector(start_time=1000.0)
+        # 3 accesses: no notice yet
+        detector.record_line("→ Read ThemisPlayground/Models.swift [limit=60, offset=1]", now=1000.0)
+        detector.record_line("→ Read ThemisPlayground/Models.swift [limit=120, offset=60]", now=1001.0)
+        detector.record_line("→ Read ThemisPlayground/Models.swift [limit=50, offset=120]", now=1002.0)
+        
+        # 4th access: loop notice triggered
+        notices = detector.record_line("→ Read ThemisPlayground/Models.swift [limit=50, offset=170]", now=1003.0)
+        self.assertEqual(len(notices), 1)
+        self.assertIn("Potential tool loop detected", notices[0])
+        self.assertIn("Models.swift", notices[0])
+        self.assertIn("Ctrl-C to abort", notices[0])
+
+    def test_detector_detects_ping_pong_loop(self) -> None:
+        detector = common.LoopTroubleDetector(start_time=1000.0)
+        detector.record_line("→ Read ThemisPlayground/FileA.swift", now=1000.0)
+        detector.record_line("→ Read ThemisPlayground/FileB.swift", now=1001.0)
+        detector.record_line("→ Read ThemisPlayground/FileA.swift", now=1002.0)
+        detector.record_line("→ Read ThemisPlayground/FileB.swift", now=1003.0)
+        detector.record_line("→ Read ThemisPlayground/FileA.swift", now=1004.0)
+        notices = detector.record_line("→ Read ThemisPlayground/FileB.swift", now=1005.0)
+        
+        self.assertTrue(any("Alternating ping-pong loop detected" in n for n in notices))
+        self.assertTrue(any("FileA.swift" in n and "FileB.swift" in n for n in notices))
+
+    def test_detector_detects_step_count_milestones(self) -> None:
+        detector = common.LoopTroubleDetector(start_time=1000.0)
+        for i in range(14):
+            detector.record_line(f"→ Read ThemisPlayground/File{i}.swift", now=1000.0 + i)
+        
+        # 15th step triggers milestone notice
+        notices = detector.record_line("→ Read ThemisPlayground/File15.swift", now=1015.0)
+        self.assertTrue(any("Agent has executed 15 steps" in n for n in notices))
+        self.assertTrue(any("Ctrl-C to abort" in n for n in notices))
+
+    def test_detector_detects_duration_milestone(self) -> None:
+        detector = common.LoopTroubleDetector(start_time=1000.0)
+        detector.record_line("Compiling Sources", now=1195.0)
+        # Not yet at 5 minutes (300s)
+        self.assertEqual(detector.check_time_triggers(now=1200.0), [])
+        
+        # At 5 minutes (1000 + 301 = 1301)
+        detector.record_line("Running test suite", now=1300.0)
+        notices = detector.check_time_triggers(now=1301.0)
+        self.assertEqual(len(notices), 1)
+        self.assertIn("Task has been running for 5m", notices[0])
+        self.assertIn("Ctrl-C to abort", notices[0])
+        
+        # Subsequent check before 10m should not repeat 5m notice
+        detector.record_line("Running test suite", now=1399.0)
+        self.assertEqual(detector.check_time_triggers(now=1400.0), [])
+
+    def test_detector_detects_idle_stall_milestone(self) -> None:
+        detector = common.LoopTroubleDetector(start_time=1000.0)
+        detector.record_line("Reading sources", now=1000.0)
+        
+        # 125s idle (2m+)
+        notices = detector.check_time_triggers(now=1125.0, last_output_time=1000.0)
+        self.assertEqual(len(notices), 1)
+        self.assertIn("No output received for 2m", notices[0])
+        self.assertIn("Ctrl-C to abort", notices[0])
+
 
 if __name__ == "__main__":
     unittest.main()

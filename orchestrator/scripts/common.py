@@ -2743,6 +2743,204 @@ def extract_step_from_line(line: str) -> str | None:
     return None
 
 
+class LoopTroubleDetector:
+    """
+    Monitors process output streams and execution time for stuck loops,
+    upstream API retries/overloads, repetitive tool calls, high step counts, and prolonged stalls.
+    Emits clean, formatted notifications advising the user when they may want to abort.
+    """
+
+    def __init__(self, start_time: float | None = None):
+        self.start_time = start_time if start_time is not None else time.monotonic()
+        self.last_output_time = self.start_time
+        self.last_notice_time: dict[str, float] = {}
+
+        # Tracking
+        self.upstream_errors: dict[str, int] = {}
+        self.recent_tool_targets: list[str] = []
+        self.step_count: int = 0
+        self.fired_duration_milestones: set[int] = set()
+        self.fired_step_milestones: set[int] = set()
+        self.fired_idle_milestones: set[int] = set()
+
+    def reset(self, start_time: float | None = None) -> None:
+        self.start_time = start_time if start_time is not None else time.monotonic()
+        self.last_output_time = self.start_time
+        self.last_notice_time.clear()
+        self.upstream_errors.clear()
+        self.recent_tool_targets.clear()
+        self.step_count = 0
+        self.fired_duration_milestones.clear()
+        self.fired_step_milestones.clear()
+        self.fired_idle_milestones.clear()
+
+    def _should_notify(self, key: str, cooldown: float = 45.0, now: float | None = None) -> bool:
+        current_time = now if now is not None else time.monotonic()
+        last = self.last_notice_time.get(key, 0.0)
+        if current_time - last >= cooldown:
+            self.last_notice_time[key] = current_time
+            return True
+        return False
+
+    def record_chunk(self, chunk: str, now: float | None = None) -> list[str]:
+        """Analyzes a chunk of streamed output and returns any trouble/loop notifications."""
+        notices: list[str] = []
+        for line in chunk.splitlines():
+            line_notices = self.record_line(line, now=now)
+            notices.extend(line_notices)
+        return notices
+
+    def record_line(self, line: str, now: float | None = None) -> list[str]:
+        """Analyzes a single line for loop/trouble indicators."""
+        current_time = now if now is not None else time.monotonic()
+        self.last_output_time = current_time
+        notices: list[str] = []
+
+        if not line:
+            return notices
+
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\^\[\[?[A-Za-z0-9_~]*')
+        clean = ansi_escape.sub('', line).strip()
+        if not clean:
+            return notices
+
+        # Skip lines that are already orchestrator notice lines
+        if any(marker in clean for marker in ["[Loop Notice]", "[Trouble Notice]", "[Duration Notice]", "[Stall Notice]", "[Step Notice]"]):
+            return notices
+
+        # 1. Detect Upstream API Errors & Overload / Retries
+        upstream_match = self._match_upstream_error(clean)
+        if upstream_match:
+            err_type, err_detail = upstream_match
+            self.upstream_errors[err_type] = self.upstream_errors.get(err_type, 0) + 1
+            count = self.upstream_errors[err_type]
+
+            # Notify on 2nd occurrence or if 1st severe error and cooldown permits
+            if (count >= 2 or "overloaded" in err_type.lower() or "502" in err_type) and self._should_notify(f"upstream_{err_type}", cooldown=35.0, now=current_time):
+                notice = (
+                    f"\033[1;93m⚠️  [Trouble Notice] Upstream API issue detected: {err_detail} ({count} occurrence{'s' if count != 1 else ''}).\033[0m\n"
+                    f"\033[96m   👉 If the remote model is overloaded or stuck in retry loops, press Ctrl-C to abort and choose another model.\033[0m"
+                )
+                notices.append(notice)
+
+        # 2. Detect Tool Calls & Repetitive Action Loops
+        step_label = extract_step_from_line(clean)
+        if step_label:
+            self.step_count += 1
+
+            # Extract target identifier (file or command)
+            target = self._extract_tool_target(clean, step_label)
+            if target:
+                self.recent_tool_targets.append(target)
+                if len(self.recent_tool_targets) > 16:
+                    self.recent_tool_targets.pop(0)
+
+                # Check for repetition of same target (e.g. >= 4 times in recent window)
+                target_occurrences = self.recent_tool_targets.count(target)
+                if target_occurrences >= 4 and self._should_notify(f"loop_target_{target}", cooldown=45.0, now=current_time):
+                    notice = (
+                        f"\033[1;93m⚠️  [Loop Notice] Potential tool loop detected: Repeatedly accessing '{target}' ({target_occurrences} times).\033[0m\n"
+                        f"\033[96m   👉 If the AI agent is looping without making progress, press Ctrl-C to abort and provide guidance or switch models.\033[0m"
+                    )
+                    notices.append(notice)
+
+                # Check for ping-pong alternating pattern (A, B, A, B, A, B)
+                if len(self.recent_tool_targets) >= 6:
+                    r = self.recent_tool_targets[-6:]
+                    if r[0] == r[2] == r[4] and r[1] == r[3] == r[5] and r[0] != r[1]:
+                        if self._should_notify(f"pingpong_{r[0]}_{r[1]}", cooldown=45.0, now=current_time):
+                            notice = (
+                                f"\033[1;93m⚠️  [Loop Notice] Alternating ping-pong loop detected between '{r[0]}' and '{r[1]}'.\033[0m\n"
+                                f"\033[96m   👉 If the agent is cycling between files without resolution, press Ctrl-C to abort.\033[0m"
+                            )
+                            notices.append(notice)
+
+            # Check step milestones (15, 25, 40, 60, 80, 100)
+            for threshold in [15, 25, 40, 60, 80, 100]:
+                if self.step_count >= threshold and threshold not in self.fired_step_milestones:
+                    self.fired_step_milestones.add(threshold)
+                    if self._should_notify(f"step_milestone_{threshold}", cooldown=60.0, now=current_time):
+                        notice = (
+                            f"\033[1;93m💡 [Step Notice] Agent has executed {self.step_count} steps without concluding.\033[0m\n"
+                            f"\033[96m   👉 You may press Ctrl-C to abort and steer with [Q] Ask AI, or switch models.\033[0m"
+                        )
+                        notices.append(notice)
+                        break
+
+        return notices
+
+    def _match_upstream_error(self, line: str) -> tuple[str, str] | None:
+        """Matches upstream API errors, 502/503/429 overloads, rate limits, connection failures."""
+        line_lower = line.lower()
+        if "502" in line or "bad gateway" in line_lower or "upstream error" in line_lower:
+            return "502_upstream_error", "502 Upstream Error (Server temporarily overloaded)"
+        if "503" in line or "service unavailable" in line_lower:
+            return "503_unavailable", "503 Service Unavailable"
+        if "504" in line or "gateway timeout" in line_lower:
+            return "504_gateway_timeout", "504 Gateway Timeout"
+        if "429" in line or "rate_limit" in line_lower or "too many requests" in line_lower or "resourceexhausted" in line_lower:
+            return "429_rate_limit", "429 Rate Limit / Quota Exceeded"
+        if "temporarily overloaded" in line_lower or "service overloaded" in line_lower:
+            return "api_overloaded", "Remote AI service temporarily overloaded"
+        if "retrying request" in line_lower or "retrying in " in line_lower:
+            return "api_retrying", "API request failed; retrying automatically"
+        if "connection refused" in line_lower or "connection reset" in line_lower:
+            return "conn_reset", "API connection dropped / reset"
+        return None
+
+    def _extract_tool_target(self, line: str, step_label: str) -> str | None:
+        """Extracts the file name or command target from the step label or line."""
+        for prefix in ["Reading ", "Editing ", "Writing ", "Compiling "]:
+            if step_label.startswith(prefix):
+                return step_label[len(prefix):].strip()
+        if step_label.startswith("Running: "):
+            return step_label[len("Running: "):].strip()
+
+        match = re.search(r'(?:→\s*(?:Read|Edit|Write|Patch|View)\s+|\b(?:replace_file_content|view_file|edit_file)\s+)([^\s\[\],:]+)', line, re.IGNORECASE)
+        if match:
+            return Path(match.group(1).strip("'\":`")).name
+        return None
+
+    def check_time_triggers(self, now: float | None = None, last_output_time: float | None = None) -> list[str]:
+        """Checks duration and idle stall milestones."""
+        current_time = now if now is not None else time.monotonic()
+        notices: list[str] = []
+
+        # 1. Total Elapsed Runtime Milestones (5m, 10m, 15m, 20m, 30m, 40m, 50m, 60m)
+        elapsed_sec = int(current_time - self.start_time)
+        elapsed_min = elapsed_sec // 60
+
+        milestones = [5, 10, 15, 20, 30, 40, 50, 60]
+        for m in milestones:
+            if elapsed_min >= m and m not in self.fired_duration_milestones:
+                self.fired_duration_milestones.add(m)
+                step_str = f"Step {self.step_count}" if self.step_count > 0 else "in progress"
+                notice = (
+                    f"\033[1;93m💡 [Duration Notice] Task has been running for {m}m ({step_str}).\033[0m\n"
+                    f"\033[96m   👉 If it appears stuck in loops or trouble, press Ctrl-C to abort at any time.\033[0m"
+                )
+                notices.append(notice)
+                break
+
+        # 2. Idle Stall Milestones (No output received for 2m, 4m, 6m)
+        out_time = last_output_time or self.last_output_time
+        idle_sec = int(current_time - out_time)
+        idle_min = idle_sec // 60
+
+        for stall_m in [2, 4, 6]:
+            if idle_min >= stall_m and stall_m not in self.fired_idle_milestones:
+                self.fired_idle_milestones.add(stall_m)
+                if self._should_notify(f"stall_milestone_{stall_m}", cooldown=90.0, now=current_time):
+                    notice = (
+                        f"\033[1;93m💡 [Stall Notice] No output received for {stall_m}m (waiting on remote model/process).\033[0m\n"
+                        f"\033[96m   👉 If the remote service is unresponsive or frozen, press Ctrl-C to abort.\033[0m"
+                    )
+                    notices.append(notice)
+                    break
+
+        return notices
+
+
 def format_inline_markdown(text: str) -> str:
     # 1. Protect inline code blocks first (substitute with placeholder)
     code_placeholders = []

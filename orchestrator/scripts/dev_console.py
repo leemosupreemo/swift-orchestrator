@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, get_github_links, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, LoopTroubleDetector, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, get_github_links, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -786,6 +786,7 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
     else:
         initial_label = "Executing workflow"
     indicator = ProgressIndicator(label=initial_label, hint="Ctrl-C to abort")
+    detector = LoopTroubleDetector()
     output_chunks = []
 
     with StatusBar(job, is_processing=True, sub_menu=sub_menu) as status_bar:
@@ -823,6 +824,15 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
         try:
             render_status_bar(force=True)
             while process.poll() is None:
+                # Check for time-based loop/stall warnings (long running duration, prolonged idle stall)
+                time_notices = detector.check_time_triggers(now=time.monotonic(), last_output_time=last_output_time)
+                if time_notices:
+                    indicator.clear()
+                    for notice in time_notices:
+                        sys.stdout.write(f"\n{notice}\n")
+                    sys.stdout.flush()
+                    render_status_bar(force=True)
+
                 # Update UI (throttled to 0.1s inside render_status_bar)
                 render_status_bar()
 
@@ -861,9 +871,19 @@ def run_streaming_process(cmd: list[str], job: dict[str, Any] | None = None, sub
                                     render_status_bar(force=True)
                                     break
                                     
-                            # Print directly to stdout and flush immediately
-                            sys.stdout.write(data)
-                            sys.stdout.flush()
+                            # Check for trouble / loops in incoming data stream
+                            chunk_notices = detector.record_chunk(data, now=time.monotonic())
+                            if chunk_notices:
+                                indicator.clear()
+                                sys.stdout.write(data)
+                                for notice in chunk_notices:
+                                    sys.stdout.write(f"\n{notice}\n")
+                                sys.stdout.flush()
+                                render_status_bar(force=True)
+                            else:
+                                # Print directly to stdout and flush immediately
+                                sys.stdout.write(data)
+                                sys.stdout.flush()
                     except (OSError, ValueError):
                         pass
 

@@ -10,7 +10,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from common import CONFIG_DIR, ROOT, append_log, ProgressIndicator, colorize_diff_line
+from common import CONFIG_DIR, ROOT, append_log, ProgressIndicator, colorize_diff_line, LoopTroubleDetector
 from model_registry import get_model, ModelTier, get_all_models, preferred_cli, summarize_cli_error
 from model_router import get_prioritized_models, ModelRole
 
@@ -324,7 +324,7 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
     elif model.startswith("gemini-3.1") or model.startswith("gpt-5.5") or model.startswith("claude-opus") or "qwen" in model.lower():
         thinking_label = "Thinking: Deep Reasoning model active"
     indicator = ProgressIndicator(label=thinking_label, hint="Ctrl-C to cancel")
-
+    detector = LoopTroubleDetector(start_time=start_time)
 
     try:
         while True:
@@ -363,6 +363,13 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
                     last_milestone=f"Stalled for {int(now - last_activity)}s (Last: {last_milestone})"
                 )
 
+            # Check time-based loop/stall warnings
+            time_notices = detector.check_time_triggers(now=now, last_output_time=last_activity)
+            if time_notices:
+                indicator.clear()
+                for notice in time_notices:
+                    print(f"\n{notice}\n", flush=True)
+
             # Update stylized indicator
             indicator.render(last_activity_time=last_activity)
             
@@ -380,6 +387,13 @@ def _run_llm_single(model: str, prompt: str, cwd: Path | None = None, timeout: i
                 
                 # Reset activity timer on ANY output (stdout or stderr)
                 last_activity = time.time()
+                
+                # Check line for loop / trouble indicators
+                line_notices = detector.record_line(line, now=now)
+                if line_notices:
+                    indicator.clear()
+                    for notice in line_notices:
+                        print(f"\n{notice}\n", flush=True)
                 
                 if key.fileobj is process.stdout:
                     stdout_chunks.append(line)

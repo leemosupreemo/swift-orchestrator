@@ -306,6 +306,17 @@ def run_propose(job: dict, job_path: Path, logs_path: str | None, feedback: str 
         
         print(f"      - Proposal received: {plan.get('action')}")
         print(f"      - Hypothesis: {plan.get('hypothesis')}")
+
+        # Check if hypothesis repeats previous attempts
+        prev_hypotheses = [
+            h.get("hypothesis", "").strip().lower() 
+            for h in job.get("debug_history", [])[:-1] 
+            if h.get("hypothesis")
+        ]
+        curr_hyp = (plan.get("hypothesis") or "").strip().lower()
+        if curr_hyp and curr_hyp in prev_hypotheses:
+            print(f"\n\033[1;93m⚠️  [Loop Notice] Debugger produced duplicate hypothesis already attempted in a previous iteration.\033[0m")
+            print(f"\033[96m   👉 You may press Ctrl-C to abort and steer with [Q] Ask AI or supply guidance.\033[0m\n")
     except json.JSONDecodeError:
         print("!!! LLM response was not valid JSON. Check ai/logs.")
     
