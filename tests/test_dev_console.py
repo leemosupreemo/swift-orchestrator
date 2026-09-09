@@ -455,16 +455,15 @@ class DevConsoleTests(unittest.TestCase):
         mock_run_script.assert_called_once()
         self.assertEqual(mock_run_script.call_args.args[0], "debug_job.py")
 
-    @patch("dev_console.prompt_input", side_effect=["Focus on the latest build failure.", "3"])
+    @patch("dev_console.prompt_input", return_value="Focus on the latest build failure.")
     @patch("dev_console.print_header")
     @patch("dev_console.print")
     def test_prompt_autofix_iteration_settings_collects_guidance(self, mock_print, mock_header, _mock_prompt_input):
         job = {"max_iterations": 8}
 
-        feedback, final_limit = dev_console.prompt_autofix_iteration_settings(job)
+        feedback = dev_console.prompt_autofix_iteration_settings(job)
 
         self.assertEqual(feedback, "Focus on the latest build failure.")
-        self.assertEqual(final_limit, 11)
         mock_header.assert_called_once_with("Auto-Fix / Iterate")
         printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
         self.assertIn("The AI will inspect the current job", printed)
@@ -476,7 +475,7 @@ class DevConsoleTests(unittest.TestCase):
 
     @patch("dev_console.get_key", side_effect=["d", "b"])
     @patch("dev_console.input", return_value="")
-    @patch("dev_console.prompt_autofix_iteration_settings", return_value=("Focus on retries.", 12))
+    @patch("dev_console.prompt_autofix_iteration_settings", return_value="Focus on retries.")
     @patch("dev_console.auto_link_latest_logs")
     @patch("dev_console.run_script")
     @patch("dev_console.clear_screen")
@@ -509,8 +508,6 @@ class DevConsoleTests(unittest.TestCase):
         status_bar.reset_scroll_region.assert_called_with(force=True)
         mock_clear.assert_called()
         args = mock_run_script.call_args.args[1]
-        self.assertIn("--max-iterations", args)
-        self.assertIn("12", args)
         self.assertIn("--feedback", args)
         self.assertIn("Focus on retries.", args)
 
@@ -548,7 +545,7 @@ class DevConsoleTests(unittest.TestCase):
                     mock_confirm = stack.enter_context(patch("dev_console.prompt_confirm", return_value=False))
                     stack.enter_context(patch("dev_console.prompt_input", side_effect=["", "0"]))
                     mock_auto_logs = stack.enter_context(patch("dev_console.auto_link_latest_logs"))
-                    stack.enter_context(patch("dev_console.prompt_autofix_iteration_settings", return_value=(None, 8)))
+                    stack.enter_context(patch("dev_console.prompt_autofix_iteration_settings", return_value=None))
                     mock_loading = stack.enter_context(patch("dev_console.run_with_loading_screen", return_value=(["Gemini"], {"Gemini": "gemini"}, {}, [])))
                     mock_checkbox = stack.enter_context(patch("dev_console.prompt_checkbox", return_value=[]))
                     mock_radio = stack.enter_context(patch("dev_console.prompt_radio", return_value="Open Pull Request #456 in browser"))
@@ -1857,8 +1854,10 @@ class AppFeatureTests_{i}: XCTestCase {{
         with patch("builtins.print") as mock_print:
             dev_console.handle_job_selection(job, [], [])
             printed = " ".join(str(c) for c in mock_print.call_args_list)
-            self.assertIn("Budget: Up to 8 Automated Fix Attempts", printed)
-            self.assertIn("Ready for Attempt #1 of 8", printed)
+            self.assertIn("Auto-Debug Loop", printed)
+            self.assertIn("Ready for Attempt #1", printed)
+            self.assertNotIn("Budget: Up to", printed)
+            self.assertNotIn("of 8", printed)
             self.assertIn("User reported bug is still happening.", printed)
             self.assertIn("to run Auto-Fix (starts Attempt #1)", printed)
 
@@ -1903,7 +1902,9 @@ class AppFeatureTests_{i}: XCTestCase {{
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("Attempt #1 Failed", printed)
             self.assertIn("1 suite test failing", printed)
-            self.assertIn("Attempt #2 of 8", printed)
+            self.assertIn("Ready for", printed)
+            self.assertIn("Attempt #2", printed)
+            self.assertNotIn("of 8", printed)
             self.assertIn("Added DocumentRiskAnalysisState", printed)
             self.assertIn("DocumentLogicTests.testTabSelection", printed)
             self.assertIn("to run Auto-Fix (starts Attempt #2)", printed)

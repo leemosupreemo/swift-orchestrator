@@ -137,21 +137,23 @@ def run_debug_iteration(job_path: Path, logs: str | None = None, feedback: str |
     # 2. Handle Iteration Overrides
     if max_iterations is not None:
         job["max_iterations"] = max_iterations
-        # If we were paused, reset phase to propose to start work immediately
         if job.get("debug_phase") == "paused":
             job["debug_phase"] = "propose"
+        write_json(job_path, job)
+    elif job.get("debug_phase") == "paused":
+        job["debug_phase"] = "propose"
         write_json(job_path, job)
 
     # 3. Check for Intelligent Convergence / Loop Termination
     test_summary = get_job_test_summary(job)
     convergence = analyze_debug_loop_convergence(job, test_summary)
-    max_iters = job.get("max_iterations", 8)
+    safety_ceiling = max_iterations if max_iterations is not None else 30
 
-    if convergence["is_stuck"] or (job["iteration"] >= max_iters and convergence["health"] != "converging"):
+    if convergence["is_stuck"] or (job["iteration"] >= safety_ceiling and convergence["health"] != "converging"):
         if convergence["is_stuck"]:
             reason = f"Loop/Stall detected: {convergence['description']}"
         else:
-            reason = f"Max iterations ({max_iters}) reached without passing tests."
+            reason = f"Automated repair paused after {job['iteration']} attempts without passing all tests."
 
         print(f"\n\033[1;93m!!! {reason} Pausing for human review.\033[0m")
         job["status"] = "debugging"
@@ -165,18 +167,13 @@ def run_debug_iteration(job_path: Path, logs: str | None = None, feedback: str |
         except:
             pass
         return
-    elif job["iteration"] >= max_iters and convergence["health"] == "converging":
-        job["max_iterations"] = job["iteration"] + 4
-        print(f"\n\033[1;92m📈 Active convergence detected ({convergence['description']}). Dynamically extending attempt budget to {job['max_iterations']}.\033[0m")
-        write_json(job_path, job)
 
     job["iteration"] += 1
     iteration = job["iteration"]
-    max_iters = job.get("max_iterations", "??")
     
     # 3. Print Iteration Header
     print("\n" + "="*80)
-    print(f"\033[1;93m🔄 DEBUG ITERATION {iteration} / {max_iters}\033[0m")
+    print(f"\033[1;93m🔄 DEBUG ITERATION #{iteration}\033[0m")
     print("="*80 + "\n")
     
     print_phase("debug_loop", subtext=f"Iteration {iteration} (Phase: {job['debug_phase']})")

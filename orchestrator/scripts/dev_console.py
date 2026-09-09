@@ -3989,8 +3989,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             badge = status_badges.get(status, f"\033[97m{status}\033[0m")
             if status == "debugging":
                 iter_num = job.get("iteration", 1)
-                max_iter = job.get("max_iterations", 8)
-                badge += f" \033[90m(Attempt {iter_num}/{max_iter})\033[0m"
+                badge += f" \033[90m(Attempt #{iter_num})\033[0m"
             print(f"\033[1;96mStatus:\033[0m       {badge}")
 
             # 3. Branch & Base
@@ -4207,7 +4206,6 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 
             elif status == "debugging":
                 iter_val = job.get("iteration", 1)
-                max_iter = job.get("max_iterations", 8)
                 history = job.get("debug_history", [])
 
                 completed_trials = [e for e in history if e.get("result") not in ("pending", None)]
@@ -4215,8 +4213,8 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 convergence = analyze_debug_loop_convergence(job, test_summary)
 
                 if phase == "paused":
-                    pause_reason = job.get("debug_pause_reason") or f"Automated repair reached the budget limit of {max_iter} attempts without passing all tests."
-                    print(f"\033[1;93m ⏸️  PAUSED: Loop Paused ({iter_val}/{max_iter} Attempts Used)\033[0m")
+                    pause_reason = job.get("debug_pause_reason") or "Automated repair paused after repeated attempts without passing all tests."
+                    print(f"\033[1;93m ⏸️  PAUSED: Loop Paused (Attempt #{iter_val})\033[0m")
                     print_wrapped_kv(" Reason:        ", f"\033[97m{pause_reason}\033[0m")
                     if completed_trials:
                         last_t = completed_trials[-1]
@@ -4231,12 +4229,12 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         if len(test_summary["failing_tests"]) > 2:
                             ft_str += f" (+{len(test_summary['failing_tests']) - 2} more)"
                         print_wrapped_kv(" Failing Tests: ", f"\033[1;91m{ft_str}\033[0m")
-                    print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to increase attempt limits & resume Auto-Fix, \033[1;96m'Q'\033[0m to Ask AI, or \033[1;96m'R'\033[0m to reset.")
+                    print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to resume Auto-Fix, \033[1;96m'Q'\033[0m to Ask AI, or \033[1;96m'R'\033[0m to reset.")
 
                 elif not has_completed:
                     # Initial state before Attempt #1 is run
-                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop (Budget: Up to {max_iter} Automated Fix Attempts)\033[0m")
-                    print_wrapped_kv(" Current State: ", f"\033[93m⏳ Ready for Attempt #1 of {max_iter}\033[0m \033[90m(Not yet executed — press 'D' to start)\033[0m")
+                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop\033[0m")
+                    print_wrapped_kv(" Current State: ", f"\033[93m⏳ Ready for Attempt #1\033[0m \033[90m(Not yet executed — press 'D' to start)\033[0m")
                     if history:
                         target = history[-1].get("hypothesis") or history[-1].get("action") or "Investigate and resolve issue"
                         print_wrapped_kv(" Target Issue:  ", f"\033[97m{target}\033[0m")
@@ -4258,14 +4256,14 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     badge, detail = format_trial_result(last_t.get("result"), test_summary)
 
                     health_part = f" [{convergence['health_badge']}]" if convergence.get("health") not in ("exploring", "ready") else ""
-                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop (Budget: Up to {max_iter} Automated Fix Attempts){health_part}\033[0m")
+                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop{health_part}\033[0m")
                     
                     last_res = last_t.get("result", {})
                     if isinstance(last_res, dict) and last_res.get("tests_ok"):
                         state_label = f"\033[1;93m⚠️  Attempt #{last_num} Follow-up Needed\033[0m \033[90m({detail})\033[0m"
                     else:
                         state_label = f"\033[1;91m⚠️  Attempt #{last_num} Failed\033[0m \033[90m({detail})\033[0m"
-                    print_wrapped_kv(" Current State: ", f"{state_label} \033[1;96m-> Ready for Attempt #{next_num} of {max_iter}\033[0m")
+                    print_wrapped_kv(" Current State: ", f"{state_label} \033[1;96m-> Ready for Attempt #{next_num}\033[0m")
 
                     if convergence.get("health") == "converging":
                         print_wrapped_kv(" Trajectory:    ", f"\033[1;92m📈 {convergence['description']}\033[0m")
@@ -5038,8 +5036,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                         status_bar.clear_footer()
                         status_bar.reset_scroll_region(force=True)
                         clear_screen()
-                        feedback, final_limit = prompt_autofix_iteration_settings(job)
-                        args.extend(["--max-iterations", str(final_limit)])
+                        feedback = prompt_autofix_iteration_settings(job)
                         if feedback:
                             args.extend(["--feedback", feedback])
 
@@ -5507,7 +5504,7 @@ def render_ai_changes_synopsis(job: dict[str, Any]) -> None:
                 for f in sorted(ai_untracked):
                     print(f"    • \033[92m{f}\033[0m")
 
-def prompt_autofix_iteration_settings(job: dict[str, Any]) -> tuple[str | None, int]:
+def prompt_autofix_iteration_settings(job: dict[str, Any]) -> str | None:
     print_header("Auto-Fix / Iterate")
     print("\033[90mThe AI will inspect the current job, linked logs, and failing test output, apply a targeted fix, and rerun the job's TDD test suite to verify the fix.\033[0m\n")
 
@@ -5523,37 +5520,13 @@ def prompt_autofix_iteration_settings(job: dict[str, Any]) -> tuple[str | None, 
     print("  \033[90mℹ️  Tip: Leave the guidance field blank to run Auto-Fix with existing job context.\033[0m")
     print("  \033[90m" + ("─" * 60) + "\033[0m\n")
 
-    current_total = job.get("max_iterations", 8)
-    if current_total == 5:
-        current_total = 8
-
     feedback = prompt_input(
         "Guidance (Optional)",
         placeholder="optional; leave blank to use current context",
         field_below=True,
     )
 
-    default_extra = 5
-    while True:
-        extra_input = prompt_input(
-            "Additional iterations to allow:",
-            default=str(default_extra),
-            placeholder=str(default_extra),
-            field_below=True,
-        )
-        if not extra_input:
-            extra = default_extra
-            break
-        try:
-            extra = int(extra_input)
-            if extra < 0:
-                print("\033[1;91m      ⚠️  Please enter zero or a positive number.\033[0m")
-                continue
-            break
-        except ValueError:
-            print("\033[1;91m      ⚠️  Invalid input. Please enter a number.\033[0m")
-
-    return (feedback or None), current_total + extra
+    return feedback or None
 
 def handle_tweak_revise(job: dict[str, Any]):
     print_header("Tweak / Revise")
