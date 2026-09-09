@@ -4064,11 +4064,7 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
 
             if sessions or investigations:
                 total_sess_count = len(sessions) if sessions else len(investigations)
-
-                j_hint = " \033[90m| [\033[1;96mJ\033[0;90m] View History\033[0m" if (len(sessions) > 0 or len(investigations) > 0) else ""
-                print(f"\033[1;96mAI Sessions:\033[0m  \033[97m{total_sess_count} recorded\033[0m{j_hint}")
-                if len(sessions) > 0 or len(investigations) > 0:
-                    if "j" not in actions: actions.append("j")
+                print(f"\033[1;96mAI Sessions:\033[0m  \033[97m{total_sess_count} recorded\033[0m")
 
                 if models_used:
                     if len(models_used) <= 3:
@@ -4487,6 +4483,9 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             if ai_modified or ai_untracked or job.get("builder_summary"):
                 inspect_options.append(("i", "[\033[1;96mI\033[0m] View AI Changes (Files & Synopsis)"))
                 
+            if sessions or investigations:
+                inspect_options.append(("j", "[\033[1;96mJ\033[0m] View LLM Usage History"))
+
             context_options.append(("l", "[\033[93mL\033[0m] Link Logs (Update Context)"))
             context_options.append(("k", "[\033[93mK\033[0m] Attach UI Mockup / Reference"))
 
@@ -4652,25 +4651,42 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 open_action_screen()
                 handle_ask_ai(job, session_allowed_models)
                 job = refresh_job(job)
-            elif choice == "j":
-                open_action_screen("LLM Session Tracking")
+            elif choice == "j" and "j" in actions:
+                open_action_screen("LLM Usage History")
                 sessions = job.get("llm_sessions", [])
                 if not sessions and "llm_session_ids" in job:
                     sessions = [{"id": sid, "model": "unknown"} for sid in job["llm_session_ids"]]
-                
-                if not sessions:
-                    print("  No sessions recorded.")
+                investigations = job.get("interactive_investigations", [])
+
+                if not sessions and not investigations:
+                    print("  No AI / LLM sessions recorded.")
                 else:
-                    # Table Header
-                    print(f"  {'#':3} | {'Model Name':30} | {'Session ID (UUID)':40}")
-                    print(f"  {'-'*3:3}-+-{'-'*30:30}-+-{'-'*40:40}")
-                    
-                    for i, s in enumerate(sessions):
-                        model = s.get("model", "unknown")
-                        sid = s.get("id", "unknown")
-                        print(f"  {i:3} | {model:30} | \033[97m{sid}\033[0m")
+                    if sessions:
+                        print("\033[1;97mAI / LLM Model Sessions:\033[0m")
+                        print(f"  {'#':3} | {'Model / Tool':30} | {'Session ID (UUID)':40}")
+                        print(f"  {'-'*3:3}-+-{'-'*30:30}-+-{'-'*40:40}")
+                        
+                        for i, s in enumerate(sessions):
+                            model = s.get("model") or s.get("tool", "unknown")
+                            sid = s.get("id", "unknown")
+                            print(f"  {i+1:3} | {model:30} | \033[97m{sid}\033[0m")
+                        print()
+
+                    if investigations:
+                        print("\033[1;97mInteractive CLI Investigations:\033[0m")
+                        for idx, inv in enumerate(investigations, 1):
+                            t = inv.get("tool", "AI CLI")
+                            d = inv.get("duration", "")
+                            n = inv.get("notes", "") or inv.get("note", "")
+                            commits = inv.get("new_commits", [])
+                            meta = f" ({d})" if d else ""
+                            print(f"  {idx}. \033[1;96m{t}\033[0m{meta}")
+                            if n:
+                                print(f"     \033[90mNotes:\033[0m \033[97m{n}\033[0m")
+                            if commits:
+                                print(f"     \033[90mCommits:\033[0m {', '.join(commits)}")
                 
-                print("\n  Tip: You can resume these in the Antigravity CLI using: antigravity --resume <ID>")
+                print("\n  Tip: You can resume model sessions in the AI CLI using: antigravity --resume <ID>")
                 input("\n\033[1;96mTap Enter to return to menu...\033[0m")
             elif choice == "i" and "i" in actions:
                 open_action_screen("AI Changes & Synopsis")

@@ -1655,7 +1655,7 @@ class AppFeatureTests_{i}: XCTestCase {{
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("AI Sessions:", printed)
             self.assertIn("4 recorded", printed)
-            self.assertIn("View History", printed)
+            self.assertIn("View LLM Usage History", printed)
             self.assertIn("Models:", printed)
             self.assertIn("gemini-3.1-pro-preview", printed)
             self.assertIn("+2 more", printed)
