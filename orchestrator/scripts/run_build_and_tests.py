@@ -138,6 +138,20 @@ def resolve_command(cmd: str) -> str:
     return cmd
 
 
+def uses_configured_test_tool(command: str, base_command: str) -> bool:
+    """Recognize focused commands using the project's configured executable.
+
+    This is a format check, not a sandbox: commands already run as shell code.
+    Reject malformed quoting and prose instead of maintaining a language list.
+    """
+    try:
+        command_parts = shlex.split(command)
+        base_parts = shlex.split(base_command)
+    except ValueError:
+        return False
+    return bool(command_parts and base_parts and command_parts[0] == base_parts[0])
+
+
 def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
     out_dir = OUTPUT_DIR / job["job_id"]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -157,7 +171,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
     if override:
         o = override.strip().lower()
         # Robust N/A check
-        is_na = any(x in o for x in {"n/a", "none", "no tests", "no specific tests", "skipped", "validated"})
+        is_na = o in {"n/a", "none", "no tests", "no specific tests", "skipped", "validated"}
         
         if is_na:
             test_cmd = None
@@ -166,7 +180,9 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
             is_standalone_test = True
         elif "xcodebuild test" in override:
             test_cmd = override
-        elif override.startswith("-only-testing") or override.startswith("-skip-testing"):
+        elif uses_configured_test_tool(override, raw_test_cmd):
+            test_cmd = override
+        elif "xcodebuild" in raw_test_cmd and override.startswith(("-only-testing", "-skip-testing")):
             # Traditional -only-testing override
             test_cmd = f"{raw_test_cmd} {override}"
         else:
@@ -179,7 +195,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
     final_test_cmd = resolve_command(test_cmd)
 
     # Only run xcodebuild build if it's not a standalone non-ios test or if we are forced
-    if is_infra and is_standalone_test:
+    if is_infra and is_standalone_test and "xcodebuild" in build_cmd:
         print_phase("skipping_ios_build", subtext="infra task with standalone tests")
         build_ok = True
     else:
@@ -196,7 +212,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
                 full_output = cap_result.stdout + "\n" + cap_result.stderr
 
                 # If destination mismatch, attempt automated fallback retry
-                if "Unable to find a device matching the provided destination specifier" in full_output:
+                if "xcodebuild" in build_cmd and "Unable to find a device matching the provided destination specifier" in full_output:
                     curr_dest = extract_destination_from_command(build_cmd)
                     for candidate in get_fallback_simulator_destinations(curr_dest):
                         if candidate == curr_dest: continue
@@ -211,7 +227,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
                         write_text(out_dir / "build.log", "** BUILD SUCCEEDED ON FALLBACK DESTINATION **")
                         break
 
-                environment_issue = detect_simulator_environment_issue(full_output)
+                environment_issue = detect_simulator_environment_issue(full_output) if "xcodebuild" in build_cmd else None
                 if environment_issue:
                     write_text(out_dir / "environment_failure.md", environment_issue + "\n\n--- Raw output ---\n" + full_output)
                     write_text(out_dir / "build.log", full_output)
@@ -246,7 +262,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
         full_test_output = test_result.stdout + "\n\nSTDERR:\n" + test_result.stderr
         
         # If destination mismatch, attempt automated fallback retry
-        if test_result.returncode != 0 and "Unable to find a device matching the provided destination specifier" in full_test_output:
+        if test_result.returncode != 0 and "xcodebuild" in final_test_cmd and "Unable to find a device matching the provided destination specifier" in full_test_output:
             curr_dest = extract_destination_from_command(final_test_cmd)
             for candidate in get_fallback_simulator_destinations(curr_dest):
                 if candidate == curr_dest: continue
@@ -273,7 +289,7 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
             return True, True
 
         if test_result.returncode != 0:
-            environment_issue = detect_simulator_environment_issue(full_test_output)
+            environment_issue = detect_simulator_environment_issue(full_test_output) if "xcodebuild" in final_test_cmd else None
             if environment_issue:
                 write_text(out_dir / "environment_failure.md", environment_issue + "\n\n--- Raw output ---\n" + full_test_output)
                 raise EnvironmentValidationError(environment_issue)
@@ -309,14 +325,15 @@ def run_build_and_tests(job: dict, summary_file: Path) -> tuple[bool, bool]:
         print("---------------------------\n")
 
         # Extract xcresult summary
-        xc_summary = extract_xcresult_summary(test_result.stdout)
+        xc_summary = extract_xcresult_summary(test_result.stdout) if "xcodebuild" in final_test_cmd else None
         if xc_summary:
             write_text(out_dir / f"test_results_{ts}.txt", xc_summary)
 
         write_text(out_dir / f"test_analysis_{ts}.md", analysis)
         
         # Capture system logs on failure
-        capture_system_logs(out_dir / f"system_{ts}.log")
+        if "xcodebuild" in final_test_cmd:
+            capture_system_logs(out_dir / f"system_{ts}.log")
         
         return True, False
 

@@ -360,7 +360,8 @@ def main():
     except Exception as e:
         print(f"Warning: Could not create 'latest' symlink: {e}")
 
-    build_cmd, test_cmd = extract_commands()
+    if args.mode in {"build", "test", "both"}:
+        build_cmd, test_cmd = extract_commands()
 
     if args.mode == "capture":
         capture_logs(manual_out)

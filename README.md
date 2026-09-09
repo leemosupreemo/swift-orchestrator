@@ -1,6 +1,6 @@
 # Swift Orchestrator
 
-Swift Orchestrator is a standalone, multi-agent AI orchestration platform designed for Swift and Xcode projects. It provides a rich, interactive dev console for automating software engineering tasks—from bug fixes and feature planning to fleet-wide test execution and Firebase distribution.
+Swift Orchestrator is a multi-agent AI orchestration CLI and development console built specifically for Swift and Xcode projects. It provides a rich, interactive dev console for automating software engineering tasks—from bug fixes and feature planning to fleet-wide test execution and Firebase distribution.
 
 Unlike generic AI coding tools, Orchestrator is built specifically for the complexities of the Apple ecosystem, supporting deep integration with `xcodebuild`, simulators, and remote Mac build farms.
 
@@ -14,7 +14,7 @@ Unlike generic AI coding tools, Orchestrator is built specifically for the compl
     *   **Builder**: Executes the plan, writing code and running terminal tools.
     *   **Reviewer**: Performs a technical audit of changes before they are finalized.
     *   **Verifier**: Validates that the implementation meets the original goal and maintains system integrity.
-*   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote Macs via SSH. The Orchestrator manages code syncing, package installation, and log retrieval automatically.
+*   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote Macs via SSH. The Orchestrator handles branch synchronization, worker package installation, remote execution, and job output automatically.
 *   **Project-Local Intelligence**: Store role-specific prompt overrides (`.orchestrator/prompts/`) and architecture guides (`AGENTS.md`) directly in your repo to keep agents grounded in your project's conventions.
 *   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
 *   **Automated PR & Issue Workflow**: Seamlessly integrates with `gh` CLI to create issues, open PRs, and post-automated status updates.
@@ -28,7 +28,7 @@ Recommended CLI install via `pipx`:
 ```bash
 brew install pipx
 pipx ensurepath
-pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
+pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
 orchestrator --help
 ```
 
@@ -132,8 +132,8 @@ orchestrator update --fleet  # Updates all remote workers
 For developers contributing to the Orchestrator itself:
 
 ```bash
-git clone https://github.com/leemosupreemo/orchestrator.git
-cd orchestrator
+git clone https://github.com/leemosupreemo/swift-orchestrator.git
+cd swift-orchestrator
 python3 -m pip install -e .
 python3 -m unittest discover tests
 ```
@@ -142,3 +142,13 @@ Package install smoke test:
 ```bash
 python3 tests/smoke_package_install.py
 ```
+
+---
+
+## 📄 License
+
+Copyright © 2026 The Jaunt Company. All rights reserved.
+
+This project is source-available for viewing and evaluation, but is
+not released under an open-source license. See [LICENSE](LICENSE) for details.
+

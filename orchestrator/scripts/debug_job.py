@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from common import ROOT, OUTPUT_DIR, PROMPTS_DIR, now_iso, read_json, write_json, write_text, run_shell, print_phase, StatusBar
+from common import ROOT, OUTPUT_DIR, PROMPTS_DIR, now_iso, read_json, write_json, write_text, run_shell, print_phase, StatusBar, analyze_debug_loop_convergence, get_job_test_summary
 from llm import run_llm, extract_json_block
 from model_router import ModelRole
 from reference_artifacts import reference_context
@@ -90,13 +90,24 @@ def sanitize_runtime_log(text: str) -> str:
     return sanitized
 
 
-def append_runtime_log(runtime_logs: str, section_header: str, text: str) -> str:
-    entry = section_header + sanitize_runtime_log(text) + "\n"
-    combined = runtime_logs + entry
+def append_runtime_log(current: str, header: str, content: str) -> str:
+    cleaned = content.strip()
+    if not cleaned:
+        return current
+
+    entry = f"{header}\n{cleaned}\n"
+    if len(entry) > MAX_LOG_ENTRY_CHARS:
+        entry = (
+            entry[: MAX_LOG_ENTRY_CHARS // 2]
+            + f"\n...[debug_job truncated large log: {len(entry) - MAX_LOG_ENTRY_CHARS} chars omitted]...\n"
+            + entry[-MAX_LOG_ENTRY_CHARS // 2 :]
+        )
+
+    combined = current + entry
     if len(combined) > MAX_RUNTIME_LOG_CHARS:
         overflow = len(combined) - MAX_RUNTIME_LOG_CHARS
-        head_size = int(MAX_RUNTIME_LOG_CHARS * 0.1)
-        tail_size = int(MAX_RUNTIME_LOG_CHARS * 0.9)
+        head_size = MAX_RUNTIME_LOG_CHARS // 4
+        tail_size = MAX_RUNTIME_LOG_CHARS - head_size
         return (
             combined[:head_size]
             + f"\n...[debug_job truncated older runtime log context: {overflow} chars omitted]...\n"
@@ -131,19 +142,33 @@ def run_debug_iteration(job_path: Path, logs: str | None = None, feedback: str |
             job["debug_phase"] = "propose"
         write_json(job_path, job)
 
-    # 3. Check for Loop Termination
-    if job["iteration"] >= job["max_iterations"]:
-        print(f"!!! Max iterations ({job['max_iterations']}) reached. Pausing for human review.")
+    # 3. Check for Intelligent Convergence / Loop Termination
+    test_summary = get_job_test_summary(job)
+    convergence = analyze_debug_loop_convergence(job, test_summary)
+    max_iters = job.get("max_iterations", 8)
+
+    if convergence["is_stuck"] or (job["iteration"] >= max_iters and convergence["health"] != "converging"):
+        if convergence["is_stuck"]:
+            reason = f"Loop/Stall detected: {convergence['description']}"
+        else:
+            reason = f"Max iterations ({max_iters}) reached without passing tests."
+
+        print(f"\n\033[1;93m!!! {reason} Pausing for human review.\033[0m")
         job["status"] = "debugging"
         job["debug_phase"] = "paused"
+        job["debug_pause_reason"] = reason
         write_json(job_path, job)
         
         # Send failure notification
         try:
-            run_shell(f'{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPTS_DIR / "notify.py"))} "Job Paused: Max Iterations Reached" "Issue #{job["issue_number"]} reached max iterations ({job["max_iterations"]}) without passing tests.\nTitle: {job["title"]}" "{job["job_id"]}"', cwd=ROOT, check=False)
+            run_shell(f'{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPTS_DIR / "notify.py"))} "Job Paused: {reason}" "Issue #{job.get("issue_number", "")} reached pause condition.\nReason: {reason}\nTitle: {job.get("title", "")}" "{job.get("job_id", "")}"', cwd=ROOT, check=False)
         except:
             pass
         return
+    elif job["iteration"] >= max_iters and convergence["health"] == "converging":
+        job["max_iterations"] = job["iteration"] + 4
+        print(f"\n\033[1;92m📈 Active convergence detected ({convergence['description']}). Dynamically extending attempt budget to {job['max_iterations']}.\033[0m")
+        write_json(job_path, job)
 
     job["iteration"] += 1
     iteration = job["iteration"]

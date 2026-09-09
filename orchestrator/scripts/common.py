@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -147,15 +148,18 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 def format_log_path(path_str: str) -> str:
-    """Formats a path string with a timestamp (YYYYMMDD-HHMMSS or YYYYMMDDTHHMMSS) to be more readable."""
-    # Pattern to match YYYYMMDD-HHMMSS or YYYYMMDDTHHMMSS anywhere in the string
-    pattern = r"(\d{4})(\d{2})(\d{2})[-T](\d{2})(\d{2})(\d{2})"
+    """Formats a path string with a timestamp (YYYYMMDD-HHMMSS or YYYY-MM-DD_HH-MM-SS or variants) to be more readable."""
+    # Match hyphenated/underscored timestamps: YYYY-MM-DD[-_T]HH-MM-SS or YYYY-MM-DD[-_T]HH:MM:SS
+    pattern_sep = r"(\d{4})-(\d{2})-(\d{2})[-_T](\d{2})[-:](\d{2})[-:](\d{2})"
+    # Match compact timestamps: YYYYMMDD[-T]HHMMSS
+    pattern_compact = r"(\d{4})(\d{2})(\d{2})[-T](\d{2})(\d{2})(\d{2})"
     
     def replacement(m):
         # Format as YYYY-MM-DD HH:MM:SS
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)}"
     
-    return re.sub(pattern, replacement, path_str)
+    res = re.sub(pattern_sep, replacement, path_str)
+    return re.sub(pattern_compact, replacement, res)
 
 def now_iso() -> str:
     return datetime.now().isoformat()
@@ -546,6 +550,140 @@ def get_job_test_summary(job: dict[str, Any]) -> dict[str, Any]:
         "failing_tests": failing_tests,
         "build_ok": build_ok,
         "tests_ok": tests_ok,
+    }
+
+
+def analyze_debug_loop_convergence(
+    job: dict[str, Any],
+    current_test_summary: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """
+    Analyzes multi-iteration debug history to detect convergence, stagnation,
+    and oscillation/ping-pong loops dynamically without relying solely on a fixed iteration cap.
+    """
+    history = job.get("debug_history", []) if isinstance(job, dict) else []
+    completed_trials = [t for t in history if isinstance(t, dict) and t.get("result") not in ("pending", None)]
+    
+    if not completed_trials and not history:
+        return {
+            "health": "ready",
+            "health_badge": "\033[93m⏳ READY\033[0m",
+            "description": "Ready for initial debug attempt",
+            "is_stuck": False,
+            "failing_tests_delta": 0,
+            "stagnant_streak": 0,
+            "oscillation_detected": False,
+            "recommended_action": "proceed",
+        }
+
+    # 1. Track Failing Tests Delta across trials
+    failing_counts = []
+    failing_sets = []
+    for t in completed_trials:
+        res = t.get("result")
+        if isinstance(res, dict):
+            fts = res.get("failing_tests")
+            if fts is not None:
+                failing_sets.append(set(fts))
+                failing_counts.append(len(fts))
+            elif res.get("tests_ok") is False:
+                failing_counts.append(1)
+            elif res.get("tests_ok") is True:
+                failing_counts.append(0)
+    
+    if current_test_summary and current_test_summary.get("failing_tests") is not None:
+        curr_fts = set(current_test_summary["failing_tests"])
+        if not failing_sets or failing_sets[-1] != curr_fts:
+            failing_sets.append(curr_fts)
+            failing_counts.append(len(curr_fts))
+
+    # 2. Check for Stagnant Failure Streak (same failure set consecutively)
+    stagnant_streak = 0
+    if len(failing_sets) >= 2:
+        last_set = failing_sets[-1]
+        for s in reversed(failing_sets[:-1]):
+            if s and s == last_set:
+                stagnant_streak += 1
+            else:
+                break
+
+    # 3. Check for Oscillation / Ping-Pong loops (Hypotheses, actions, or diff hashes)
+    hypotheses = [
+        (t.get("hypothesis") or "").strip().lower()
+        for t in history
+        if t.get("hypothesis")
+    ]
+    diff_hashes = [
+        t.get("diff_hash")
+        for t in completed_trials
+        if t.get("diff_hash")
+    ]
+
+    oscillation_detected = False
+    oscillation_detail = ""
+    if len(hypotheses) >= 2:
+        latest_hyp = hypotheses[-1]
+        for idx, prev_h in enumerate(hypotheses[:-1], 1):
+            if latest_hyp and len(latest_hyp) > 10 and (latest_hyp == prev_h or latest_hyp in prev_h or prev_h in latest_hyp):
+                oscillation_detected = True
+                oscillation_detail = f"Attempt #{len(hypotheses)} repeated hypothesis from Attempt #{idx}"
+                break
+
+    if not oscillation_detected and len(diff_hashes) >= 3:
+        latest_hash = diff_hashes[-1]
+        for idx, prev_hash in enumerate(diff_hashes[:-1], 1):
+            if latest_hash and latest_hash == prev_hash:
+                oscillation_detected = True
+                oscillation_detail = f"Attempt #{len(diff_hashes)} produced identical code state to Attempt #{idx}"
+                break
+
+    # 4. Check Convergence Direction
+    failing_tests_delta = 0
+    if len(failing_counts) >= 2:
+        failing_tests_delta = failing_counts[-1] - failing_counts[-2]
+
+    # 5. Determine Overall Loop Health
+    if oscillation_detected:
+        health = "oscillating"
+        health_badge = "\033[1;93m🔄 OSCILLATING\033[0m"
+        description = f"Loop detected: {oscillation_detail}"
+        is_stuck = True
+        recommended_action = "prompt_guidance"
+    elif stagnant_streak >= 1:
+        identical_runs = stagnant_streak + 1
+        health = "stagnant"
+        health_badge = "\033[1;91m🛑 STAGNANT\033[0m"
+        description = f"Failure signature unchanged across {identical_runs} consecutive attempts"
+        is_stuck = True
+        recommended_action = "prompt_guidance"
+    elif failing_tests_delta < 0:
+        health = "converging"
+        health_badge = "\033[1;92m📈 CONVERGING\033[0m"
+        description = f"Progressing: failing tests reduced ({failing_counts[-2]} -> {failing_counts[-1]})"
+        is_stuck = False
+        recommended_action = "auto_proceed"
+    elif failing_tests_delta > 0:
+        health = "diverging"
+        health_badge = "\033[1;91m⚠️ DIVERGING\033[0m"
+        description = f"Regression detected: failing tests increased ({failing_counts[-2]} -> {failing_counts[-1]})"
+        is_stuck = False
+        recommended_action = "caution"
+    else:
+        health = "exploring"
+        health_badge = "\033[1;96m🔍 EXPLORING\033[0m"
+        description = "Exploring fix proposals"
+        is_stuck = False
+        recommended_action = "proceed"
+
+    return {
+        "health": health,
+        "health_badge": health_badge,
+        "description": description,
+        "is_stuck": is_stuck,
+        "failing_tests_delta": failing_tests_delta,
+        "stagnant_streak": stagnant_streak,
+        "oscillation_detected": oscillation_detected,
+        "recommended_action": recommended_action,
     }
 
 
@@ -1102,30 +1240,11 @@ def prompt_confirm(question: str, default: bool = True, description: str | list[
 def prompt_multiline(prompt: str) -> str:
     flush_stdin()
     title, desc = split_title_description(prompt)
-    
-    cols = 80
-    try:
-        cols, _ = os.get_terminal_size()
-    except:
-        pass
-    safe_cols = cols - 2
-    
-    header_title = title.upper()
-    side_padding = (safe_cols - len(header_title) - 2) // 2
-    if side_padding < 3: side_padding = 3
-    
-    if len(header_title) + 6 > safe_cols:
-        border_line = "=" * safe_cols
-        print(f"\n\033[1;36m{border_line}\n  {header_title}\n{border_line}\033[0m", flush=True)
-    else:
-        border_line = "=" * (side_padding * 2 + len(header_title) + 2)
-        print(f"\n\033[1;36m{border_line}\n{(' ' * side_padding)}{header_title}\n{border_line}\033[0m", flush=True)
-        
+    print_header(title)
     if desc:
         formatted_desc = desc[0].upper() + desc[1:] if len(desc) > 0 else desc
         print(f"\033[93m💡 {formatted_desc}\033[0m", flush=True)
-        
-    print("\033[90m(Type your input. To finish, press Enter then \033[1;97mCtrl-D\033[0m\033[90m on a new line)\033[0m", flush=True)
+    print_subtitle("(Type your input. To finish, press Enter then \033[1;97mCtrl-D\033[0m\033[90m on a new line)", hint=True)
     if _ACTIVE_STATUS_BAR:
         _ACTIVE_STATUS_BAR.render(at_bottom=True, force=True, q_msg="Ctrl-D to finish")
     try:
@@ -1467,12 +1586,15 @@ class KeyInterruptException(Exception):
         self.index = index
         self.value = value
 
-def print_divider(char: str = "-"):
+def print_divider(char: str = "-", max_width: int | None = None) -> None:
+    """Prints a subtle horizontal divider line responsive to terminal width."""
     try:
         columns, _ = os.get_terminal_size()
-    except:
+    except Exception:
         columns = 80
-    print(char * (columns - 2), flush=True)
+    columns = max(10, columns)
+    width = min(columns - 2, max_width) if max_width else max(8, columns - 2)
+    print(f"\033[90m{char * width}\033[0m", flush=True)
 
 def format_job_id(job_id: str) -> str:
     return f"\033[1;97m{job_id}\033[0m"
@@ -1732,13 +1854,13 @@ def extract_commands() -> tuple[str, str]:
     """Extracts build and test commands from docs/build-test-commands.md"""
     doc_path = DOCS_DIR / "build-test-commands.md"
 
-    def default_xcode_command(action: str) -> str:
+    def default_xcode_command(action: str) -> str | None:
         if PROJECT_CONFIG.xcode_workspace:
             base = f"xcodebuild {action} -workspace {shlex.quote(PROJECT_CONFIG.xcode_workspace)}"
         elif PROJECT_CONFIG.xcode_project:
             base = f"xcodebuild {action} -project {shlex.quote(PROJECT_CONFIG.xcode_project)}"
         else:
-            base = f"xcodebuild {action}"
+            return None
         if PROJECT_CONFIG.scheme:
             base += f" -scheme {shlex.quote(PROJECT_CONFIG.scheme)}"
         return base
@@ -1751,11 +1873,21 @@ def extract_commands() -> tuple[str, str]:
 
     if doc_path.exists():
         content = doc_path.read_text(encoding="utf-8")
-        # More robust regex handling spaces and newlines
-        build_match = re.search(r"## iOS app build[\s\S]*?```bash\s+([\s\S]*?)\s+```", content)
-        test_match = re.search(r"## iOS app tests[\s\S]*?```bash\s+([\s\S]*?)\s+```", content)
-        build = build_match.group(1).strip() if build_match else default_build
-        test = test_match.group(1).strip() if test_match else default_test
+        # Accept neutral headings and legacy generated iOS headings. Do not
+        # borrow a command from a later section when a section has no code block.
+        def documented_command(heading: str) -> str | None:
+            pattern = rf"^## (?:iOS app )?{heading}\s*$((?:(?!^## ).)*?)^```bash\s*\n(.*?)^```"
+            match = re.search(pattern, content, re.MULTILINE | re.DOTALL | re.IGNORECASE)
+            return match.group(2).strip() if match else None
+
+        build = PROJECT_CONFIG.build_command or documented_command("build") or default_build
+        test = PROJECT_CONFIG.test_command or documented_command("tests?") or default_test
+
+    if not build or not test:
+        raise ValueError(
+            "Configure build_command and test_command in .orchestrator/project.json "
+            "or document them under ## Build and ## Tests in docs/build-test-commands.md."
+        )
 
     build = build.replace("$(pwd)", str(ROOT))
     test = test.replace("$(pwd)", str(ROOT))
@@ -2401,31 +2533,100 @@ def split_title_description(text: str) -> tuple[str, str | None]:
         return parts[0].strip(), parts[1].strip()
     return text, None
 
-def get_header_string(text: str) -> str:
+def visible_width(text: str) -> int:
+    """Calculates the visible column width of a string on a terminal,
+    stripping ANSI escape sequences and accounting for wide characters/emojis."""
+    clean = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])|\^\[\[?[A-Za-z0-9_~]*', '', text)
+    width = 0
+    for char in clean:
+        ea = unicodedata.east_asian_width(char)
+        if ea in ('W', 'F'):
+            width += 2
+        elif ord(char) >= 0x1F000 or (0x2600 <= ord(char) <= 0x27BF) or (0x2B00 <= ord(char) <= 0x2BFF):
+            width += 2
+        elif unicodedata.category(char) == 'Mn':
+            width += 0
+        else:
+            width += 1
+    return width
+
+
+def fit_to_visible_width(text: str, max_width: int, ellipsis: str = "…") -> str:
+    """Truncates text so that its visible width does not exceed max_width.
+    Preserves text integrity and appends ellipsis if truncated."""
+    if max_width <= 0:
+        return ""
+    if visible_width(text) <= max_width:
+        return text
+    
+    ell_w = visible_width(ellipsis)
+    target_w = max(1, max_width - ell_w)
+    current_w = 0
+    result_chars = []
+    for char in text:
+        char_w = visible_width(char)
+        if current_w + char_w > target_w:
+            break
+        result_chars.append(char)
+        current_w += char_w
+    return "".join(result_chars).rstrip() + ellipsis
+
+
+def get_header_string(text: str, subtitle: str | None = None) -> str:
     """Returns a centered header string with equals signs in cyan, responsive to terminal width."""
     text = text.strip().rstrip(":").upper()
     text = re.sub(r"\(([^)]*)\)", lambda match: f"({match.group(1).lower()})", text)
     try:
         cols, _ = os.get_terminal_size()
-    except:
-        cols = 80
+    except Exception:
+        cols = max(80, visible_width(text) + 6)
     
-    # Use a safe width (cols - 2) to prevent bleeding onto new lines
-    safe_cols = cols - 2
-    
-    # Account for the spaces around text
-    side_padding = (safe_cols - len(text) - 2) // 2
-    if side_padding < 2: side_padding = 2
-    
-    # Final check: if text itself is too long, don't use padding at all
-    if len(text) + 6 > safe_cols:
-        return f"\n\033[1;96m== {text} ==\033[0m"
-    else:
-        return f"\n\033[1;96m{'=' * side_padding} {text} {'=' * side_padding}\033[0m"
+    cols = max(20, cols)
+    safe_cols = max(16, cols - 2)
+    max_text_width = max(6, safe_cols - 4)
+    if visible_width(text) > max_text_width:
+        text = fit_to_visible_width(text, max_text_width)
+    text_w = visible_width(text)
+    avail_space = max(2, safe_cols - text_w - 2)
+    left_pad_len = avail_space // 2
+    right_pad_len = avail_space - left_pad_len
+    left_padding = "=" * max(1, left_pad_len)
+    right_padding = "=" * max(1, right_pad_len)
+    header_line = f"\n\033[1;96m{left_padding} {text} {right_padding}\033[0m"
+    if subtitle:
+        sub_line = format_subtitle(subtitle)
+        return f"{header_line}\n{sub_line}"
+    return header_line
 
-def print_header(text: str):
-    """Prints a centered header with equals signs, responsive to terminal width."""
-    print(get_header_string(text))
+
+def print_header(text: str, subtitle: str | None = None) -> None:
+    """Prints a centered header with equals signs, responsive to terminal width, with optional subtitle."""
+    print(get_header_string(text, subtitle=subtitle))
+
+
+def format_section_header(title: str) -> str:
+    """Returns a consistently styled section header in bold white."""
+    return f"\033[1;97m{title}\033[0m"
+
+
+def print_section(title: str, subtitle: str | None = None) -> None:
+    """Prints a section header in bold white and an optional subtitle in muted gray."""
+    print(format_section_header(title))
+    if subtitle:
+        print_subtitle(subtitle)
+
+
+def format_subtitle(text: str, hint: bool = False) -> str:
+    """Returns a subtitle or hint string formatted with consistent muted colors."""
+    if hint:
+        return f"\033[1;90m{text}\033[0m"
+    return f"\033[90m{text}\033[0m"
+
+
+def print_subtitle(text: str, hint: bool = False) -> None:
+    """Prints a subtitle or description line, ensuring proper style."""
+    print(format_subtitle(text, hint=hint))
+
 
 def print_phase(phase: str, subtext: str | None = None):
     p_map = {
@@ -2436,39 +2637,54 @@ def print_phase(phase: str, subtext: str | None = None):
         "review": ("👀", "REVIEW"),
         "complete": ("✅", "COMPLETE"),
         "exporting": ("📦", "EXPORTING"),
+        "delivery": ("🚀", "DELIVERY"),
+        "investigation": ("🔍", "INVESTIGATION"),
+        "implementation": ("⚙️", "IMPLEMENTATION"),
+        "building": ("🔨", "BUILDING"),
+        "testing": ("🧪", "TESTING"),
+        "git_prep": ("🌿", "GIT PREP"),
+        "status_update": ("📊", "STATUS UPDATE"),
+        "debug_loop": ("🐞", "DEBUG LOOP"),
+        "agent_thinking": ("💭", "AI THINKING"),
+        "pull_request": ("🔀", "PULL REQUEST"),
+        "cleanup": ("🧹", "CLEANUP"),
     }
-    icon, label = p_map.get(phase.lower(), ("⚙️", phase.upper()))
+    icon, label = p_map.get(phase.lower(), ("⚙️", phase.upper().replace("_", " ")))
     
     try:
         cols, _ = os.get_terminal_size()
     except Exception:
         cols = 80
         
-    cols = max(30, cols)
+    cols = max(20, cols)
+    safe_cols = max(16, cols - 2)
     
+    prefix = f"{icon} {label}"
     if subtext:
-        header_text = f"{icon} {label}: {subtext.strip().upper()}"
+        header_text = f"{prefix}: {subtext.strip().upper()}"
     else:
-        header_text = f"{icon} {label}"
-
-    # Emojis like 🧠, 📦, 🏗️ count as 1 char in len() but take 2 terminal cells
-    visual_len = len(header_text) + 1
-    max_visual_len = cols - 6
-    if visual_len > max_visual_len and subtext:
-        prefix = f"{icon} {label}: "
-        allowed_sub = max(6, max_visual_len - (len(prefix) + 1))
-        if len(subtext.strip()) > allowed_sub:
-            short_sub = subtext.strip()[:max(3, allowed_sub - 1)] + "…"
-            header_text = f"{prefix}{short_sub.upper()}"
-            visual_len = len(header_text) + 1
-
-    avail_space = max(2, cols - visual_len - 2)
+        header_text = prefix
+        
+    max_text_w = max(6, safe_cols - 4)
+    if visible_width(header_text) > max_text_w:
+        if subtext:
+            pref_w = visible_width(f"{prefix}: ")
+            avail_sub_w = max(4, max_text_w - pref_w)
+            short_sub = fit_to_visible_width(subtext.strip().upper(), avail_sub_w)
+            header_text = f"{prefix}: {short_sub}"
+            if visible_width(header_text) > max_text_w:
+                header_text = fit_to_visible_width(header_text, max_text_w)
+        else:
+            header_text = fit_to_visible_width(header_text, max_text_w)
+            
+    text_w = visible_width(header_text)
+    avail_space = max(2, safe_cols - text_w - 2)
     left_padding = avail_space // 2
     right_padding = avail_space - left_padding
     left_pad = "=" * max(1, left_padding)
     right_pad = "=" * max(1, right_padding)
 
-    print(f"\n\033[1;96m{left_pad} {header_text} {right_pad}\033[0m")
+    print(f"\n\033[1;96m{left_pad} {header_text} {right_pad}\033[0m", flush=True)
 
 
 def get_phase_name(phase: str) -> str:
@@ -2988,12 +3204,11 @@ def format_markdown_for_terminal(text: str) -> str:
     
     try:
         cols, _ = os.get_terminal_size()
-    except:
+    except Exception:
         cols = 80
         
-    max_width = min(80, cols - 4)
-    if max_width < 40:
-        max_width = 40
+    cols = max(20, cols)
+    max_width = max(16, min(80, cols - 4))
         
     in_code_block = False
     code_block_lines = []
@@ -3007,10 +3222,11 @@ def format_markdown_for_terminal(text: str) -> str:
         if stripped.startswith("```"):
             if in_code_block:
                 # End of code block: draw box
-                formatted_lines.append("  \033[90m┌" + "─" * (max_width - 4) + "\033[0m")
+                border_w = max(2, max_width - 4)
+                formatted_lines.append("  \033[90m┌" + "─" * border_w + "\033[0m")
                 for c_line in code_block_lines:
                     formatted_lines.append(f"  \033[90m│\033[0m \033[92m{c_line}\033[0m")
-                formatted_lines.append("  \033[90m└" + "─" * (max_width - 4) + "\033[0m")
+                formatted_lines.append("  \033[90m└" + "─" * border_w + "\033[0m")
                 code_block_lines = []
                 in_code_block = False
             else:
@@ -3024,16 +3240,18 @@ def format_markdown_for_terminal(text: str) -> str:
         # Headers
         if stripped.startswith("# "):
             title = stripped[2:]
+            bar_len = max(1, min(len(title), max_width - 2))
             formatted_lines.append("")
             formatted_lines.append(f" \033[1;95m{title.upper()}\033[0m")
-            formatted_lines.append(f" \033[1;95m" + "━" * len(title) + "\033[0m")
+            formatted_lines.append(f" \033[1;95m" + "━" * bar_len + "\033[0m")
             formatted_lines.append("")
             continue
         elif stripped.startswith("## "):
             title = stripped[3:]
+            bar_len = max(1, min(len(title), max_width - 2))
             formatted_lines.append("")
             formatted_lines.append(f" \033[1;96m{title}\033[0m")
-            formatted_lines.append(f" \033[96m" + "─" * len(title) + "\033[0m")
+            formatted_lines.append(f" \033[96m" + "─" * bar_len + "\033[0m")
             formatted_lines.append("")
             continue
         elif stripped.startswith("### "):

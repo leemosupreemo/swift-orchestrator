@@ -11,7 +11,7 @@ Recommended CLI install:
 ```bash
 brew install pipx
 pipx ensurepath
-pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
+pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
 ```
 
 Upgrade later with:

@@ -12,6 +12,7 @@ from typing import Any
 from orchestrator.project_config import (
     DEFAULT_RUNTIME_DIRNAME,
     find_project_root,
+    forget_project,
     load_project_config,
     load_recent_projects,
     project_display_name,
@@ -132,13 +133,13 @@ def build_test_docs(config: dict) -> str:
 
 Canonical validation commands for this project.
 
-## iOS app build
+## Build
 
 ```bash
 {build_command}
 ```
 
-## iOS app tests
+## Tests
 
 ```bash
 {test_command}
@@ -244,7 +245,7 @@ elif command -v orchestrator >/dev/null 2>&1; then
     exec orchestrator "$@"
 else
     echo "Error: 'orchestrator' command not found."
-    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/orchestrator.git'"
+    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/swift-orchestrator.git'"
     echo "Or run from source: PYTHONPATH=. python3 -m orchestrator"
     exit 1
 fi
@@ -1618,7 +1619,7 @@ def use_project_command(reference: str) -> int:
     root = resolve_cli_project(reference)
     if not root:
         return 1
-    if not root.exists():
+    if not root.exists() or not root.is_dir():
         print(f"Project path does not exist: {root}")
         return 1
     remember_project(root, project_display_name(root), active=True)
@@ -1626,19 +1627,34 @@ def use_project_command(reference: str) -> int:
     return 0
 
 
+def remove_project_command(reference: str) -> int:
+    if forget_project(reference):
+        print(f"Removed '{reference}' from remembered projects.")
+        return 0
+    else:
+        print(f"Project '{reference}' not found in remembered projects.")
+        return 1
+
+
+def prune_projects_command() -> int:
+    load_recent_projects(prune_missing=True)
+    print("Pruned missing projects. Current remembered projects:")
+    return list_projects_command()
+
+
 def update_command(args: argparse.Namespace) -> int:
     from orchestrator.project_config import PACKAGE_ROOT
     from orchestrator import __version__
+    from orchestrator.scripts.common import print_header, print_section
     
     pkg_dir = PACKAGE_ROOT.parent
     is_git = (pkg_dir / ".git").exists()
     
-    print(f"\n\033[1;96m{'='*20} Orchestrator Update {'='*20}\033[0m")
+    print_header("Orchestrator Update")
     print(f"Current Version: \033[97mv{__version__}\033[0m")
     
     if is_git:
-        print("\n\033[1;96m--- Local Update (Git Repository) ---\033[0m")
-        print(f"Location: {pkg_dir}")
+        print_section("\n--- Local Update (Git Repository) ---", f"Location: {pkg_dir}")
         try:
             subprocess.run(["git", "pull"], cwd=str(pkg_dir), check=False)
             subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=str(pkg_dir), check=False)
@@ -1652,7 +1668,7 @@ def update_command(args: argparse.Namespace) -> int:
         print("If you installed via pip, run:  \033[97mpip install --upgrade orchestrator\033[0m")
 
     if getattr(args, "fleet", False):
-        print("\n\033[1;96m--- Fleet Update ---\033[0m")
+        print_section("\n--- Fleet Update ---")
         try:
             return run_script("worker_tools.py", ["install"])
         except Exception as e:
@@ -1731,11 +1747,20 @@ def _main(argv: list[str] | None = None) -> int:
             os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(local_root)
             argv = ["console"]
         else:
-            recent = load_recent_projects()
+            recent = load_recent_projects(prune_missing=True)
             projects = recent.get("projects", [])
 
-            print(f"\n\033[1;96m{'='*20} Orchestrator {'='*20}\033[0m")
-            print("No initialized project found in current directory.\n")
+            from orchestrator.scripts.common import (
+                clear_choice_placeholder,
+                get_key,
+                print_choice_prompt,
+                print_divider,
+                print_header,
+                print_subtitle,
+            )
+
+            print_header("Orchestrator")
+            print_subtitle("No initialized project found in current directory.\n")
             print("    [\033[93m1\033[0m] Initialize new project (Wizard)")
 
             if projects:
@@ -1745,26 +1770,38 @@ def _main(argv: list[str] | None = None) -> int:
                     print(f"        \033[90m{p['root']}\033[0m")
 
             print("\n    [\033[1;91mQ\033[0m] Quit\n")
-            print("-" * 37)
+            print_divider()
 
-            from orchestrator.scripts.common import get_key, print_choice_prompt, clear_choice_placeholder
             while True:
                 sys.stdout.write("\r")
                 print_choice_prompt("Choice:", "(index or letter)")
-                choice = get_key().strip().lower()
+                if len(projects) > 8:
+                    try:
+                        choice = input().strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        print()
+                        return 0
+                else:
+                    choice = get_key().strip().lower()
                 clear_choice_placeholder()
                 
                 if choice == "q":
                     print()
                     return 0
-                if choice == "1":
+                if choice in {"1", "w"}:
                     print()
                     argv = ["wizard"]
                     break
                 if choice.isdigit():
                     idx = int(choice) - 2
                     if 0 <= idx < len(projects):
-                        os.environ["ORCHESTRATOR_PROJECT_ROOT"] = projects[idx]["root"]
+                        proj_root = Path(projects[idx]["root"])
+                        if not proj_root.exists() or not proj_root.is_dir():
+                            print(f"\n\033[1;91mProject path no longer exists: {proj_root}\033[0m")
+                            recent = load_recent_projects(prune_missing=True)
+                            projects = recent.get("projects", [])
+                            continue
+                        os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(proj_root)
                         print()
                         argv = ["console"]
                         break
@@ -1802,6 +1839,7 @@ def _main(argv: list[str] | None = None) -> int:
     wizard_parser.add_argument("--team-id")
     wizard_parser.add_argument("--method")
     wizard_parser.add_argument("--provisioning-profile")
+    wizard_parser.add_argument("--provisioning-profile-specifier")
     wizard_parser.add_argument("--asc-key-id")
     wizard_parser.add_argument("--asc-issuer-id")
     wizard_parser.add_argument("--asc-key-path")
@@ -1821,9 +1859,12 @@ def _main(argv: list[str] | None = None) -> int:
     worker_install = subparsers.add_parser("worker-install")
     worker_install.add_argument("--machine")
     worker_install.add_argument("--project", help="Recent project name or project root path")
-    subparsers.add_parser("projects")
-    use_parser = subparsers.add_parser("use")
+    subparsers.add_parser("projects", help="List remembered projects")
+    use_parser = subparsers.add_parser("use", help="Select active project")
     use_parser.add_argument("project", help="Recent project name or project root path")
+    remove_parser = subparsers.add_parser("remove", help="Remove a project from remembered projects")
+    remove_parser.add_argument("project", help="Recent project name or project root path")
+    subparsers.add_parser("prune", help="Prune missing projects from remembered projects")
 
     update_parser = subparsers.add_parser("update")
     update_parser.add_argument("--fleet", action="store_true", help="Update all enabled remote workers in the fleet")
@@ -1887,6 +1928,10 @@ def _main(argv: list[str] | None = None) -> int:
         return list_projects_command()
     if args.command == "use":
         return use_project_command(args.project)
+    if args.command == "remove":
+        return remove_project_command(args.project)
+    if args.command == "prune":
+        return prune_projects_command()
     if args.command == "update":
         if args.fleet and args.project and apply_project_env(args.project):
             return 1

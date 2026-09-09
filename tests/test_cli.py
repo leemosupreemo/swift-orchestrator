@@ -103,6 +103,56 @@ class CliTests(unittest.TestCase):
             self.assertIn("Project: SampleApp", use_output.getvalue())
             self.assertIn(str(root.resolve()), use_output.getvalue())
 
+    def test_remove_and_prune_project_commands(self) -> None:
+        from orchestrator.project_config import load_recent_projects, remember_project
+
+        with tempfile.TemporaryDirectory(prefix="orchestrator-proj1-") as dir1, \
+             tempfile.TemporaryDirectory(prefix="orchestrator-proj2-") as dir2:
+            p1 = Path(dir1)
+            p2 = Path(dir2)
+            (p1 / "App1.xcodeproj").mkdir()
+            (p2 / "App2.xcodeproj").mkdir()
+
+            remember_project(p1, "App1")
+            remember_project(p2, "App2")
+
+            data = load_recent_projects()
+            self.assertEqual(len(data["projects"]), 2)
+
+            # Test remove command
+            remove_out = io.StringIO()
+            with redirect_stdout(remove_out):
+                self.assertEqual(cli.main(["remove", "App1"]), 0)
+            self.assertIn("Removed 'App1'", remove_out.getvalue())
+
+            data = load_recent_projects()
+            self.assertEqual(len(data["projects"]), 1)
+            self.assertEqual(data["projects"][0]["name"], "App2")
+
+        # Now dir2 is deleted (exited context manager)
+        prune_out = io.StringIO()
+        with redirect_stdout(prune_out):
+            self.assertEqual(cli.main(["prune"]), 0)
+        self.assertIn("No recent projects", prune_out.getvalue())
+
+        data = load_recent_projects()
+        self.assertEqual(len(data["projects"]), 0)
+
+    def test_load_recent_projects_auto_prunes_missing_dirs(self) -> None:
+        from orchestrator.project_config import load_recent_projects, save_recent_projects
+
+        save_recent_projects({
+            "version": 1,
+            "active": "GhostApp",
+            "projects": [
+                {"name": "GhostApp", "root": "/non/existent/path/ghost"},
+            ]
+        })
+
+        data = load_recent_projects(prune_missing=True)
+        self.assertEqual(data["projects"], [])
+        self.assertIsNone(data["active"])
+
     def test_init_project_can_generate_starter_docs_and_helper_script(self) -> None:
         with tempfile.TemporaryDirectory(prefix="orchestrator-init-") as temp_dir:
             root = Path(temp_dir)

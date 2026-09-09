@@ -1532,7 +1532,7 @@ class AppFeatureTests_{i}: XCTestCase {{
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("3 created", printed)
             self.assertIn("1 failing", printed)
-            self.assertIn("(14 passing)", printed)
+            self.assertNotIn("passing)", printed)
             self.assertIn("ThemisTests.RiskViewModelTests.testTabSelection", printed)
             self.assertIn("FIX REQUIRED: Auto-Debug", printed)
             self.assertIn("to run Auto-Fix", printed)
@@ -1572,7 +1572,7 @@ class AppFeatureTests_{i}: XCTestCase {{
             printed = " ".join(str(c) for c in mock_print.call_args_list)
             self.assertIn("2 created", printed)
             self.assertIn("All Passing", printed)
-            self.assertIn("(25 suite tests)", printed)
+            self.assertNotIn("suite tests", printed)
 
     @patch("dev_console.refresh_job")
     @patch("dev_console.get_job_test_summary")

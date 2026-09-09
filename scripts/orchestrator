@@ -15,7 +15,7 @@ elif command -v orchestrator >/dev/null 2>&1; then
     exec orchestrator "$@"
 else
     echo "Error: 'orchestrator' command not found."
-    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/orchestrator.git'"
+    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/swift-orchestrator.git'"
     echo "Or run from source: PYTHONPATH=. python3 -m orchestrator"
     exit 1
 fi

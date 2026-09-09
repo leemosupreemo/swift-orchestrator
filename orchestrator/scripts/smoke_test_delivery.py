@@ -116,15 +116,11 @@ def run_smoke_delivery():
         res = subprocess.call([sys.executable, str(deliver_script), str(job_file)], cwd=str(ROOT), stdout=sys.stdout, stderr=sys.stderr)
 
         if res == 0:
-            print("\n\033[1;92m======================================================================\033[0m", flush=True)
-            print("   \033[1;92m✨ SMOKE TEST SUCCESSFUL!\033[0m", flush=True)
-            print("   \033[97mBuild should be appearing on your registered device soon.\033[0m", flush=True)
-            print("\033[1;92m======================================================================\033[0m\n", flush=True)
+            print_header("✨ Smoke Test Successful!")
+            print("   \033[97mBuild should be appearing on your registered device soon.\033[0m\n", flush=True)
         else:
-            print("\n\033[1;91m======================================================================\033[0m", flush=True)
-            print("   \033[1;91m❌ SMOKE DELIVERY FAILED DURING BUILD/DISTRIBUTION\033[0m", flush=True)
-            print("   \033[97mSee the diagnostic messages above for details and fix instructions.\033[0m", flush=True)
-            print("\033[1;91m======================================================================\033[0m\n", flush=True)
+            print_header("❌ Smoke Delivery Failed")
+            print("   \033[97mSee the diagnostic messages above for details and fix instructions.\033[0m\n", flush=True)
             
         # Auto-cleanup temporary mock job
         if job_file.exists():

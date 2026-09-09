@@ -28,7 +28,7 @@ try:
 except:
     pass
 
-from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, LoopTroubleDetector, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, get_github_links, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff
+from common import ROOT, CONFIG_DIR, JOBS_DIR, ARCHIVE_DIR, OUTPUT_DIR, DOCS_DIR, read_json, write_json, now_iso, timestamp, get_best_simulator_destination, get_simulator_diagnostic, prompt_radio, prompt_confirm, format_job_id, format_index, prompt_checkbox, BackException, KeyInterruptException, get_key, StatusBar, print_divider, extract_commands, print_phase, ProgressIndicator, LoopTroubleDetector, get_test_plan_flags, print_choice_prompt, get_choice_prompt, clear_choice_placeholder, purge_zombie_processes, print_header, get_header_string, print_section, print_subtitle, format_section_header, format_subtitle, prompt_input, prompt_password, format_markdown_for_terminal, print_wrapped_option, extract_step_from_line, record_clarification, find_latest_runtime_log, flush_stdin, get_github_url, get_github_links, record_interactive_investigation, format_investigation_history, get_job_test_summary, parse_test_output, count_created_tests_in_diff, analyze_debug_loop_convergence
 from llm import SUPPORTED_MODELS, DEFAULT_FALLBACKS, run_llm, extract_json_block
 from model_router import ModelRole
 from model_registry import get_all_models, ModelTier
@@ -626,22 +626,7 @@ def format_job_header(job: dict[str, Any]) -> str:
         )
         full_title = f"[{tag}] {clean_title.upper()}"
         
-    try:
-        cols, _ = os.get_terminal_size()
-    except Exception:
-        cols = 80
-        
-    safe_cols = max(40, cols - 2)
-    border = "=" * safe_cols
-    
-    inner_text = f"===== {full_title} ====="
-    if len(inner_text) < safe_cols:
-        padding = (safe_cols - len(inner_text)) // 2
-        title_line = " " * padding + inner_text
-    else:
-        title_line = inner_text[:safe_cols]
-        
-    return f"\n\033[1;96m{border}\033[0m\n\033[1;97m{title_line}\033[0m\n\033[1;96m{border}\033[0m"
+    return get_header_string(full_title)
 
 def print_job_header(job: dict[str, Any]) -> None:
     print(format_job_header(job))
@@ -4017,38 +4002,28 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
             # 4. Tests Status Summary
             test_summary = get_job_test_summary(job)
             created_cnt = test_summary["created_count"]
-            planned_cnt = test_summary["planned_count"]
             failed_cnt = test_summary["failed_count"]
             passed_cnt = test_summary["passed_count"]
-            total_cnt = test_summary["total_run"]
             f_tests = test_summary["failing_tests"]
             t_status = test_summary["status"]
 
-            if created_cnt > 0:
-                created_str = f"\033[1;97m{created_cnt} created\033[0m"
-            elif planned_cnt > 0:
-                created_str = f"\033[90m{planned_cnt} planned\033[0m"
-            else:
-                created_str = "\033[90m0 created\033[0m"
+            created_suffix = f" \033[90m|\033[0m \033[1;97m{created_cnt} created\033[0m" if created_cnt > 0 else ""
 
             if t_status == "failing" and failed_cnt > 0:
-                pass_part = f" \033[90m({passed_cnt} passing)\033[0m" if passed_cnt > 0 else ""
-                fail_badge = f"\033[1;91m❌ {failed_cnt} failing\033[0m{pass_part}"
-                print(f"\033[1;96mTests:\033[0m        {fail_badge} \033[90m|\033[0m {created_str}")
+                fail_badge = f"\033[1;91m❌ {failed_cnt} failing\033[0m"
+                print(f"\033[1;96mTests:\033[0m        {fail_badge}{created_suffix}")
                 for ft in f_tests[:3]:
                     print_wrapped_bullet("  \033[1;91m└─ ❌\033[0m ", f"\033[1;91m{ft}\033[0m")
                 if len(f_tests) > 3:
                     print(f"  \033[90m└─ ... and {len(f_tests) - 3} more\033[0m")
             elif t_status == "build-failed":
-                print(f"\033[1;96mTests:\033[0m        \033[1;91m❌ Build / Compilation Failed\033[0m \033[90m|\033[0m {created_str}")
+                print(f"\033[1;96mTests:\033[0m        \033[1;91m❌ Build / Compilation Failed\033[0m{created_suffix}")
             elif t_status == "passing" or (failed_cnt == 0 and passed_cnt > 0):
-                test_noun = "suite test" if total_cnt == 1 else "suite tests"
-                suite_part = f" \033[90m({total_cnt} {test_noun})\033[0m" if total_cnt > 0 else (f" \033[90m({passed_cnt} passing)\033[0m" if passed_cnt > 0 else "")
-                print(f"\033[1;96mTests:\033[0m        \033[1;92m✅ All Passing\033[0m{suite_part} \033[90m|\033[0m {created_str}")
+                print(f"\033[1;96mTests:\033[0m        \033[1;92m✅ All Passing\033[0m{created_suffix}")
             elif t_status == "pending":
-                print(f"\033[1;96mTests:\033[0m        \033[90m⚙️ Pending execution\033[0m \033[90m|\033[0m {created_str}")
+                print(f"\033[1;96mTests:\033[0m        \033[90m⚙️ Pending execution\033[0m{created_suffix}")
             else:
-                print(f"\033[1;96mTests:\033[0m        \033[90mUntested\033[0m \033[90m|\033[0m {created_str}")
+                print(f"\033[1;96mTests:\033[0m        \033[90mUntested\033[0m{created_suffix}")
 
             # 5. Linked Logs
             logs = job.get("last_manual_log_paths", [])
@@ -4058,7 +4033,11 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                 print(f"\033[1;96mLinked Logs:\033[0m  \033[92m{count_str}\033[0m")
                 for l in logs[:3]:
                     p = Path(l) if Path(l).is_absolute() else (ROOT / l)
-                    log_label = format_log_path(Path(l).name)
+                    if p.parent.name == "manual":
+                        raw_name = f"manual/{p.name}"
+                    else:
+                        raw_name = p.name
+                    log_label = format_log_path(raw_name)
                     link_str = format_file_link(p, label=f"\033[92m{log_label}\033[0m")
                     print_wrapped_bullet("  \033[90m└─ 📄\033[0m ", link_str)
                 if len(logs) > 3:
@@ -4237,10 +4216,12 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
 
                 completed_trials = [e for e in history if e.get("result") not in ("pending", None)]
                 has_completed = len(completed_trials) > 0
+                convergence = analyze_debug_loop_convergence(job, test_summary)
 
                 if phase == "paused":
-                    print(f"\033[1;93m ⏸️  PAUSED: Max Iterations Reached ({iter_val}/{max_iter} Attempts Used)\033[0m")
-                    print_wrapped_kv(" Reason:        ", f"\033[97mAutomated repair reached the budget limit of {max_iter} attempts without passing all tests.\033[0m")
+                    pause_reason = job.get("debug_pause_reason") or f"Automated repair reached the budget limit of {max_iter} attempts without passing all tests."
+                    print(f"\033[1;93m ⏸️  PAUSED: Loop Paused ({iter_val}/{max_iter} Attempts Used)\033[0m")
+                    print_wrapped_kv(" Reason:        ", f"\033[97m{pause_reason}\033[0m")
                     if completed_trials:
                         last_t = completed_trials[-1]
                         badge, detail = format_trial_result(last_t.get("result"), test_summary)
@@ -4274,14 +4255,29 @@ def handle_job_selection(job: dict[str, Any], session_allowed_machines: list[str
                     print(f"\n \033[1;96m->\033[0m Press \033[1;96m'D'\033[0m to run Auto-Fix (starts Attempt #1), \033[1;96m'Q'\033[0m to Ask AI, or \033[1;96m'R'\033[0m to reset.")
 
                 else:
-                    # One or more prior attempts failed, ready for next iteration
+                    # One or more prior attempts executed
                     last_t = completed_trials[-1]
                     last_num = last_t.get("iteration", 1)
                     next_num = max(iter_val, last_num + 1)
                     badge, detail = format_trial_result(last_t.get("result"), test_summary)
 
-                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop (Budget: Up to {max_iter} Automated Fix Attempts)\033[0m")
-                    print_wrapped_kv(" Current State: ", f"\033[1;91m⚠️  Attempt #{last_num} Failed\033[0m \033[90m({detail})\033[0m \033[1;96m-> Ready for Attempt #{next_num} of {max_iter}\033[0m")
+                    health_part = f" [{convergence['health_badge']}]" if convergence.get("health") not in ("exploring", "ready") else ""
+                    print(f"\033[1;95m 🐞 FIX REQUIRED: Auto-Debug Loop (Budget: Up to {max_iter} Automated Fix Attempts){health_part}\033[0m")
+                    
+                    last_res = last_t.get("result", {})
+                    if isinstance(last_res, dict) and last_res.get("tests_ok"):
+                        state_label = f"\033[1;93m⚠️  Attempt #{last_num} Follow-up Needed\033[0m \033[90m({detail})\033[0m"
+                    else:
+                        state_label = f"\033[1;91m⚠️  Attempt #{last_num} Failed\033[0m \033[90m({detail})\033[0m"
+                    print_wrapped_kv(" Current State: ", f"{state_label} \033[1;96m-> Ready for Attempt #{next_num} of {max_iter}\033[0m")
+
+                    if convergence.get("health") == "converging":
+                        print_wrapped_kv(" Trajectory:    ", f"\033[1;92m📈 {convergence['description']}\033[0m")
+                    elif convergence.get("health") == "oscillating":
+                        print_wrapped_kv(" Trajectory:    ", f"\033[1;93m🔄 {convergence['description']}\033[0m")
+                    elif convergence.get("health") == "stagnant":
+                        print_wrapped_kv(" Trajectory:    ", f"\033[1;91m🛑 {convergence['description']}\033[0m")
+
                     if last_t.get("action"):
                         print_wrapped_kv(" Last Action:   ", f"\033[90m#{last_num}: {last_t.get('action')}\033[0m")
                     if last_t.get("hypothesis"):
@@ -6572,7 +6568,7 @@ def handle_role_prompts(session_allowed_machines, session_allowed_models):
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
 
 def handle_change_target_project(status_bar: StatusBar) -> None:
-    from orchestrator.project_config import load_recent_projects, remember_project
+    from orchestrator.project_config import forget_project, load_recent_projects, remember_project
 
     selected_idx = 0
 
@@ -6608,7 +6604,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
                 return
         else:
             print("\033[1;97mRecent Projects\033[0m")
-            print("\033[1;90m(Arrows: navigate, Enter: select, B: back)\033[0m\n")
+            print("\033[1;90m(Arrows: navigate, Enter: select, D: remove, B: back)\033[0m\n")
 
             for idx, project in enumerate(projects):
                 is_selected = idx == selected_idx
@@ -6628,6 +6624,7 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
 
             print("\n\033[1;97mActions\033[0m")
             print("  [\033[1;92mA\033[0m] Add Project")
+            print("  [\033[1;91mD\033[0m] Remove from List")
             print("  [\033[1;96mH\033[0m] Help\n")
             print("  [\033[1;91mB\033[0m] Back")
 
@@ -6636,6 +6633,12 @@ def handle_change_target_project(status_bar: StatusBar) -> None:
 
             if key == "b":
                 return
+            if key in {"d", "x", "delete"}:
+                if projects and 0 <= selected_idx < len(projects):
+                    selected = projects[selected_idx]
+                    forget_project(selected.get("name", ""))
+                    selected_idx = max(0, selected_idx - 1)
+                continue
             if key in {"up", "k"}:
                 selected_idx = (selected_idx - 1) % len(projects)
                 continue

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 import sys
 import tempfile
 import unittest
@@ -18,6 +20,44 @@ import common  # noqa: E402
 
 
 class CommonTests(unittest.TestCase):
+    def test_generic_commands_override_legacy_docs_without_simulator_probe(self):
+        config = SimpleNamespace(build_command="cargo build", test_command="cargo test",
+                                 xcode_project=None, xcode_workspace=None, scheme=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = Path(tmp)
+            (docs / "build-test-commands.md").write_text(
+                "## iOS app build\n```bash\nswift build\n```\n"
+                "## iOS app tests\n```bash\nswift test\n```\n")
+            with patch.object(common, "DOCS_DIR", docs), patch.object(common, "PROJECT_CONFIG", config), \
+                 patch.object(common, "get_best_simulator_destination") as simulator:
+                self.assertEqual(common.extract_commands(), ("cargo build", "cargo test"))
+                simulator.assert_not_called()
+
+    def test_generic_documented_commands_and_missing_command_error(self):
+        config = SimpleNamespace(build_command=None, test_command=None,
+                                 xcode_project=None, xcode_workspace=None, scheme=None,
+                                 derived_data_path="/tmp/test-generic-dd")
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = Path(tmp)
+            with patch.object(common, "DOCS_DIR", docs), patch.object(common, "PROJECT_CONFIG", config):
+                with self.assertRaisesRegex(ValueError, "build_command"):
+                    common.extract_commands()
+                (docs / "build-test-commands.md").write_text(
+                    "## Build\n```bash\nnpm run build\n```\n"
+                    "## Tests\n```bash\nnpm test\n```\n")
+                self.assertEqual(common.extract_commands(), ("npm run build", "npm test"))
+
+    def test_empty_build_doc_section_does_not_borrow_test_command(self):
+        config = SimpleNamespace(build_command=None, test_command=None,
+                                 xcode_project=None, xcode_workspace=None, scheme=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = Path(tmp)
+            (docs / "build-test-commands.md").write_text(
+                "## Build\nNot configured yet.\n## Tests\n```bash\nnpm test\n```\n")
+            with patch.object(common, "DOCS_DIR", docs), patch.object(common, "PROJECT_CONFIG", config):
+                with self.assertRaisesRegex(ValueError, "build_command"):
+                    common.extract_commands()
+
     @patch("common.get_best_simulator_destination", return_value="platform=iOS Simulator,id=TEST_SIM")
     def test_extract_commands_reads_ios_app_tests_section(self, _mock_destination) -> None:
         project_config = SimpleNamespace(
@@ -150,6 +190,40 @@ xcodebuild test CLANG_MODULE_CACHE_PATH=$(pwd)/.clang-module-cache
         self.assertIn("LOAD SPEC FROM A LOCAL FILE OR WEB ADDRESS?", header)
         self.assertIn("(useful for large multi-page docs)", header)
         self.assertNotIn("(USEFUL FOR LARGE MULTI-PAGE DOCS)", header)
+
+    def test_visible_width_and_fitting(self) -> None:
+        self.assertEqual(common.visible_width("Hello World"), 11)
+        self.assertEqual(common.visible_width("\033[1;96mHello World\033[0m"), 11)
+        # Emojis count as 2 visible cells
+        self.assertEqual(common.visible_width("🧠"), 2)
+        self.assertEqual(common.visible_width("📦 Box"), 6)
+
+        fitted = common.fit_to_visible_width("Very Long Title That Needs Truncating", 15)
+        self.assertLessEqual(common.visible_width(fitted), 15)
+        self.assertTrue(fitted.endswith("…"))
+
+    def test_header_string_readjusts_on_small_form_factors(self) -> None:
+        long_title = "Identified Risks & Mitigation Strategies"
+        
+        for cols in [30, 40, 60, 80]:
+            with patch("os.get_terminal_size", return_value=(cols, 24)):
+                header = common.get_header_string(long_title)
+                # Ensure no single line in header exceeds cols - 2
+                clean_lines = [re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", line) for line in header.split("\n") if line.strip()]
+                for line in clean_lines:
+                    self.assertLessEqual(common.visible_width(line), cols - 2)
+
+    def test_section_and_subtitle_formatting(self) -> None:
+        sec = common.format_section_header("Current Project")
+        self.assertIn("Current Project", sec)
+        self.assertIn("\033[1;97m", sec)
+
+        sub = common.format_subtitle("Description text")
+        self.assertIn("Description text", sub)
+        self.assertIn("\033[90m", sub)
+
+        hint = common.format_subtitle("(Arrows: navigate)", hint=True)
+        self.assertIn("\033[1;90m", hint)
 
     @patch("common.sys.stdout.isatty", return_value=True)
     @patch("common.sys.stdout.flush")
@@ -968,6 +1042,18 @@ class FollowupAndLogTests(unittest.TestCase):
 
             self.assertEqual(result, ".orchestrator/output/test-job-123/runtime.log")
 
+    def test_format_log_path_handles_all_timestamp_variants(self) -> None:
+        # Compact timestamp
+        self.assertEqual(common.format_log_path("20260906-171714"), "2026-09-06 17:17:14")
+        self.assertEqual(common.format_log_path("manual/20260906-171714"), "manual/2026-09-06 17:17:14")
+        # Hyphenated/underscored timestamp with prefix and extension
+        self.assertEqual(common.format_log_path("test_2026-09-05_23-48-26.log"), "test_2026-09-05 23:48:26.log")
+        self.assertEqual(common.format_log_path("test_2026-09-05_13-14-07.log"), "test_2026-09-05 13:14:07.log")
+        self.assertEqual(common.format_log_path("system_2026-09-05_23-48-26.log"), "system_2026-09-05 23:48:26.log")
+        # Standard filenames without timestamp
+        self.assertEqual(common.format_log_path("build.log"), "build.log")
+        self.assertEqual(common.format_log_path("test.log"), "test.log")
+
     @patch("debug_job.run_debug_iteration")
     def test_trigger_followup_iteration_updates_job_and_runs_debug(self, mock_debug_iter) -> None:
         import worker_run
@@ -1184,7 +1270,91 @@ class FollowupAndLogTests(unittest.TestCase):
         self.assertIn("Ctrl-C to abort", notices[0])
 
 
+class ConvergenceAnalysisTests(unittest.TestCase):
+    def test_ready_state_with_empty_history(self) -> None:
+        job = {"job_id": "test-1", "debug_history": []}
+        result = common.analyze_debug_loop_convergence(job)
+        self.assertEqual(result["health"], "ready")
+        self.assertFalse(result["is_stuck"])
+
+    def test_convergence_detected_when_failing_tests_decrease(self) -> None:
+        job = {
+            "job_id": "test-2",
+            "debug_history": [
+                {
+                    "iteration": 1,
+                    "hypothesis": "Fix models",
+                    "action": "Updated Models.swift",
+                    "result": {"build_ok": True, "tests_ok": False, "failing_tests": ["TestA", "TestB", "TestC"]},
+                },
+                {
+                    "iteration": 2,
+                    "hypothesis": "Fix view models",
+                    "action": "Updated ViewModel.swift",
+                    "result": {"build_ok": True, "tests_ok": False, "failing_tests": ["TestA"]},
+                },
+            ]
+        }
+        result = common.analyze_debug_loop_convergence(job)
+        self.assertEqual(result["health"], "converging")
+        self.assertEqual(result["failing_tests_delta"], -2)
+        self.assertFalse(result["is_stuck"])
+        self.assertIn("failing tests reduced", result["description"])
+
+    def test_stagnation_detected_when_failing_tests_unchanged_across_attempts(self) -> None:
+        job = {
+            "job_id": "test-3",
+            "debug_history": [
+                {
+                    "iteration": 1,
+                    "hypothesis": "Try approach 1",
+                    "action": "Edit 1",
+                    "result": {"build_ok": True, "tests_ok": False, "failing_tests": ["TestA"]},
+                },
+                {
+                    "iteration": 2,
+                    "hypothesis": "Try approach 2",
+                    "action": "Edit 2",
+                    "result": {"build_ok": True, "tests_ok": False, "failing_tests": ["TestA"]},
+                },
+            ]
+        }
+        summary = {"failing_tests": ["TestA"]}
+        result = common.analyze_debug_loop_convergence(job, current_test_summary=summary)
+        self.assertEqual(result["health"], "stagnant")
+        self.assertTrue(result["is_stuck"])
+        self.assertGreaterEqual(result["stagnant_streak"], 1)
+
+    def test_oscillation_detected_when_duplicate_hypothesis_repeated(self) -> None:
+        job = {
+            "job_id": "test-4",
+            "debug_history": [
+                {
+                    "iteration": 1,
+                    "hypothesis": "Add optional binding in Models.swift to prevent nil crash",
+                    "action": "Added if-let",
+                    "result": {"build_ok": True, "tests_ok": False},
+                },
+                {
+                    "iteration": 2,
+                    "hypothesis": "Remove optional binding because property is non-optional",
+                    "action": "Removed if-let",
+                    "result": {"build_ok": True, "tests_ok": False},
+                },
+                {
+                    "iteration": 3,
+                    "hypothesis": "Add optional binding in Models.swift to prevent nil crash",
+                    "action": "Added if-let back",
+                    "result": "pending",
+                },
+            ]
+        }
+        result = common.analyze_debug_loop_convergence(job)
+        self.assertEqual(result["health"], "oscillating")
+        self.assertTrue(result["is_stuck"])
+        self.assertTrue(result["oscillation_detected"])
+        self.assertIn("repeated hypothesis", result["description"])
+
+
 if __name__ == "__main__":
     unittest.main()
-
-

@@ -20,6 +20,8 @@ from common import (
     extract_commands,
     get_best_simulator_destination,
     command_with_destination,
+    print_divider,
+    print_header,
     timestamp,
     write_text,
 )
@@ -196,9 +198,7 @@ def main() -> None:
     ])
     write_text(out_dir / "report.md", "\n".join(report_lines))
 
-    print("\n\033[1;92m======================================================================\033[0m")
-    print("   \033[1;92m📱 SIMULATOR VISUAL CHECK COMPLETE\033[0m")
-    print("\033[1;92m======================================================================\033[0m")
+    print_header("📱 Simulator Visual Check Complete")
     print(f"   \033[1;36m• Target App:\033[0m        \033[1;97m{bundle_id}\033[0m \033[90m({app_path.name})\033[0m")
     print(f"   \033[1;36m• Scope Captured:\033[0m    \033[97mForeground root view & initial UI state after launch\033[0m")
     print(f"   \033[1;36m• Screenshots:\033[0m       \033[1;93m{len(screenshot_paths)} screenshot(s)\033[0m \033[90m({args.wait:.1f}s post-launch settle delay)\033[0m")
@@ -209,7 +209,7 @@ def main() -> None:
         print(f"   \033[1;36m• Captured Images:\033[0m")
         for idx, path in enumerate(screenshot_paths, start=1):
             print(f"     \033[90m- Screenshot #{idx}:\033[0m {markdown_link(path.name, path)}")
-    print("\033[1;92m======================================================================\033[0m\n")
+    print_divider()
     cleanup_logs(manual_base)
 
 
