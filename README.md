@@ -100,14 +100,14 @@ The Dev Console is the primary way to interact with the Orchestrator. It feature
 ## 📡 Remote Workers (Fleet)
 
 Scale your workflow by adding remote machines as workers. Remote workers can handle:
-- **Builds**: Offload heavy `xcodebuild` tasks.
+- **Builds**: Offload resource-intensive build jobs.
 - **Tests**: Run exhaustive UI or unit test suites in parallel.
 - **Execution**: The Orchestrator syncs your repository and its own runtime to the worker automatically.
 
 Add workers in `.orchestrator/config/machines.json` and prepare them with:
 ```bash
-orchestrator worker-install --machine mac2
-orchestrator worker-check --machine mac2
+orchestrator worker-install --machine worker1
+orchestrator worker-check --machine worker1
 ```
 
 ---
