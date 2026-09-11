@@ -17,7 +17,7 @@ Orchestrator began with deep support for Swift and Xcode. It is now expanding ac
     *   **Builder**: Follows the Red–Green–Refactor cycle: write a failing test, implement the minimum code needed to pass, then improve the code while keeping tests green.
     *   **Reviewer**: Audits the implementation, test coverage, and regression risks before changes are finalized.
 *   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote machines via SSH. The Orchestrator handles branch synchronization, worker package installation, remote execution, and job output automatically.
-*   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
+*   **Interactive Account Setup**: Detect installed AI and GitHub CLIs, then sign in or add API keys from the wizard without restarting.
 *   **Automated GitHub PR & Issue Workflow**: Integrates with GitHub through the `gh` CLI to create issues, open pull requests, and post automated status updates.
 *   **Multi-Language Project Setup (Beta)**: Detect Rust, Python, Node.js/TypeScript, Go, Swift Package Manager, and Xcode projects, then configure the appropriate build and test commands.
 
@@ -25,10 +25,9 @@ Orchestrator began with deep support for Swift and Xcode. It is now expanding ac
 
 ## 🛠️ Install
 
-Recommended CLI install via `pipx`:
+Orchestrator requires Python 3.11 or newer. With `pipx` installed:
 
 ```bash
-brew install pipx
 pipx ensurepath
 pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
 orchestrator --help
@@ -41,7 +40,7 @@ orchestrator --help
     cd /path/to/MyProject
     orchestrator wizard
     ```
-2.  **Verify**: Check the saved project, provider, and worker configuration.
+2.  **Verify**: Check prerequisites, AI provider access, and machine configuration.
     ```bash
     orchestrator check
     ```
@@ -114,18 +113,7 @@ orchestrator worker-check --machine worker1
 
 ## ⚙️ Project Configuration
 
-The core configuration lives in `.orchestrator/project.json`.
-
-```json
-{
-  "project_name": "MyApp",
-  "base_branch": "main",
-  "scheme": "MyApp",
-  "test_target": "MyAppTests",
-  "branch_prefix": "ai/issue",
-  "firebase_distribution": true
-}
-```
+The wizard writes stack-specific project and build/test settings to `.orchestrator/project.json`.
 
 Validate your configuration any time:
 ```bash
@@ -134,10 +122,11 @@ orchestrator check-config
 
 ### 🆙 Keeping Up to Date
 
-Easily update your local installation and your remote fleet with one command:
+Use the command that matches your installation:
 ```bash
-orchestrator update          # Updates local package (Git/Pip)
-orchestrator update --fleet  # Updates all remote workers
+pipx upgrade orchestrator     # pipx installation
+orchestrator update           # Editable Git checkout
+orchestrator update --fleet   # Enabled remote machines
 ```
 
 ---
@@ -146,8 +135,6 @@ orchestrator update --fleet  # Updates all remote workers
 
 - [Getting Started](docs/getting-started.md): What Orchestrator does and the first commands to run.
 - [User Guide](docs/user-guide.md): Comprehensive setup, commands, and troubleshooting.
-- [Migration Guide](docs/migration-guide.md): Transitioning from legacy local scripts.
-- [AI Workflow](docs/ai-workflow.md): Understanding the agentic lifecycle.
 
 ---
 
@@ -159,7 +146,7 @@ For developers contributing to the Orchestrator itself:
 git clone https://github.com/leemosupreemo/orchestrator.git
 cd orchestrator
 python3 -m pip install -e .
-python3 -m unittest discover tests
+python3 -m unittest discover -s tests
 ```
 
 Package install smoke test:
