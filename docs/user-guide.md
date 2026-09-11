@@ -420,6 +420,10 @@ Firebase delivery is opt-in:
 
 `check-config` fails early if Firebase delivery is enabled but the distribution script or plist path is missing.
 
+The delivery workflow archives and signs the iOS app, uploads the IPA to Firebase App Distribution, and can release it to configured tester emails or groups. This lets multiple testers install the beta build on their devices.
+
+For an end-to-end workflow from iPhone or iPad, use [Secure ShellFish](https://secureshellfish.app/) to connect over SSH to the machine running Orchestrator. You can manage the coding workflow remotely, run builds and tests, and trigger Firebase delivery from the same terminal session.
+
 ## Troubleshooting
 
 Run both checks first:
