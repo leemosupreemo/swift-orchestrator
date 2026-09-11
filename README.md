@@ -18,7 +18,7 @@ Orchestrator began with deep support for Swift and Xcode. It is now expanding ac
     *   **Verifier**: Runs the configured test suite and validates that the implementation meets the original goal without breaking existing behavior.
 *   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote machines via SSH. The Orchestrator handles branch synchronization, worker package installation, remote execution, and job output automatically.
 *   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
-*   **Automated PR & Issue Workflow**: Seamlessly integrates with `gh` CLI to create issues, open PRs, and post-automated status updates.
+*   **Automated GitHub PR & Issue Workflow**: Integrates with GitHub through the `gh` CLI to create issues, open pull requests, and post automated status updates.
 *   **Multi-Language Project Setup (Beta)**: Detect Rust, Python, Node.js/TypeScript, Go, Swift Package Manager, and Xcode projects, then configure the appropriate build and test commands.
 
 ---
