@@ -343,6 +343,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run manual build/tests and save logs.")
     parser.add_argument("mode", choices=["build", "test", "both", "run", "capture"], help="What to run")
     parser.add_argument("--test-only", help="Additional -only-testing flags for xcodebuild")
+    parser.add_argument("--test-command", help="Exact command for a selected non-Xcode test suite")
     parser.add_argument("--run-cmd", help="Custom command to run for 'run' mode")
     args = parser.parse_args()
 
@@ -382,7 +383,7 @@ def main():
             sys.exit(1)
 
     if args.mode in ["test", "both"]:
-        final_test_cmd = test_cmd
+        final_test_cmd = args.test_command or test_cmd
         if args.test_only:
             if "xcodebuild test" in args.test_only:
                 final_test_cmd = args.test_only

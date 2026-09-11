@@ -747,7 +747,7 @@ def sync_models(live_discovery: bool = False) -> tuple[bool, str]:
         # Try to load registry URL from settings
         registry_url = os.environ.get(
             "MODEL_REGISTRY_URL",
-            "https://raw.githubusercontent.com/leemosupreemo/swift-orchestrator/main/orchestrator/config/models.json",
+            "https://raw.githubusercontent.com/leemosupreemo/orchestrator/main/orchestrator/config/models.json",
         )
         settings_path = Path.home() / ".orchestrator" / "config" / "settings.json"
         if "ORCHESTRATOR_PROJECT_ROOT" in os.environ:

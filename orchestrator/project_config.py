@@ -258,6 +258,11 @@ class ProjectConfig:
     firebase_groups: str | None = None
 
     @property
+    def stack(self) -> Any:
+        from orchestrator.stack_detection import detect_project_stack
+        return detect_project_stack(self.root)
+
+    @property
     def uses_xcode(self) -> bool:
         """Whether this project needs Xcode-specific configuration and tooling."""
         return bool(
@@ -379,8 +384,14 @@ def load_project_config() -> ProjectConfig:
     project_name = data.get("project_name") or root.name
     xcode_project = data.get("xcode_project") or _first_match(root, "*.xcodeproj")
     xcode_workspace = data.get("xcode_workspace") or _first_match(root, "*.xcworkspace")
-    scheme = data.get("scheme") or (Path(xcode_project).stem if xcode_project else project_name)
-    test_target = data.get("test_target") or f"{scheme}Tests"
+    build_cmd = data.get("build_command")
+    test_cmd = data.get("test_command")
+    if not (xcode_project or xcode_workspace) and (build_cmd or test_cmd):
+        scheme = data.get("scheme")
+        test_target = data.get("test_target", "")
+    else:
+        scheme = data.get("scheme") or (Path(xcode_project).stem if xcode_project else project_name)
+        test_target = data.get("test_target") or f"{scheme}Tests"
     derived_data_path = data.get("derived_data_path") or f"/tmp/{project_name.lower()}_orchestrator_dd"
 
     return ProjectConfig(

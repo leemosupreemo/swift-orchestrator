@@ -110,22 +110,26 @@ def git_remote(root: Path) -> str | None:
         return None
 
 
-def build_test_docs(config: dict) -> str:
-    if config["build_command"]:
+def build_test_docs(config: dict, stack: Any = None) -> str:
+    if config.get("build_command"):
         build_command = config["build_command"]
-    elif config["xcode_workspace"]:
+    elif config.get("xcode_workspace") and config.get("scheme"):
         build_command = f"xcodebuild build -workspace {config['xcode_workspace']} -scheme {config['scheme']}"
-    elif config["xcode_project"]:
+    elif config.get("xcode_project") and config.get("scheme"):
         build_command = f"xcodebuild build -project {config['xcode_project']} -scheme {config['scheme']}"
+    elif stack and stack.build_command:
+        build_command = stack.build_command
     else:
         build_command = "swift build"
 
-    if config["test_command"]:
+    if config.get("test_command"):
         test_command = config["test_command"]
-    elif config["xcode_workspace"]:
+    elif config.get("xcode_workspace") and config.get("scheme"):
         test_command = f"xcodebuild test -workspace {config['xcode_workspace']} -scheme {config['scheme']}"
-    elif config["xcode_project"]:
+    elif config.get("xcode_project") and config.get("scheme"):
         test_command = f"xcodebuild test -project {config['xcode_project']} -scheme {config['scheme']}"
+    elif stack and stack.test_command:
+        test_command = stack.test_command
     else:
         test_command = "swift test"
 
@@ -181,7 +185,93 @@ Repository guidance for coding agents working on {project_name}.
 """
 
 
-def architecture_docs(project_name: str, scheme: str) -> str:
+def architecture_docs(project_name: str, scheme: str = "App", stack: Any = None) -> str:
+    if stack and stack.language == "python":
+        return f"""# Architecture Guide
+
+Architectural overview and guidelines for {project_name}.
+
+## Overview
+
+- **Platform:** Python ({stack.framework or 'Modular Service'})
+- **Design Pattern:** Modular Service Architecture / Clean Architecture
+
+## Core Layers
+
+1. **Domain / Models:** Data structures, schemas, and domain entities.
+2. **Services / Workflows:** Core business logic and use-case handlers.
+3. **Interface / Entrypoints:** CLI commands, API routers, or scripts.
+4. **Clients / Adapters:** Database, external integrations, and filesystem access.
+
+## Concurrency & Execution
+
+- Use structured async/await (`asyncio`) or multi-threading where applicable.
+- Keep business logic isolated and testable without side effects.
+"""
+    if stack and stack.language == "rust":
+        return f"""# Architecture Guide
+
+Architectural overview and guidelines for {project_name}.
+
+## Overview
+
+- **Platform:** Rust ({stack.framework or 'Cargo'})
+- **Design Pattern:** Modular Crate Architecture / Clean Architecture
+
+## Core Layers
+
+1. **Domain Primitives:** Core structs, enums, and trait definitions.
+2. **Modules / Logic:** Domain operations implementing business rules.
+3. **I/O & Adapters:** Network, CLI, filesystem, and external adapters.
+
+## Concurrency & Memory Safety
+
+- Leverage Rust's ownership and borrow checker guarantees.
+- Prefer explicit error handling via `Result` and `Option`.
+"""
+    if stack and stack.language in ("typescript", "javascript"):
+        return f"""# Architecture Guide
+
+Architectural overview and guidelines for {project_name}.
+
+## Overview
+
+- **Platform:** Node.js / TypeScript ({stack.framework or 'npm'})
+- **Design Pattern:** Modular Component / Service Architecture
+
+## Core Layers
+
+1. **Types / Schemas:** Data transfer objects, interfaces, and validation schemas.
+2. **Services / Modules:** Core business logic and reusable functions.
+3. **Entrypoints / Controllers:** Route handlers, CLI commands, or UI components.
+
+## Concurrency & Execution
+
+- Use standard async/await and Promises.
+- Avoid unhandled promise rejections and state leaks.
+"""
+    if stack and stack.language == "go":
+        return f"""# Architecture Guide
+
+Architectural overview and guidelines for {project_name}.
+
+## Overview
+
+- **Platform:** Go ({stack.framework or 'go test'})
+- **Design Pattern:** Standard Go Package Layout
+
+## Core Layers
+
+1. **Domain Types:** Structs and interfaces defining domain boundaries.
+2. **Internal Packages:** Isolated packages with clear responsibilities.
+3. **Entrypoints:** Main packages under `cmd/`.
+
+## Concurrency & Error Handling
+
+- Use goroutines and channels with `context.Context` cancellation.
+- Explicit error returns (`if err != nil`).
+"""
+
     return f"""# Architecture Guide
 
 Architectural overview and guidelines for {project_name}.
@@ -206,7 +296,79 @@ Architectural overview and guidelines for {project_name}.
 """
 
 
-def coding_standards_docs(project_name: str) -> str:
+def coding_standards_docs(project_name: str, stack: Any = None) -> str:
+    if stack and stack.language == "python":
+        return f"""# Coding Standards
+
+Coding standards and conventions for {project_name}.
+
+## Python Standards
+
+- **Language Version:** Python 3.10+
+- **Style Guidelines:** Follow PEP 8 and use modern type hints (`def foo(val: str) -> int:`).
+- **Naming Conventions:**
+  - Classes: `UpperCamelCase`
+  - Functions, variables, modules: `snake_case`
+  - Constants: `UPPER_SNAKE_CASE`
+- **Error Handling:** Use explicit exception types and avoid bare `except:`.
+- **Testing:**
+  - Write unit and integration tests using {stack.framework or 'pytest'}.
+  - Test command: `{stack.test_command or 'pytest'}`.
+"""
+    if stack and stack.language == "rust":
+        return f"""# Coding Standards
+
+Coding standards and conventions for {project_name}.
+
+## Rust Standards
+
+- **Language Edition:** Rust 2021+
+- **Formatting & Linting:** Run `cargo fmt --check` and `cargo clippy`.
+- **Naming Conventions:**
+  - Structs, Enums, Traits: `UpperCamelCase`
+  - Functions, variables, modules: `snake_case`
+  - Constants: `SCREAMING_SNAKE_CASE`
+- **Error Handling:** Use `Result<T, E>` and the `?` operator; avoid `.unwrap()` in production code.
+- **Testing:**
+  - Unit tests in `src/` under `#[cfg(test)]`, integration tests in `tests/`.
+  - Test command: `{stack.test_command or 'cargo test'}`.
+"""
+    if stack and stack.language in ("typescript", "javascript"):
+        return f"""# Coding Standards
+
+Coding standards and conventions for {project_name}.
+
+## TypeScript / JavaScript Standards
+
+- **Language Standards:** Strict TypeScript / modern ECMAScript.
+- **Formatting:** Consistent formatting (Prettier / ESLint conventions).
+- **Naming Conventions:**
+  - Classes, Interfaces, Types: `UpperCamelCase`
+  - Functions, variables: `lowerCamelCase`
+  - Constants: `UPPER_SNAKE_CASE`
+- **Error Handling:** Structured error throwing and typed error handling.
+- **Testing:**
+  - Unit and integration tests for all features and fixes.
+  - Test command: `{stack.test_command or 'npm test'}`.
+"""
+    if stack and stack.language == "go":
+        return f"""# Coding Standards
+
+Coding standards and conventions for {project_name}.
+
+## Go Standards
+
+- **Language Standards:** Go 1.20+
+- **Formatting:** Always run `gofmt`.
+- **Naming Conventions:**
+  - Exported identifiers: `UpperCamelCase`
+  - Unexported identifiers: `lowerCamelCase`
+- **Error Handling:** Explicit error checking (`if err != nil`); avoid panics in libraries.
+- **Testing:**
+  - Unit tests in `*_test.go` with standard `testing` package.
+  - Test command: `{stack.test_command or 'go test ./...'}`.
+"""
+
     return f"""# Coding Standards
 
 Coding standards and conventions for {project_name}.
@@ -245,14 +407,18 @@ elif command -v orchestrator >/dev/null 2>&1; then
     exec orchestrator "$@"
 else
     echo "Error: 'orchestrator' command not found."
-    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/swift-orchestrator.git'"
+    echo "Install via pipx: pipx install 'git+https://github.com/leemosupreemo/orchestrator.git'"
     echo "Or run from source: PYTHONPATH=. python3 -m orchestrator"
     exit 1
 fi
 """
 
 
-def write_starter_docs(root: Path, config: dict, force: bool) -> list[Path]:
+def write_starter_docs(root: Path, config: dict, force: bool, stack: Any = None) -> list[Path]:
+    if stack is None:
+        from orchestrator.stack_detection import detect_project_stack
+        stack = detect_project_stack(root)
+
     paths = [
         root / "AGENTS.md",
         root / "docs" / "build-test-commands.md",
@@ -260,11 +426,11 @@ def write_starter_docs(root: Path, config: dict, force: bool) -> list[Path]:
         root / "docs" / "architecture.md",
         root / "docs" / "coding-standards.md",
     ]
-    write_text_file(paths[1], build_test_docs(config), force)
+    write_text_file(paths[1], build_test_docs(config, stack), force)
     write_text_file(paths[2], ai_workflow_docs(config["project_name"]), force)
     write_text_file(paths[0], agents_docs(config["project_name"]), force)
-    write_text_file(paths[3], architecture_docs(config["project_name"], config.get("scheme", "App")), force)
-    write_text_file(paths[4], coding_standards_docs(config["project_name"]), force)
+    write_text_file(paths[3], architecture_docs(config["project_name"], config.get("scheme", "App"), stack), force)
+    write_text_file(paths[4], coding_standards_docs(config["project_name"], stack), force)
     return paths
 
 
@@ -316,7 +482,7 @@ def apply_project_env(project: str | None) -> int:
     return 0
 
 
-def print_wizard_bar(skip_available: bool = True, status_bar: Any | None = None):
+def print_wizard_bar(skip_available: bool = True, status_bar: Any | None = None, text_input: bool = False, enter_hint: str | None = None):
     """Refreshes the sticky footer for the wizard."""
     if not status_bar:
         return
@@ -328,22 +494,30 @@ def print_wizard_bar(skip_available: bool = True, status_bar: Any | None = None)
     # Visible plain text for metadata bar
     plain_skip = " [S] Skip Section |" if skip_available else ""
     q_msg = f"{plain_skip} [Q] Quit Wizard"
+    if text_input:
+        q_msg = ("[Ctrl-S] Skip section | " if skip_available else "") + "[Ctrl-Q] Quit"
     
+    if enter_hint:
+        q_msg += f" | Enter: {enter_hint}"
+
     # We use the status bar to draw at the bottom
     status_bar.render(at_bottom=True, force=True, q_msg=q_msg)
 
 
-def prompt_text(label: str, default: str | None = None, skip_available: bool = True, status_bar: Any | None = None) -> str:
+def prompt_text(label: str, default: str | None = None, skip_available: bool = True, status_bar: Any | None = None, *, optional: bool = False, enter_hint: str | None = None) -> str:
     from orchestrator.scripts.common import get_key, clear_choice_placeholder
-    suffix = f" [{default}]" if default is not None else ""
+    suffix = f" [{default}]" if default else ""
+    hint = enter_hint or ("keep default" if default else "skip this field" if optional else "submit")
+    field_label = f"{label} (optional)" if optional else label
     
     while True:
         if status_bar:
-            print_wizard_bar(skip_available, status_bar)
+            print_wizard_bar(skip_available, status_bar, text_input=True, enter_hint=hint)
+            sys.stdout.write("\033[?25h")
         
         # Ensure we are at the start of a line
         sys.stdout.write("\r")
-        print(f"{label}{suffix}: ", end="", flush=True)
+        print(f"{field_label}{suffix} (Enter: {hint}): ", end="", flush=True)
         
         # Use get_key for consistent hotkeys
         val = ""
@@ -352,11 +526,11 @@ def prompt_text(label: str, default: str | None = None, skip_available: bool = T
             if key == "enter":
                 print()
                 return val or (default or "")
-            if key == "q":
+            if key == "\x11":
                 print("\033[1;91mquit\033[0m")
                 if status_bar: status_bar.reset_scroll_region()
                 sys.exit(0)
-            if key == "s" and skip_available:
+            if key == "\x13" and skip_available:
                 print("\033[1;92mskip\033[0m")
                 raise SkipSectionException()
             if key == "backspace":
@@ -364,6 +538,10 @@ def prompt_text(label: str, default: str | None = None, skip_available: bool = T
                     val = val[:-1]
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
+            elif key == "space":
+                val += " "
+                sys.stdout.write(" ")
+                sys.stdout.flush()
             elif len(key) == 1:
                 val += key
                 sys.stdout.write(key)
@@ -375,30 +553,27 @@ def prompt_yes_no(label: str, default: bool = False, skip_available: bool = True
     suffix = "Y/n" if default else "y/N"
     
     if status_bar:
-        print_wizard_bar(skip_available, status_bar)
+        print_wizard_bar(skip_available, status_bar, enter_hint="Yes" if default else "No")
         
     sys.stdout.write("\r")
-    print(f"{label} [{suffix}]: ", end="", flush=True)
+    print(f"{label} [{suffix}] (Enter: {'Yes' if default else 'No'}): ", end="", flush=True)
     
-    # Non-blocking key press
-    key = get_key().strip().lower()
-    
-    if key == "q":
-        print("\033[1;91mquit\033[0m")
-        if status_bar: status_bar.reset_scroll_region()
-        sys.exit(0)
-    if key == "s" and skip_available:
-        print("\033[1;92mskip\033[0m")
-        raise SkipSectionException()
-        
-    # If it's a newline (enter), return default
-    if key in {"enter", ""}:
-        print("\033[90m(yes)\033[0m" if default else "\033[90m(no)\033[0m")
-        return default
-        
-    res = key in {"y", "yes", "true", "1"}
-    print("\033[1;92myes\033[0m" if res else "\033[1;91mno\033[0m")
-    return res
+    while True:
+        key = get_key().strip().lower()
+        if key in {"q", "\x11"}:
+            if status_bar:
+                status_bar.reset_scroll_region()
+            raise SystemExit(0)
+        if key in {"s", "\x13"} and skip_available:
+            raise SkipSectionException()
+        if key in {"enter", ""}:
+            print("yes" if default else "no")
+            return default
+        if key in {"y", "yes", "n", "no"}:
+            answer = key in {"y", "yes"}
+            print("yes" if answer else "no")
+            return answer
+        print("Please choose Y or N (Enter keeps the default): ", end="", flush=True)
 
 
 def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
@@ -407,8 +582,11 @@ def prompt_password(label: str, placeholder: str = "(enter to skip)") -> str:
 
 
 def prompt_radio(label: str, options: list[str], default: str | None = None, clear_screen: bool = True, status_bar: Any | None = None, description: str | None = None) -> str:
-    from orchestrator.scripts.common import prompt_radio as _prompt_radio
-    return _prompt_radio(label, options, default, clear_screen, status_bar, description)
+    from orchestrator.scripts.common import BackException, prompt_radio as _prompt_radio
+    try:
+        return _prompt_radio(label, options, default, clear_screen, status_bar, description)
+    except BackException as exc:
+        raise SkipSectionException() from exc
 
 
 class SkipSectionException(Exception): pass
@@ -487,6 +665,7 @@ def create_ssh_machine(name: str, ssh_target: str, repo_path: str) -> dict[str, 
         "execution_mode": "ssh",
         "ssh_target": ssh_target,
         "repo_path": repo_path,
+        "orchestrator_package_path": "~/.orchestrator/package",
         "roles": ["worker", "build", "test"],
         "models": ["gemini", "codex", "claude"],
         "priority": 50,
@@ -557,6 +736,8 @@ def audit_project_setup(root: Path) -> dict[str, Any]:
     gaps: list[str] = []
     
     # 1. Project & Xcode
+    from orchestrator.stack_detection import detect_project_stack
+    stack = detect_project_stack(root)
     xcode_proj, xcode_ws, detected_scheme, detected_schemes, detected_targets = infer_xcode(root)
     has_project_file = project_file.exists()
     project_data = {}
@@ -567,6 +748,9 @@ def audit_project_setup(root: Path) -> dict[str, Any]:
             pass
             
     proj_items = []
+    # Detected Stack
+    proj_items.append({"name": "Detected Stack", "status": "ok", "detail": f"{stack.display_name}"})
+
     # Git repo
     is_git = (root / ".git").exists()
     if is_git:
@@ -589,8 +773,12 @@ def audit_project_setup(root: Path) -> dict[str, Any]:
 
     # Project JSON
     if has_project_file and project_data:
-        scheme_name = project_data.get("scheme") or detected_scheme or "Not set"
-        proj_items.append({"name": "Project Config", "status": "ok", "detail": f"project.json (Scheme: {scheme_name})"})
+        if stack.uses_xcode:
+            scheme_name = project_data.get("scheme") or detected_scheme or "Not set"
+            proj_items.append({"name": "Project Config", "status": "ok", "detail": f"project.json (Scheme: {scheme_name})"})
+        else:
+            build_info = project_data.get("build_command") or stack.build_command or "None"
+            proj_items.append({"name": "Project Config", "status": "ok", "detail": f"project.json (Build: {build_info})"})
     else:
         proj_items.append({"name": "Project Config", "status": "gap", "detail": "MISSING (.orchestrator/project.json)", "fix": "Configure project"})
         gaps.append("Project configuration file (.orchestrator/project.json) is missing")
@@ -786,6 +974,51 @@ def print_setup_audit_report(audit: dict[str, Any]) -> None:
     print(f"\n\033[1;96m{'='*67}\033[0m\n")
 
 
+def wizard_stage(number: int, title: str) -> None:
+    print(f"\n\033[1;96m[{number}/5] {title}\033[0m")
+
+
+def wizard_edit_fields(fields: dict[str, str], status_bar: Any) -> dict[str, str]:
+    """Review defaults together and edit only the fields that need changing."""
+    fields = dict(fields)
+    while True:
+        labels = list(fields)
+        for index, (label, value) in enumerate(fields.items(), 1):
+            print(f"  {index}. {label}: {value or '(not set)'}")
+        try:
+            choice = prompt_text("Field number to edit", "", status_bar=status_bar, enter_hint="continue")
+            if not choice:
+                return fields
+            if not choice.isdigit() or not 1 <= int(choice) <= len(labels):
+                print("Choose a field number from the list.")
+                continue
+            label = labels[int(choice) - 1]
+            fields[label] = prompt_text(label, fields[label], status_bar=status_bar, enter_hint="keep default" if fields[label] else "leave unchanged")
+        except SkipSectionException:
+            return fields
+
+
+def wizard_choose_items(title: str, options: list[tuple[str, str]], selected: list[str], status_bar: Any, *, enter_hint: str = "keep selection") -> list[str]:
+    """Choose numbered items without needing to memorize identifiers."""
+    while True:
+        print(title)
+        for index, (identifier, label) in enumerate(options, 1):
+            mark = "x" if identifier in selected else " "
+            print(f"  {index}. [{mark}] {label}")
+        try:
+            value = prompt_text("Numbers separated by commas; 0 clears", "", status_bar=status_bar, enter_hint=enter_hint)
+        except SkipSectionException:
+            return selected
+        if not value:
+            return selected
+        if value == "0":
+            return []
+        parts = [part.strip() for part in value.split(",")]
+        if all(part.isdigit() and 1 <= int(part) <= len(options) for part in parts):
+            return list(dict.fromkeys(options[int(part) - 1][0] for part in parts))
+        print("Choose numbers from the list, for example 1,3.")
+
+
 def verify_wizard_setup(install_workers: list[str]) -> int:
     check_result = run_script("check_setup.py", [])
     config_result = validate_config_command()
@@ -799,13 +1032,25 @@ def verify_wizard_setup(install_workers: list[str]) -> int:
 
 
 def run_wizard(args: argparse.Namespace) -> int:
-    from orchestrator.scripts.common import StatusBar
-    from orchestrator.scripts.model_registry import get_all_models
-    
     root_arg = args.project or args.root
     root = safe_resolve(Path(root_arg).expanduser()) if root_arg else find_project_root()
     models = parse_csv(args.models)
-    
+
+    old_project_root_env = os.environ.get("ORCHESTRATOR_PROJECT_ROOT")
+    os.environ["ORCHESTRATOR_PROJECT_ROOT"] = str(root)
+    try:
+        return _run_wizard_impl(args, root, models)
+    finally:
+        if old_project_root_env is None:
+            os.environ.pop("ORCHESTRATOR_PROJECT_ROOT", None)
+        else:
+            os.environ["ORCHESTRATOR_PROJECT_ROOT"] = old_project_root_env
+
+
+def _run_wizard_impl(args: argparse.Namespace, root: Path, models: list[str]) -> int:
+    from orchestrator.scripts.common import StatusBar
+    from orchestrator.scripts.model_registry import get_all_models
+
     if args.non_interactive and not models:
         print("Wizard requires at least one model. Pass --models codex or run interactively.")
         return 1
@@ -846,17 +1091,19 @@ def run_wizard(args: argparse.Namespace) -> int:
         project_file = runtime_dir / "project.json"
         machines_file = config_dir / "machines.json"
         settings_file = config_dir / "settings.json"
-        needs_init = args.force or not project_file.exists()
         review_paths: list[Path] = []
 
-        # 1. Initial Setup Status & Gaps Audit (Interactive mode)
+        # Interactive stage overview
         if not args.non_interactive:
-            audit = audit_project_setup(root)
-            print_setup_audit_report(audit)
+            print("Project → AI setup → Optional tools → Review and apply → Verify and finish")
+            print("Settings are saved after review. CLI logins happen immediately when selected.")
+            wizard_stage(1, "Project")
 
         # ----------------------------------------------------
-        # 1. Project & Xcode Configuration
+        # 1. Project & Stack Configuration
         # ----------------------------------------------------
+        from orchestrator.stack_detection import detect_project_stack
+        stack = detect_project_stack(root)
         xcode_proj, xcode_ws, det_scheme, det_schemes, det_targets = infer_xcode(root)
 
         existing_p_cfg: dict[str, Any] = {}
@@ -867,83 +1114,43 @@ def run_wizard(args: argparse.Namespace) -> int:
                 existing_p_cfg = {}
 
         p_name = existing_p_cfg.get("project_name") or args.project_name or root.name
-        p_scheme = existing_p_cfg.get("scheme") or args.scheme or det_scheme or "App"
-        p_target = existing_p_cfg.get("test_target") or args.test_target or next((t for t in det_targets if t.endswith("Tests")), f"{p_scheme}Tests")
         p_branch = existing_p_cfg.get("base_branch") or args.base_branch or "main"
-        p_xcode = existing_p_cfg.get("xcode_project") or existing_p_cfg.get("xcode_workspace") or xcode_proj or xcode_ws or "None"
+
+        if stack.uses_xcode:
+            p_scheme = existing_p_cfg.get("scheme") or args.scheme or det_scheme or "App"
+            p_target = existing_p_cfg.get("test_target") or args.test_target or next((t for t in det_targets if t.endswith("Tests")), f"{p_scheme}Tests")
+            p_xcode = existing_p_cfg.get("xcode_project") or existing_p_cfg.get("xcode_workspace") or xcode_proj or xcode_ws or "None"
+            p_build_cmd = existing_p_cfg.get("build_command") or getattr(args, "build_command", None)
+            p_test_cmd = existing_p_cfg.get("test_command") or getattr(args, "test_command", None)
+
+        else:
+            p_scheme = existing_p_cfg.get("scheme") or getattr(args, "scheme", None)
+            p_target = existing_p_cfg.get("test_target") or getattr(args, "test_target", "") or ""
+            p_build_cmd = existing_p_cfg.get("build_command") or getattr(args, "build_command", None) or stack.build_command or ""
+            p_test_cmd = existing_p_cfg.get("test_command") or getattr(args, "test_command", None) or stack.test_command or ""
+
+        def edit_project_fields():
+            nonlocal p_name, p_branch, p_scheme, p_target, p_build_cmd, p_test_cmd
+            print(f"Detected stack: {stack.display_name}")
+            if stack.uses_xcode:
+                print(f"Xcode container: {p_xcode}")
+                fields = wizard_edit_fields({"Project Name": p_name, "Xcode Scheme": p_scheme,
+                                            "Test Target": p_target, "Base Branch": p_branch}, status_bar)
+                p_name, p_scheme, p_target, p_branch = fields.values()
+            else:
+                fields = wizard_edit_fields({"Project Name": p_name, "Base Branch": p_branch,
+                                            "Build Command": p_build_cmd, "Test Command": p_test_cmd}, status_bar)
+                p_name, p_branch, p_build_cmd, p_test_cmd = fields.values()
 
         if not args.non_interactive:
-            try:
-                print(f"\n\033[1;96m{'='*20} Project & Xcode Configuration {'='*20}\033[0m")
-                if p_xcode != "None":
-                    print(f"Xcode container: \033[97m{p_xcode}\033[0m")
-                print("\033[90m(Press [Enter] to keep default for each setting, or type to change)\033[0m\n")
-
-                p_name = prompt_text("Project Name", p_name, status_bar=status_bar)
-                p_scheme = prompt_text("Xcode Scheme", p_scheme, status_bar=status_bar)
-                p_target = prompt_text("Test Target", p_target, status_bar=status_bar)
-                p_branch = prompt_text("Base Branch", p_branch, status_bar=status_bar)
-            except SkipSectionException:
-                pass
-
-        if existing_p_cfg and not args.force:
-            existing_p_cfg["project_name"] = p_name
-            existing_p_cfg["scheme"] = p_scheme
-            existing_p_cfg["test_target"] = p_target
-            existing_p_cfg["base_branch"] = p_branch
-            existing_p_cfg["pr_base_branch"] = p_branch
-            project_file.write_text(json.dumps(existing_p_cfg, indent=2) + "\n", encoding="utf-8")
-            if not args.non_interactive:
-                print("  ✅ Project configuration saved.")
-        else:
-            init_args = argparse.Namespace(
-                root=str(root),
-                project=None,
-                project_name=p_name,
-                scheme=p_scheme,
-                test_target=p_target,
-                base_branch=p_branch,
-                force=args.force,
-                with_starter_docs=True,
-                with_helper_script=True
-            )
-            init_project(init_args)
-            review_paths.append(project_file)
-
-        # Ensure all starter grounding docs and helper script exist
-        try:
-            p_cfg = json.loads(project_file.read_text(encoding="utf-8")) if project_file.exists() else {}
-        except Exception:
-            p_cfg = {}
-        p_name = p_cfg.get("project_name", root.name)
-        p_scheme = p_cfg.get("scheme", "App")
-
-        missing_grounding = False
-        if not (root / "AGENTS.md").exists():
-            write_text_file(root / "AGENTS.md", agents_docs(p_name), force=False)
-            missing_grounding = True
-        if not (root / "docs" / "build-test-commands.md").exists():
-            write_text_file(root / "docs" / "build-test-commands.md", build_test_docs(p_cfg or {"project_name": p_name, "scheme": p_scheme, "build_command": None, "test_command": None, "xcode_workspace": None, "xcode_project": None}), force=False)
-            missing_grounding = True
-        if not (root / "docs" / "architecture.md").exists():
-            write_text_file(root / "docs" / "architecture.md", architecture_docs(p_name, p_scheme), force=False)
-            missing_grounding = True
-        if not (root / "docs" / "coding-standards.md").exists():
-            write_text_file(root / "docs" / "coding-standards.md", coding_standards_docs(p_name), force=False)
-            missing_grounding = True
-        if not (root / "docs" / "ai-workflow.md").exists():
-            write_text_file(root / "docs" / "ai-workflow.md", ai_workflow_docs(p_name), force=False)
-            missing_grounding = True
-        if not (root / "scripts" / "orchestrator").exists():
-            write_helper_script(root, force=False)
-            missing_grounding = True
-
-        if missing_grounding and not args.non_interactive:
-            print("  ✅ Missing grounding docs have been generated.")
+            edit_project_fields()
 
         # ----------------------------------------------------
         # 2. AI Providers & Models
         # ----------------------------------------------------
+        if not args.non_interactive:
+            wizard_stage(2, "AI setup")
+        pending_keys: dict[str, str] = {}
         all_models = get_all_models()
         configured_models: list[str] = []
         if machines_file.exists():
@@ -1025,12 +1232,8 @@ def run_wizard(args: argparse.Namespace) -> int:
                         break
                     elif choice == 'm':
                         print("\033[97mmodify models\033[0m")
-                        all_ids = [m.id for m in all_models]
-                        print(f"Available model IDs: {', '.join(all_ids)}")
-                        new_models_str = prompt_text("Active models (comma-separated)", ",".join(models) if models else "gemini,codex", status_bar=status_bar)
-                        if new_models_str:
-                            models = [m.strip() for m in new_models_str.split(",") if m.strip()]
-                            print(f"  ✅ Updated active models to: {', '.join(models)}")
+                        models = wizard_choose_items("Available models", [(m.id, m.id) for m in all_models], models, status_bar)
+                        print(f"Active models: {', '.join(models) or 'None — select at least one'}")
                     elif choice == 'l':
                         print("\033[97mlogin\033[0m")
                         if not not_logged_in:
@@ -1091,13 +1294,10 @@ def run_wizard(args: argparse.Namespace) -> int:
                             key_id, model_id = "ollama_api_key", "ollama"
                             
                         if key_id:
-                            entered_key = prompt_password(f"Enter {key_id}:", placeholder="(enter to cancel)")
+                            entered_key = prompt_password(f"{key_id} (optional)", placeholder="(Enter: skip this field)")
                             if entered_key:
-                                s_path = settings_file
-                                s_conf = json.loads(s_path.read_text(encoding="utf-8")) if s_path.exists() else {}
-                                s_conf[key_id] = entered_key
-                                s_path.write_text(json.dumps(s_conf, indent=2) + "\n", encoding="utf-8")
-                                print(f"✅ Saved {key_id} to settings.json.")
+                                pending_keys[key_id] = entered_key
+                                print(f"✅ {key_id} will be saved after review.")
                                 if model_id and model_id not in models:
                                     models.append(model_id)
                     elif choice == 'c' and not models:
@@ -1107,17 +1307,34 @@ def run_wizard(args: argparse.Namespace) -> int:
             except SkipSectionException:
                 pass
 
+        if not args.non_interactive and args.models:
+            print(f"Active models: {', '.join(models)} (from --models)")
+
         if not models:
             status_bar.reset_scroll_region()
             print("Wizard requires at least one model. Pass --models codex or run interactively.")
             return 1
 
+        optional_tools: list[str] = []
+        if not args.non_interactive:
+            wizard_stage(3, "Optional tools")
+            options = [("github", "GitHub account and PR integration"),
+                       ("workers", "Remote SSH workers"),
+                       ("prompts", "Custom role prompts")]
+            if stack.uses_xcode or firebase_enabled or existing_p_cfg.get("firebase_distribution") or existing_p_cfg.get("development_team") or existing_p_cfg.get("firebase_plist_path"):
+                options.append(("delivery", "Firebase delivery and Apple signing"))
+            optional_tools = wizard_choose_items("Choose tools to configure now (all optional)", options, [], status_bar, enter_hint="skip optional tools")
+            print("Unselected tools keep their existing settings. You can configure them later.")
+        configure_keychain = False
+        install_workers: list[str] = []
+
         # ----------------------------------------------------
         # 3. GitHub Integration
         # ----------------------------------------------------
-        if not args.non_interactive:
+        if not args.non_interactive and "github" in optional_tools:
             try:
                 print(f"\n\033[1;96m{'='*20} GitHub Integration {'='*20}\033[0m")
+                print("Login and account switching update your GitHub CLI session immediately.")
                 from orchestrator.scripts.dev_console import get_github_auth_info
                 has_gh, gh_accounts, gh_active_user = get_github_auth_info()
                 if not has_gh:
@@ -1138,7 +1355,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                     print("  [A] Add another GitHub account")
                     print("  [W] Switch active GitHub account")
                     print("  [V] View auth status details")
-                    gh_choice = prompt_text("Select action (A/W/V or Enter to keep)", "", status_bar=status_bar).strip().lower()
+                    gh_choice = prompt_text("Select action (A/W/V)", "", status_bar=status_bar, enter_hint="keep active account").strip().lower()
                     if gh_choice == 'v':
                         subprocess.run(["gh", "auth", "status"], check=False)
                     elif gh_choice == 'a':
@@ -1162,14 +1379,16 @@ def run_wizard(args: argparse.Namespace) -> int:
         prompts_dir = runtime_dir / "prompts"
         has_custom_prompts = prompts_dir.exists() and any(prompts_dir.iterdir())
 
+        overwrite_prompts = args.force
         copy_prompts = args.copy_prompt_overrides
-        if not copy_prompts and not args.non_interactive:
+        if not copy_prompts and not args.non_interactive and "prompts" in optional_tools:
             try:
                 print(f"\n\033[1;96m{'='*20} Role Prompts {'='*20}\033[0m")
                 if has_custom_prompts:
                     print(f"Current status: \033[1;92m✅ Custom prompt templates exist in {prompts_dir.relative_to(root)}\033[0m\n")
                     if prompt_yes_no("Overwrite custom prompts with latest default templates?", default=False, status_bar=status_bar):
                         copy_prompts = True
+                        overwrite_prompts = True
                 else:
                     print("Current status: \033[90mUsing built-in default role prompts\033[0m")
                     print("You can customize the AI's coding style by editing local copies of instruction prompts.\n")
@@ -1177,8 +1396,6 @@ def run_wizard(args: argparse.Namespace) -> int:
             except SkipSectionException:
                 copy_prompts = False
 
-        if copy_prompts:
-            review_paths.extend(copy_prompt_overrides(root, args.force))
 
         # ----------------------------------------------------
         # 5. Worker Fleet
@@ -1191,7 +1408,7 @@ def run_wizard(args: argparse.Namespace) -> int:
             except Exception:
                 pass
 
-        if not args.non_interactive:
+        if not args.non_interactive and "workers" in optional_tools:
             try:
                 print(f"\n\033[1;96m{'='*20} Worker Fleet {'='*20}\033[0m")
                 if existing_machines:
@@ -1200,7 +1417,7 @@ def run_wizard(args: argparse.Namespace) -> int:
                         m_type = "Local" if m.get("execution_mode") == "local" else f"SSH ({m.get('ssh_target')})"
                         print(f"  • \033[97m{m['name']}\033[0m : {m_type}")
                     print()
-                    scan_fleet = prompt_yes_no("Scan and add additional worker machines?", default=False, status_bar=status_bar)
+                    scan_fleet = True
                 else:
                     scan_fleet = True
 
@@ -1316,12 +1533,18 @@ def run_wizard(args: argparse.Namespace) -> int:
             except SkipSectionException:
                 pass
 
-        update_machine_models(runtime_dir / "config", models, ssh_machines)
+        install_workers = [machine["name"] for machine in ssh_machines] if args.install_workers else []
+        if not args.non_interactive and ssh_machines and not install_workers:
+            try:
+                if prompt_yes_no("After saving, install/check packages on the added SSH workers?", default=False, status_bar=status_bar):
+                    install_workers = [machine["name"] for machine in ssh_machines]
+            except SkipSectionException:
+                pass
 
         # ----------------------------------------------------
         # 6. Delivery & Code Signing
         # ----------------------------------------------------
-        curr_p_cfg = json.loads(project_file.read_text(encoding="utf-8")) if project_file.exists() else {}
+        curr_p_cfg = existing_p_cfg
         curr_fb = curr_p_cfg.get("firebase_distribution", False)
         curr_team = curr_p_cfg.get("development_team")
         curr_method = curr_p_cfg.get("delivery_method") or "ad-hoc"
@@ -1330,7 +1553,7 @@ def run_wizard(args: argparse.Namespace) -> int:
 
         has_existing_distribution = bool(curr_fb or curr_team or curr_plist)
 
-        if not firebase_enabled and not args.non_interactive:
+        if "delivery" in optional_tools and not firebase_enabled and not args.non_interactive:
             try:
                 print(f"\n\033[1;96m{'='*20} Delivery & Code Signing {'='*20}\033[0m")
                 if has_existing_distribution:
@@ -1369,16 +1592,16 @@ def run_wizard(args: argparse.Namespace) -> int:
                         if installed_profiles:
                             options = installed_profiles + ["[Enter profile name manually]", "[Skip]"]
                             print("\n🔍 Detected installed provisioning profiles:")
-                            choice = prompt_radio("Select Provisioning Profile:", options, default=options[0], clear_screen=False, status_bar=status_bar)
+                            choice = prompt_radio("Select Provisioning Profile (optional; choose [Skip] to continue):", options, default=options[0], clear_screen=False, status_bar=status_bar)
                             if choice == "[Enter profile name manually]":
-                                provisioning_profile = prompt_text("Enter Provisioning Profile Specifier/Name", status_bar=status_bar)
+                                provisioning_profile = prompt_text("Provisioning Profile Specifier/Name", status_bar=status_bar, optional=True)
                             elif choice == "[Skip]":
                                 provisioning_profile = None
                             else:
                                 provisioning_profile = choice
                         else:
                             if prompt_yes_no("No installed provisioning profiles detected. Enter one manually?", False, status_bar=status_bar):
-                                provisioning_profile = prompt_text("Enter Provisioning Profile Specifier/Name", status_bar=status_bar)
+                                provisioning_profile = prompt_text("Provisioning Profile Specifier/Name", status_bar=status_bar, optional=True)
                     else:
                         if prompt_yes_no(f"Use currently configured Provisioning Profile ({provisioning_profile})?", True, status_bar=status_bar):
                             pass
@@ -1387,77 +1610,231 @@ def run_wizard(args: argparse.Namespace) -> int:
                             default_option = provisioning_profile if provisioning_profile in installed_profiles else None
                             options = installed_profiles + ["[Enter profile name manually]", "[Skip]"]
                             print("\n🔍 Detected installed provisioning profiles:")
-                            choice = prompt_radio("Select Provisioning Profile:", options, default=default_option or options[0], clear_screen=False, status_bar=status_bar)
+                            choice = prompt_radio("Select Provisioning Profile (optional; choose [Skip] to continue):", options, default=default_option or options[0], clear_screen=False, status_bar=status_bar)
                             if choice == "[Enter profile name manually]":
-                                provisioning_profile = prompt_text("Enter Provisioning Profile Specifier/Name", status_bar=status_bar)
+                                provisioning_profile = prompt_text("Provisioning Profile Specifier/Name", status_bar=status_bar, optional=True)
                             elif choice == "[Skip]":
                                 provisioning_profile = None
                             else:
                                 provisioning_profile = choice
 
                     if prompt_yes_no("Configure App Store Connect API keys for automated signing?", False, status_bar=status_bar):
-                        asc_key_id = asc_key_id or prompt_password("ASC Key ID", placeholder="(enter to skip)")
-                        asc_issuer_id = asc_issuer_id or prompt_password("ASC Issuer ID", placeholder="(enter to skip)")
-                        asc_key_path = asc_key_path or prompt_text("ASC Key Path (.p8)", status_bar=status_bar)
+                        asc_key_id = asc_key_id or prompt_password("ASC Key ID (optional)", placeholder="(Enter: skip this field)")
+                        asc_issuer_id = asc_issuer_id or prompt_password("ASC Issuer ID (optional)", placeholder="(Enter: skip this field)")
+                        asc_key_path = asc_key_path or prompt_text("ASC Key Path (.p8)", status_bar=status_bar, optional=True)
                     if prompt_yes_no("Configure automated keychain unlocking?", True, status_bar=status_bar):
-                        run_script("dev_console.py", ["keychain-setup"])
+                        configure_keychain = True
 
-                script_args = ["--force"]
-                if firebase_plist_path: script_args.extend(["--firebase-plist", firebase_plist_path])
-                if team_id: script_args.extend(["--team-id", team_id])
-                if method: script_args.extend(["--method", method])
-                if provisioning_profile: script_args.extend(["--provisioning-profile", provisioning_profile])
-                if asc_key_id: script_args.extend(["--asc-key-id", asc_key_id])
-                if asc_issuer_id: script_args.extend(["--asc-issuer-id", asc_issuer_id])
-                if asc_key_path: script_args.extend(["--asc-key-path", asc_key_path])
-                if root: script_args.extend(["--root", str(root)])
-
-                res = run_script("setup_distribution.py", script_args)
-                if res != 0:
-                    print("\n❌ iOS signing configuration failed. Please check the errors above.")
-                    return 1
             except SkipSectionException:
-                pass
+                firebase_enabled = False
+                configure_keychain = False
 
-        # ----------------------------------------------------
-        # 7. Grounding & Verification
-        # ----------------------------------------------------
+        required_field_errors = []
+        if not p_name:
+            required_field_errors.append("Project Name is required.")
+        if stack.uses_xcode:
+            if not p_xcode or p_xcode == "None":
+                required_field_errors.append("Xcode project or workspace is required.")
+            if not p_scheme:
+                required_field_errors.append("Xcode Scheme is required.")
+            if not p_target and not p_test_cmd:
+                required_field_errors.append("Test Target or Test Command is required.")
+        else:
+            if not p_build_cmd:
+                required_field_errors.append("Build Command is required for non-Xcode projects.")
+            if not p_test_cmd:
+                required_field_errors.append("Test Command is required for non-Xcode projects.")
+        if required_field_errors:
+            status_bar.reset_scroll_region()
+            print("Wizard cannot apply the configuration:")
+            for error in required_field_errors:
+                print(f"  - {error}")
+            return 1
+
         if not args.non_interactive:
-            print(f"\n\033[1;96m{'='*20} Grounding & Verification {'='*20}\033[0m")
-            res = run_script("index_project.py", [])
+            wizard_stage(4, "Review and apply")
+            while True:
+                print(f"Project: {p_name} | Base branch: {p_branch}")
+                if stack.uses_xcode:
+                    print(f"Scheme: {p_scheme} | Test target: {p_target}")
+                else:
+                    print(f"Build: {p_build_cmd or '(none)'}")
+                    print(f"Test: {p_test_cmd or '(none)'}")
+                print(f"Models for all workers: {', '.join(models)}")
+                print(f"Workers to add/update: {', '.join(m['name'] for m in ssh_machines) or 'None'}")
+                print(f"Worker package installs: {', '.join(install_workers) or 'None'}")
+                print(f"Role prompts: {'Overwrite with defaults' if copy_prompts and overwrite_prompts else 'Copy missing defaults' if copy_prompts else 'Keep existing'}")
+                print(f"API keys to save: {', '.join(pending_keys) or 'None'} (values hidden)")
+                if firebase_enabled:
+                    print(f"Delivery: Firebase | Team: {team_id} | Method: {method}")
+                    print(f"Firebase plist: {firebase_plist_path} | Profile: {provisioning_profile or 'Automatic'}")
+                    print("Regenerate scripts/distribute_ios.sh and scripts/ExportOptions.plist")
+                    print(f"App Store Connect credentials: {'Configure' if asc_key_id or asc_issuer_id or asc_key_path else 'Keep existing'}")
+                print(f"Keychain setup after saving: {'Yes' if configure_keychain else 'No'}")
+                print("Save project and worker configuration; create missing grounding docs and helper script.")
+                if args.force:
+                    print("--force: existing generated configuration and starter docs will be overwritten.")
+                action = prompt_text("[Enter] Apply | [P] Edit project | [M] Edit models | [C] Cancel", "", skip_available=False, status_bar=status_bar, enter_hint="apply changes").lower()
+                if action == "c":
+                    print("Setup cancelled. No project files were changed.")
+                    return 0
+                if action == "p":
+                    edit_project_fields()
+                    continue
+                if action == "m":
+                    selected = wizard_choose_items("Available models", [(m.id, m.id) for m in all_models], models, status_bar)
+                    if selected:
+                        models = selected
+                    else:
+                        print("At least one model is required; keeping the previous selection.")
+                    continue
+                if action == "":
+                    break
+                print("Choose P, M, C, or Enter to apply.")
+
+        if existing_p_cfg and not args.force:
+            existing_p_cfg["project_name"] = p_name
+            existing_p_cfg["base_branch"] = p_branch
+            existing_p_cfg["pr_base_branch"] = p_branch
+            if stack.uses_xcode:
+                existing_p_cfg["scheme"] = p_scheme
+                existing_p_cfg["test_target"] = p_target
+            else:
+                existing_p_cfg["build_command"] = p_build_cmd or None
+                existing_p_cfg["test_command"] = p_test_cmd or None
+                if p_scheme:
+                    existing_p_cfg["scheme"] = p_scheme
+                if p_target:
+                    existing_p_cfg["test_target"] = p_target
+            project_file.write_text(json.dumps(existing_p_cfg, indent=2) + "\n", encoding="utf-8")
+            if not args.non_interactive:
+                print("  ✅ Project configuration saved.")
+        else:
+            init_args = argparse.Namespace(
+                root=str(root),
+                project=None,
+                project_name=p_name,
+                scheme=p_scheme,
+                test_target=p_target,
+                base_branch=p_branch,
+                build_command=p_build_cmd,
+                test_command=p_test_cmd,
+                force=args.force,
+                with_starter_docs=True,
+                with_helper_script=True
+            )
+            init_project(init_args)
+            review_paths.append(project_file)
+
+        # Ensure all starter grounding docs and helper script exist
+        try:
+            p_cfg = json.loads(project_file.read_text(encoding="utf-8")) if project_file.exists() else {}
+        except Exception:
+            p_cfg = {}
+        p_name = p_cfg.get("project_name", root.name)
+        p_scheme = p_cfg.get("scheme", "App" if stack.uses_xcode else "")
+
+        missing_grounding = False
+        if not (root / "AGENTS.md").exists():
+            write_text_file(root / "AGENTS.md", agents_docs(p_name), force=False)
+            missing_grounding = True
+        if not (root / "docs" / "build-test-commands.md").exists():
+            write_text_file(root / "docs" / "build-test-commands.md", build_test_docs(p_cfg or {"project_name": p_name, "scheme": p_scheme, "build_command": p_build_cmd, "test_command": p_test_cmd, "xcode_workspace": None, "xcode_project": None}, stack), force=False)
+            missing_grounding = True
+        if not (root / "docs" / "architecture.md").exists():
+            write_text_file(root / "docs" / "architecture.md", architecture_docs(p_name, p_scheme, stack), force=False)
+            missing_grounding = True
+        if not (root / "docs" / "coding-standards.md").exists():
+            write_text_file(root / "docs" / "coding-standards.md", coding_standards_docs(p_name, stack), force=False)
+            missing_grounding = True
+        if not (root / "docs" / "ai-workflow.md").exists():
+            write_text_file(root / "docs" / "ai-workflow.md", ai_workflow_docs(p_name), force=False)
+            missing_grounding = True
+        if not (root / "scripts" / "orchestrator").exists():
+            write_helper_script(root, force=False)
+            missing_grounding = True
+
+        if missing_grounding and not args.non_interactive:
+            print("  ✅ Missing grounding docs have been generated.")
+
+        if pending_keys:
+            settings = json.loads(settings_file.read_text(encoding="utf-8")) if settings_file.exists() else {}
+            settings.update(pending_keys)
+            settings_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        if copy_prompts:
+            review_paths.extend(copy_prompt_overrides(root, overwrite_prompts))
+        update_machine_models(config_dir, models, ssh_machines)
+        if configure_keychain:
+            print("Opening keychain setup. This changes your local keychain configuration.")
+            if run_script("dev_console.py", ["keychain-setup"]) != 0:
+                print("Configuration saved, but keychain setup failed. Run orchestrator wizard to retry.")
+                return 1
+        if firebase_enabled:
+            script_args = ["--force"]
+            if firebase_plist_path: script_args.extend(["--firebase-plist", firebase_plist_path])
+            if team_id: script_args.extend(["--team-id", team_id])
+            if method: script_args.extend(["--method", method])
+            if provisioning_profile: script_args.extend(["--provisioning-profile", provisioning_profile])
+            if asc_key_id: script_args.extend(["--asc-key-id", asc_key_id])
+            if asc_issuer_id: script_args.extend(["--asc-issuer-id", asc_issuer_id])
+            if asc_key_path: script_args.extend(["--asc-key-path", asc_key_path])
+            if root: script_args.extend(["--root", str(root)])
+
+            res = run_script("setup_distribution.py", script_args)
             if res != 0:
-                print("\n❌ Project grounding/indexing failed. Please check the errors above.")
+                print("\n❌ iOS signing configuration failed. Please check the errors above.")
+                return 1
+        # ----------------------------------------------------
+        # 5. Verify and finish
+        if not args.non_interactive:
+            wizard_stage(5, "Verify and finish")
+        if not args.non_interactive:
+            print("Checking saved configuration...")
+            if validate_config_command() != 0:
+                print("Configuration saved, but validation failed. Fix the errors and run orchestrator check-config.")
                 return 1
 
-            # Xcode Smoke Test
+        if not args.non_interactive:
+            print("Indexing project files and tests...")
+            if run_script("index_project.py", []) != 0:
+                print("Configuration saved, but indexing failed. Run orchestrator wizard to retry.")
+                return 1
             cfg = load_project_config()
-            if (cfg.xcode_project or cfg.xcode_workspace) and prompt_yes_no("Run a quick Xcode build validation (Smoke Test)?", default=True, status_bar=status_bar):
-                print("\n🔍 Verifying Xcode build settings...")
-                cmd_args = ["xcodebuild", "-scheme", cfg.scheme, "-showBuildSettings"]
-                if cfg.xcode_workspace: cmd_args.extend(["-workspace", cfg.xcode_workspace])
-                elif cfg.xcode_project: cmd_args.extend(["-project", cfg.xcode_project])
-
+            if cfg.xcode_project or cfg.xcode_workspace:
                 try:
-                    subprocess.run(cmd_args, capture_output=True, text=True, check=True, timeout=30, cwd=str(root))
-                    print("✅ Xcode configuration verified.")
-                except Exception as e:
-                    print(f"❌ Xcode validation failed: {e}")
+                    check_xcode = prompt_yes_no("Check Xcode build settings (does not compile the app)?", default=True, status_bar=status_bar)
+                except SkipSectionException:
+                    check_xcode = False
+                if check_xcode:
+                    cmd_args = ["xcodebuild", "-scheme", cfg.scheme, "-showBuildSettings"]
+                    if cfg.xcode_workspace:
+                        cmd_args.extend(["-workspace", cfg.xcode_workspace])
+                    else:
+                        cmd_args.extend(["-project", cfg.xcode_project])
+                    try:
+                        subprocess.run(cmd_args, capture_output=True, text=True, check=True, timeout=30, cwd=str(root))
+                        print("Xcode build settings verified.")
+                    except Exception as exc:
+                        print(f"Configuration saved, but Xcode validation failed: {exc}")
+                        print("Check the scheme/container above and rerun orchestrator wizard.")
+                        return 1
+                else:
+                    print("Xcode build settings check skipped.")
 
+        if args.verify or install_workers:
+            print("Checking tools and requested worker packages...")
+            if verify_wizard_setup(install_workers) != 0:
+                print("Configuration saved, but setup checks failed. Resolve the errors and run orchestrator check.")
+                return 1
+        else:
+            print("Full tool and worker checks were not requested; run orchestrator check when ready.")
+        remember_project(root, project_display_name(root), active=True)
         status_bar.reset_scroll_region()
         print(f"\n\033[1;92m{'='*20} Wizard Complete {'='*20}\033[0m")
-        print("\033[90mReview these Markdown/config files before creating jobs:\033[0m")
-        for path in [*review_paths, runtime_dir / "project.json", runtime_dir / "config" / "machines.json", runtime_dir / "config" / "settings.json"]:
-            print(f"  - \033[97m{path.relative_to(root)}\033[0m")
-
-        install_workers = [machine["name"] for machine in ssh_machines] if args.install_workers else []
-        if not args.non_interactive and ssh_machines and not install_workers:
-            print(f"\033[1;96m{'='*20} Final Setup {'='*20}\033[0m")
-            if prompt_yes_no("Install/check SSH worker packages now?", default=False, status_bar=status_bar):
-                install_workers = [machine["name"] for machine in ssh_machines]
-
-        remember_project(root, project_display_name(root), active=True)
-        if args.verify or install_workers:
-            return verify_wizard_setup(install_workers)
+        print("Configuration saved. Review these files before creating jobs:")
+        for path in dict.fromkeys([*review_paths, project_file, machines_file, settings_file]):
+            print(f"  - {path.relative_to(root)}")
+        print("Next: orchestrator console")
         return 0
 
 
@@ -1470,10 +1847,22 @@ def init_project(args: argparse.Namespace) -> int:
     for subdir in ["jobs/inbox", "jobs/archive", "logs", "output", "state/machines"]:
         (runtime_dir / subdir).mkdir(parents=True, exist_ok=True)
 
+    from orchestrator.stack_detection import detect_project_stack
+    stack = detect_project_stack(root)
+
     xcode_project, xcode_workspace, detected_scheme, detected_schemes, detected_targets = infer_xcode(root)
     project_name = args.project_name or root.name
-    scheme = args.scheme or detected_scheme
-    test_target = args.test_target or next((target for target in detected_targets if target.endswith("Tests")), f"{scheme}Tests")
+
+    build_cmd = getattr(args, "build_command", None) or (None if stack.uses_xcode else stack.build_command)
+    test_cmd = getattr(args, "test_command", None) or (None if stack.uses_xcode else stack.test_command)
+
+    if stack.uses_xcode:
+        scheme = args.scheme or detected_scheme
+        test_target = args.test_target or next((target for target in detected_targets if target.endswith("Tests")), f"{scheme}Tests")
+    else:
+        scheme = getattr(args, "scheme", None)
+        test_target = getattr(args, "test_target", "") or ""
+
     config = {
         "project_name": project_name,
         "base_branch": args.base_branch,
@@ -1487,8 +1876,8 @@ def init_project(args: argparse.Namespace) -> int:
         "test_target": test_target,
         "detected_targets": detected_targets,
         "derived_data_path": f"/tmp/{project_name.lower()}_orchestrator_dd",
-        "build_command": None,
-        "test_command": None,
+        "build_command": build_cmd,
+        "test_command": test_cmd,
         "backend_test_command": None,
         "app_bundle_id": None,
         "visual_app_path": None,
@@ -1529,8 +1918,8 @@ def init_project(args: argparse.Namespace) -> int:
                     "priority": 100,
                     "max_concurrent_jobs": 1,
                     "max_heavy_jobs": 1,
-                    "supports_xcode": True,
-                    "supports_simulator": True,
+                    "supports_xcode": stack.uses_xcode,
+                    "supports_simulator": stack.uses_xcode,
                     "supports_backend_tests": False,
                     "interactive_reserved": True,
                     "tags": ["interactive", "primary"],
@@ -1553,7 +1942,7 @@ def init_project(args: argparse.Namespace) -> int:
         print(f"  ✅ Created {gitignore_file.relative_to(root)}")
 
     if args.with_starter_docs:
-        write_starter_docs(root, config, args.force)
+        write_starter_docs(root, config, args.force, stack=stack)
 
     if args.with_helper_script:
         write_helper_script(root, args.force)
@@ -1817,6 +2206,8 @@ def _main(argv: list[str] | None = None) -> int:
     init_parser.add_argument("--project-name")
     init_parser.add_argument("--scheme")
     init_parser.add_argument("--test-target")
+    init_parser.add_argument("--build-command", help="Build command for non-Xcode projects")
+    init_parser.add_argument("--test-command", help="Test command for non-Xcode projects")
     init_parser.add_argument("--base-branch", default="main")
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--with-starter-docs", action="store_true")
@@ -1828,6 +2219,8 @@ def _main(argv: list[str] | None = None) -> int:
     wizard_parser.add_argument("--project-name")
     wizard_parser.add_argument("--scheme")
     wizard_parser.add_argument("--test-target")
+    wizard_parser.add_argument("--build-command", help="Build command for non-Xcode projects")
+    wizard_parser.add_argument("--test-command", help="Test command for non-Xcode projects")
     wizard_parser.add_argument("--base-branch", default="main")
     wizard_parser.add_argument("--force", action="store_true")
     wizard_parser.add_argument("--models", help="Comma-separated model aliases or model IDs, for example codex,antigravity")

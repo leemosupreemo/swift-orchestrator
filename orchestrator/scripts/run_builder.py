@@ -195,15 +195,25 @@ def run_builder(job_path: Path, resume: bool = False) -> tuple[bool, bool, Path]
         likely_files = job.get("plan", {}).get("likely_files", [])
         is_infra = any("orchestrator/" in f or "scripts/" in f for f in likely_files)
         
+        stack = PROJECT_CONFIG.stack
         if is_infra:
             prompt_name = "builder_infra.md"
             test_index = generate_test_index(ROOT / "tests", likely_files=likely_files)
         else:
             prompt_name = "builder_bug.md" if job["type"] in {"bug-fix", "bug-investigate"} else "builder_feature_task.md"
-            test_index = generate_test_index(ROOT / PROJECT_CONFIG.test_target, likely_files=likely_files)
+            test_dir = ROOT / PROJECT_CONFIG.test_target if (PROJECT_CONFIG.test_target and (ROOT / PROJECT_CONFIG.test_target).exists()) else ROOT
+            test_index = generate_test_index(test_dir, likely_files=likely_files)
 
         prompt_template = (PROMPTS_DIR / prompt_name).read_text(encoding="utf-8")
         brief = make_brief(job)
+
+        stack_context = f"""
+### PROJECT STACK CONTEXT
+- Detected Stack: {stack.display_name}
+- Primary Language: {stack.language}
+- Build Command: {PROJECT_CONFIG.build_command or stack.build_command or 'None'}
+- Test Command: {PROJECT_CONFIG.test_command or stack.test_command or 'None'}
+"""
 
         debug_context = ""
         if job.get("status") == "debugging" and "debug_proposal" in job:
@@ -236,7 +246,7 @@ Grounding docs to inspect first:
 - docs/architecture.md
 - docs/coding-standards.md
 - docs/build-test-commands.md
-
+{stack_context}
 Available Tests (use for selecting test_command):
 {test_index}
 {debug_context}

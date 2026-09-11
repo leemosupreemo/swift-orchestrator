@@ -372,17 +372,12 @@ class CliTests(unittest.TestCase):
             root = Path(temp_dir)
             (root / "SampleApp.xcodeproj").mkdir()
 
-            # prompt_yes_no sequence:
-            # 1: Copy prompts (False)
-            # 2: Scan fleet (False)
-            # 3: Configure Firebase distribution (True)
-            # 4: ASC keys (False)
-            # 5: Keychain (False)
-            # 6: Smoke test (False)
-            mock_prompt_yes_no.side_effect = [False, False, True, False, False, False]
+            # Configure delivery, skip ASC/keychain, then skip Xcode settings check.
+            mock_prompt_yes_no.side_effect = [True, False, False, False]
             mock_prompt_text.side_effect = [
-                "SampleApp", "SampleApp", "SampleAppTests", "main",  # Project & Xcode settings
-                "SampleApp/GoogleService-Info.plist", "ABC123DEFG", "ad-hoc"  # Distribution settings
+                "", "4",  # Accept detected project; select delivery
+                "SampleApp/GoogleService-Info.plist", "ABC123DEFG", "ad-hoc",
+                "",  # Apply
             ]
             mock_prompt_radio.return_value = "Profile B"
 
@@ -436,13 +431,11 @@ class CliTests(unittest.TestCase):
             project_p.write_text(json.dumps(p_data, indent=2) + "\n", encoding="utf-8")
 
             # Run wizard with existing config
-            result = cli.main([
-                "wizard",
-                "--root",
-                str(root),
-                "--models",
-                "codex,claude",
-            ])
+            # Incomplete Firebase fixture: isolate persistence from distribution validation.
+            with patch("orchestrator.cli.validate_config_command", return_value=0):
+                result = cli.main([
+                    "wizard", "--root", str(root), "--models", "codex,claude",
+                ])
 
             self.assertEqual(result, 0)
             # Verify project config was preserved exactly as initialized
@@ -475,16 +468,13 @@ class CliTests(unittest.TestCase):
                 with_helper_script=True,
             ))
 
-            # Prompt responses:
-            # prompt_yes_no:
-            # 1. Overwrite prompts? -> False
-            # 2. Scan fleet? -> False
-            # 3. Modify distribution? -> False
-            # 4. Smoke test? -> False
-            mock_prompt_yes_no.side_effect = [False, False, False, False]
-            # prompt_text:
-            # Project & Xcode fields sequentially
-            mock_prompt_text.side_effect = ["NewApp", "NewScheme", "NewTests", "release"]
+            mock_prompt_yes_no.side_effect = [False]  # Skip Xcode settings check
+            mock_prompt_text.side_effect = [
+                "1", "NewApp", "2", "NewScheme", "3", "NewTests", "4", "release",
+                "",  # Finish editing fields
+                "",  # Skip optional tools
+                "",  # Apply
+            ]
 
             result = cli.main([
                 "wizard",

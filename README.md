@@ -1,8 +1,8 @@
-# Swift Orchestrator
+# Orchestrator
 
-Swift Orchestrator is a multi-agent AI orchestration CLI and development console built specifically for Swift and Xcode projects. It provides a rich, interactive dev console for automating software engineering tasks—from bug fixes and feature planning to fleet-wide test execution and Firebase distribution.
+Orchestrator is a multi-agent AI development CLI and interactive console for planning features, implementing changes, reviewing code, running tests, and managing delivery workflows. Its most mature support is for Swift and Xcode, including `xcodebuild`, simulators, remote Mac workers, code signing, and Firebase distribution.
 
-Unlike generic AI coding tools, Orchestrator is built specifically for the complexities of the Apple ecosystem, supporting deep integration with `xcodebuild`, simulators, and remote Mac build farms.
+Support for additional languages is currently in beta. Orchestrator can detect and configure Rust, Python, Node.js/TypeScript, Go, Swift Package Manager, and Xcode projects. Non-Xcode projects use explicit build and test commands, while Apple-specific features remain available to Swift and Xcode projects.
 
 ---
 
@@ -18,6 +18,7 @@ Unlike generic AI coding tools, Orchestrator is built specifically for the compl
 *   **Project-Local Intelligence**: Store role-specific prompt overrides (`.orchestrator/prompts/`) and architecture guides (`AGENTS.md`) directly in your repo to keep agents grounded in your project's conventions.
 *   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
 *   **Automated PR & Issue Workflow**: Seamlessly integrates with `gh` CLI to create issues, open PRs, and post-automated status updates.
+*   **Multi-Language Project Setup (Beta)**: Detect Rust, Python, Node.js/TypeScript, Go, Swift Package Manager, and Xcode projects, then configure the appropriate build and test commands.
 
 ---
 
@@ -28,18 +29,18 @@ Recommended CLI install via `pipx`:
 ```bash
 brew install pipx
 pipx ensurepath
-pipx install "git+https://github.com/leemosupreemo/swift-orchestrator.git"
+pipx install "git+https://github.com/leemosupreemo/orchestrator.git"
 orchestrator --help
 ```
 
-### Quick Start (First Project)
+### Quick Start
 
-1.  **Initialize**: Run the wizard in your project root to detect schemes and set up config.
+1.  **Configure**: Run the wizard from the project root.
     ```bash
-    cd /path/to/MySwiftProject
+    cd /path/to/MyProject
     orchestrator wizard
     ```
-2.  **Verify**: Ensure your environment (CLIs, API keys) is ready.
+2.  **Verify**: Check the saved project, provider, and worker configuration.
     ```bash
     orchestrator check
     ```
@@ -47,6 +48,39 @@ orchestrator --help
     ```bash
     orchestrator console
     ```
+
+### Setup Wizard
+
+The interactive wizard detects the project stack and walks through five stages:
+
+1. **Project**: Review the detected project name, branch, and build/test configuration. Xcode projects use a scheme and test target; other projects use build and test commands.
+2. **AI setup**: Choose at least one model and, when needed, sign in to a provider or enter an API key.
+3. **Optional tools**: Configure GitHub integration, custom role prompts, SSH workers, and Apple delivery/signing. Press Enter to skip this stage.
+4. **Review and apply**: Review every proposed change before files are written. You can edit project settings or models, apply the configuration, or cancel without changing project files.
+5. **Verify and finish**: Validate the configuration, index the project, and optionally check Xcode build settings. The completion message appears only after the requested checks pass.
+
+Prompts explain what Enter will do. Optional fields display **Enter: skip this field**, fields with detected values display **Enter: keep default**, and optional sections can be skipped with **Ctrl-S**. Use **Ctrl-Q** to quit the wizard.
+
+The core required settings are a project name and at least one AI model. Xcode projects also need a project or workspace, scheme, and test target or test command. Other projects need build and test commands. SSH worker and Firebase delivery fields become required only when those optional features are selected.
+
+For all wizard options, non-interactive setup, and generated files, see the [User Guide](docs/user-guide.md#first-run-wizard).
+
+### Multi-Language Support (Beta)
+
+Orchestrator is expanding beyond Swift and Xcode. Beta project detection and test discovery currently support:
+
+| Stack | Typical build command | Typical test command |
+| :--- | :--- | :--- |
+| Rust | `cargo build` | `cargo test` |
+| Python | `python3 -m compileall` | `pytest` or `python3 -m unittest` |
+| Node.js / TypeScript | Project package script | Project package test script |
+| Go | `go build ./...` | `go test ./...` |
+| Swift Package Manager | `swift build` | `swift test` |
+| Xcode | Detected `xcodebuild` configuration | Detected scheme and test target |
+
+The wizard proposes commands from the detected stack and lets you review or replace them before saving. For interpreted projects, the build command should perform a meaningful validation such as compilation, type checking, or linting.
+
+Remote Mac workers, simulator inspection, code signing, and Firebase distribution remain Apple-focused. See [Generic Projects](docs/generic-projects.md) for configuration details and current limitations.
 
 ---
 
@@ -132,8 +166,8 @@ orchestrator update --fleet  # Updates all remote workers
 For developers contributing to the Orchestrator itself:
 
 ```bash
-git clone https://github.com/leemosupreemo/swift-orchestrator.git
-cd swift-orchestrator
+git clone https://github.com/leemosupreemo/orchestrator.git
+cd orchestrator
 python3 -m pip install -e .
 python3 -m unittest discover tests
 ```
@@ -151,4 +185,3 @@ Copyright © 2026 The Jaunt Company. All rights reserved.
 
 This project is source-available for viewing and evaluation, but is
 not released under an open-source license. See [LICENSE](LICENSE) for details.
-

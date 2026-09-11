@@ -2037,20 +2037,21 @@ def extract_suite_name(content: str, file_stem: str) -> str:
     return file_stem
 
 def discover_test_suites(root: Path, test_target: str | None = None) -> list[dict[str, Any]]:
-    """Discovers all test suite swift files across the workspace, extracts test case counts,
-    and parses suite names for XCTest, Swift Testing, and Quick/Nimble specs."""
+    """Discovers all test suite files across the workspace for Swift, Python, Rust, Go, and JS/TS,
+    extracts test case counts, and parses suite names."""
     suites = []
     seen_paths = set()
 
     IGNORED_DIRS = {
         ".git", ".build", ".orchestrator", ".swiftpm", ".cache", ".venv", ".tox",
         "build", "DerivedData", "Pods", "Carthage", "node_modules", "vendor",
-        "xcuserdata", "fastlane", ".idea", ".vscode"
+        "xcuserdata", "fastlane", ".idea", ".vscode", "dist", "target", "__pycache__"
     }
 
     candidate_files: list[Path] = []
+    supported_exts = (".swift", ".py", ".rs", ".go", ".js", ".ts", ".jsx", ".tsx")
     
-    # Walk the entire root directory to find all Swift test files across all packages and modules
+    # Walk the directory tree to find test files across supported languages
     for current_root, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames
@@ -2060,64 +2061,165 @@ def discover_test_suites(root: Path, test_target: str | None = None) -> list[dic
         ]
         
         for file in filenames:
-            if file.endswith(".swift"):
+            if file.endswith(supported_exts):
                 candidate_files.append(Path(current_root) / file)
 
     candidate_files.sort()
 
-    for swift_file in candidate_files:
-        if swift_file in seen_paths:
+    for file_path in candidate_files:
+        if file_path in seen_paths:
             continue
 
         try:
-            raw_content = swift_file.read_text(encoding="utf-8", errors="replace")
+            raw_content = file_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             continue
 
-        rel_path_str = str(swift_file.relative_to(root)) if swift_file.is_relative_to(root) else str(swift_file)
-        
-        is_in_test_dir = bool(re.search(r'(?:^|[/\\])(?:[A-Za-z0-9_]*Test[A-Za-z0-9_]*|[A-Za-z0-9_]*Spec[A-Za-z0-9_]*|Tests|UITests|UnitTests|IntegrationTests|SnapshotTests|Specs)(?:[/\\]|$)', rel_path_str, re.IGNORECASE))
-        is_test_filename = bool(re.search(r'(?:Tests?|TestCase|Spec|Specs)\.swift$', swift_file.name, re.IGNORECASE))
-        has_test_imports = bool(re.search(r'\bimport\s+(?:XCTest|Testing|Quick|Nimble|SnapshotTesting)\b', raw_content))
-        has_test_markers = bool(re.search(r'\b(?:XCTestCase|@Suite|@Test|QuickSpec)\b', raw_content))
+        rel_path_str = str(file_path.relative_to(root)) if file_path.is_relative_to(root) else str(file_path)
+        try:
+            rel_path = file_path.relative_to(root)
+        except ValueError:
+            rel_path = Path(file_path.name)
 
-        # If none of the indicators match, skip immediately
-        if not (is_in_test_dir or is_test_filename or has_test_imports or has_test_markers):
-            continue
+        is_in_test_dir = bool(re.search(r'(?:^|[/\\])(?:[A-Za-z0-9_]*Test[A-Za-z0-9_]*|[A-Za-z0-9_]*Spec[A-Za-z0-9_]*|Tests|UITests|UnitTests|IntegrationTests|SnapshotTests|Specs|__tests__)(?:[/\\]|$)', rel_path_str, re.IGNORECASE))
 
-        cleaned_content = strip_swift_comments(raw_content)
-        test_funcs = extract_swift_test_cases(cleaned_content)
-        total_tests = len(test_funcs)
+        # 1. Swift
+        if file_path.suffix == ".swift":
+            is_test_filename = bool(re.search(r'(?:Tests?|TestCase|Spec|Specs)\.swift$', file_path.name, re.IGNORECASE))
+            has_test_imports = bool(re.search(r'\bimport\s+(?:XCTest|Testing|Quick|Nimble|SnapshotTesting)\b', raw_content))
+            has_test_markers = bool(re.search(r'\b(?:XCTestCase|@Suite|@Test|QuickSpec)\b', raw_content))
 
-        is_test_file = (
-            total_tests > 0
-            or "XCTestCase" in cleaned_content
-            or "@Suite" in cleaned_content
-            or "@Test" in cleaned_content
-            or "QuickSpec" in cleaned_content
-            or is_test_filename
-            or (is_in_test_dir and has_test_imports)
-        )
+            # If none of the indicators match, skip immediately
+            if not (is_in_test_dir or is_test_filename or has_test_imports or has_test_markers):
+                continue
 
-        if is_test_file:
-            seen_paths.add(swift_file)
-            suite_name = extract_suite_name(cleaned_content, swift_file.stem)
+            cleaned_content = strip_swift_comments(raw_content)
+            test_funcs = extract_swift_test_cases(cleaned_content)
+            total_tests = len(test_funcs)
 
-            try:
-                rel_path = swift_file.relative_to(root)
-            except ValueError:
-                rel_path = Path(swift_file.name)
+            is_test_file = (
+                total_tests > 0
+                or "XCTestCase" in cleaned_content
+                or "@Suite" in cleaned_content
+                or "@Test" in cleaned_content
+                or "QuickSpec" in cleaned_content
+                or is_test_filename
+                or (is_in_test_dir and has_test_imports)
+            )
 
+            if is_test_file:
+                seen_paths.add(file_path)
+                suite_name = extract_suite_name(cleaned_content, file_path.stem)
+
+                suites.append({
+                    "path": file_path,
+                    "rel_path": rel_path,
+                    "name": suite_name,
+                    "file_stem": file_path.stem,
+                    "test_count": total_tests,
+                    "test_funcs": test_funcs,
+                    "language": "swift",
+                })
+
+        # 2. Python
+        elif file_path.suffix == ".py":
+            is_test_filename = file_path.name.startswith("test_") or file_path.name.endswith("_test.py")
+            if not (is_in_test_dir or is_test_filename):
+                continue
+
+            test_funcs = re.findall(r'^\s*def\s+(test_[a-zA-Z0-9_]+)\s*\(', raw_content, re.MULTILINE)
+            test_classes = re.findall(r'^\s*class\s+([a-zA-Z0-9_]+Test[a-zA-Z0-9_]*|Test[a-zA-Z0-9_]*)\b', raw_content, re.MULTILINE)
+
+            if test_funcs or test_classes or is_test_filename:
+                seen_paths.add(file_path)
+                suite_name = test_classes[0] if test_classes else file_path.stem
+                suites.append({
+                    "path": file_path,
+                    "rel_path": rel_path,
+                    "name": suite_name,
+                    "file_stem": file_path.stem,
+                    "test_count": max(len(test_funcs), 1 if (test_classes or is_test_filename) else 0),
+                    "test_funcs": test_funcs,
+                    "language": "python",
+                })
+
+        # 3. Rust
+        elif file_path.suffix == ".rs":
+            is_test_filename = file_path.name.endswith("_test.rs") or "test" in file_path.stem.lower()
+            has_test_attr = "#[test]" in raw_content or "#[cfg(test)]" in raw_content
+            if not (is_in_test_dir or is_test_filename or has_test_attr):
+                continue
+
+            test_funcs = re.findall(r'#\[test\](?:\s*#\[[^\]]+\])*\s*(?:async\s+)?fn\s+([a-zA-Z0-9_]+)', raw_content)
+            if test_funcs or (is_in_test_dir and has_test_attr):
+                seen_paths.add(file_path)
+                suites.append({
+                    "path": file_path,
+                    "rel_path": rel_path,
+                    "name": file_path.stem,
+                    "file_stem": file_path.stem,
+                    "test_count": max(len(test_funcs), 1),
+                    "test_funcs": test_funcs,
+                    "language": "rust",
+                })
+
+        # 4. Go
+        elif file_path.name.endswith("_test.go"):
+            test_funcs = re.findall(r'^\s*func\s+(Test[a-zA-Z0-9_]+)\s*\(', raw_content, re.MULTILINE)
+            seen_paths.add(file_path)
             suites.append({
-                "path": swift_file,
+                "path": file_path,
+                "rel_path": rel_path,
+                "name": file_path.stem,
+                "file_stem": file_path.stem,
+                "test_count": max(len(test_funcs), 1),
+                "test_funcs": test_funcs,
+                "language": "go",
+            })
+
+        # 5. JavaScript / TypeScript
+        elif any(file_path.name.endswith(ext) for ext in (".test.js", ".test.ts", ".test.jsx", ".test.tsx", ".spec.js", ".spec.ts", ".spec.jsx", ".spec.tsx")) or (is_in_test_dir and file_path.suffix in (".js", ".ts", ".jsx", ".tsx")):
+            test_cases = re.findall(r'(?:it|test)\s*\(\s*[\'"`]([^\'"`]+)[\'"`]', raw_content)
+            desc_match = re.search(r'describe\s*\(\s*[\'"`]([^\'"`]+)[\'"`]', raw_content)
+            suite_name = desc_match.group(1) if desc_match else file_path.stem
+            lang = "typescript" if file_path.suffix in (".ts", ".tsx") else "javascript"
+            seen_paths.add(file_path)
+            suites.append({
+                "path": file_path,
                 "rel_path": rel_path,
                 "name": suite_name,
-                "file_stem": swift_file.stem,
-                "test_count": total_tests,
-                "test_funcs": test_funcs
+                "file_stem": file_path.stem,
+                "test_count": max(len(test_cases), 1),
+                "test_funcs": test_cases,
+                "language": lang,
             })
 
     return suites
+
+
+def test_command_for_suite(suite: dict[str, Any], project_config: Any) -> str:
+    """Build a runnable command for one discovered non-Xcode test suite."""
+    import shlex
+
+    language = suite.get("language")
+    rel_path = Path(suite["rel_path"])
+    quoted_path = shlex.quote(str(rel_path))
+    base_command = project_config.test_command or ""
+
+    if language == "python":
+        return f"{base_command} {quoted_path}".strip()
+    if language == "rust":
+        if rel_path.parts and rel_path.parts[0] == "tests":
+            return f"cargo test --test {shlex.quote(suite['file_stem'])}"
+        return "cargo test"
+    if language == "go":
+        rel_dir = rel_path.parent
+        package = "." if str(rel_dir) == "." else f"./{rel_dir}"
+        return f"go test {shlex.quote(package)}"
+    if language in {"javascript", "typescript"}:
+        return f"{base_command} -- {quoted_path}".strip()
+    raise ValueError(f"Unsupported non-Xcode test language: {language}")
+
 
 def discover_app_source_files(root: Path, test_suites: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Discovers application Swift source files (excluding tests, Pods, build artifacts)
@@ -3190,12 +3292,18 @@ def handle_run_tests_menu(session_allowed_machines: list[str], session_allowed_m
                 if opt["type"] == "suite":
                     selected_suite = opt["suite"]
                     suite_name = selected_suite["name"]
-                    tt = PROJECT_CONFIG.test_target or ""
-                    testing_flag = f"-only-testing:{tt}/{suite_name}" if tt else f"-only-testing:{suite_name}"
                     clear_screen()
                     print_header(f"Running Test Suite: {suite_name}")
-                    print(f"  \033[90mExecuting {testing_flag}...\033[0m\n")
-                    run_script("manual_run.py", ["test", "--test-only", testing_flag], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt=f"Running {suite_name}")
+                    if selected_suite.get("language", "swift") == "swift":
+                        tt = PROJECT_CONFIG.test_target or ""
+                        testing_flag = f"-only-testing:{tt}/{suite_name}" if tt else f"-only-testing:{suite_name}"
+                        script_args = ["test", "--test-only", testing_flag]
+                        display_command = testing_flag
+                    else:
+                        display_command = test_command_for_suite(selected_suite, PROJECT_CONFIG)
+                        script_args = ["test", "--test-command", display_command]
+                    print(f"  \033[90mExecuting {display_command}...\033[0m\n")
+                    run_script("manual_run.py", script_args, sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models, prompt=f"Running {suite_name}")
                     input("\n\033[1;96mTap Enter to return to menu...\033[0m")
                 elif opt["type"] == "plan":
                     tp = opt["plan"]

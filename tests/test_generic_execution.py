@@ -49,6 +49,18 @@ class GenericExecutionTests(unittest.TestCase):
             extract.assert_not_called()
             self.assertEqual(stream.call_args.args[0], "cargo fmt --check")
 
+    def test_manual_selected_suite_uses_exact_non_xcode_test_command(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(manual_run, "ROOT", Path(tmp)), \
+             patch.object(manual_run, "OUTPUT_DIR", Path(tmp) / "output"), \
+             patch.object(manual_run, "extract_commands", return_value=("cargo build", "cargo test")), \
+             patch.object(manual_run, "stream_command", return_value=True) as stream, \
+             patch("sys.argv", ["manual_run.py", "test", "--test-command",
+                                "cargo test --test parser"]):
+            manual_run.main()
+
+            self.assertEqual(stream.call_args.args[0], "cargo test --test parser")
+
     def test_test_tool_format_check_rejects_prose_and_malformed_quotes(self):
         for override in ["Run cargo test", "cargo test 'unterminated", "npm test", ""]:
             with self.subTest(override=override):

@@ -40,17 +40,11 @@ class E2EWorkflowTests(unittest.TestCase):
         subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(self.root))
         (self.root / "README.md").write_text("# Test Project")
         subprocess.run(["git", "add", "README.md"], cwd=str(self.root))
-        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(self.root))
-        
-        # Reload orchestrator modules to ensure they pick up the new environment
-        import importlib
-        import sys
-        
-        # Clear existing orchestrator modules from sys.modules to force fresh import
+        self.old_modules = dict(sys.modules)
         for mod_name in list(sys.modules.keys()):
             if mod_name.startswith("orchestrator") or mod_name in ["common", "new_job", "probe_machine", "llm", "model_router", "model_registry"]:
                 del sys.modules[mod_name]
-        
+
         # Initialize orchestrator in this project
         from orchestrator import cli
         cli.main(["init", "--root", str(self.root), "--project-name", "TestProject", "--base-branch", "master"])
@@ -60,6 +54,8 @@ class E2EWorkflowTests(unittest.TestCase):
         (self.root / "docs" / "build-test-commands.md").write_text("## iOS app build\n```bash\necho build\n```\n## iOS app tests\n```bash\necho test\n```")
 
     def tearDown(self) -> None:
+        sys.modules.clear()
+        sys.modules.update(self.old_modules)
         os.environ.clear()
         os.environ.update(self.old_env)
         self.state_dir.cleanup()

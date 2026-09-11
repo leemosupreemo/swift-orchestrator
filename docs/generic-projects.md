@@ -36,7 +36,4 @@ Default planning, implementation, review, and debugging prompts now derive stack
 guidance from the repository. Existing `.orchestrator/prompts/` overrides still
 take precedence; update custom SwiftUI prompts when adapting another stack.
 
-This is initial command-based support. The interactive setup wizard, test-suite
-discovery/console shortcuts, remote worker probes and scheduling, visual checks,
-and distribution still contain Apple-specific behavior. This does not yet
-establish Linux/Windows fleet support or automatic stack detection.
+The orchestrator automatically detects common stacks (Rust, Python, Node/TypeScript, Go, and Swift SPM/Xcode) when running `orchestrator init` or `orchestrator wizard`. The wizard automatically adapts its prompts to configure `build_command` and `test_command` for non-Xcode projects, bypassing Xcode scheme and signing setup. Multi-language test discovery automatically catalogs test suites across Python, Rust, Go, JavaScript/TypeScript, and Swift for agent context. Remote worker probes and visual simulator checks remain Apple-focused.
