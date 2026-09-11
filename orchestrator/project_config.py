@@ -382,8 +382,8 @@ def load_project_config() -> ProjectConfig:
     runtime_dir = safe_resolve(runtime_dir)
 
     project_name = data.get("project_name") or root.name
-    xcode_project = data.get("xcode_project") or _first_match(root, "*.xcodeproj")
-    xcode_workspace = data.get("xcode_workspace") or _first_match(root, "*.xcworkspace")
+    xcode_project = data.get("xcode_project") if "xcode_project" in data else _first_match(root, "*.xcodeproj")
+    xcode_workspace = data.get("xcode_workspace") if "xcode_workspace" in data else _first_match(root, "*.xcworkspace")
     build_cmd = data.get("build_command")
     test_cmd = data.get("test_command")
     if not (xcode_project or xcode_workspace) and (build_cmd or test_cmd):

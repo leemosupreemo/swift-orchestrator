@@ -2,16 +2,16 @@
 
 Canonical validation commands for this project.
 
-## iOS app build
+## Package validation
 
 ```bash
-swift build
+python3 -m compileall -q orchestrator tests
 ```
 
-## iOS app tests
+## Test suite
 
 ```bash
-swift test
+python3 -m unittest discover -s tests
 ```
 
 ## Orchestrator config check

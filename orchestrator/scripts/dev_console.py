@@ -8479,7 +8479,7 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
             print("\n  \033[1;90m--- ACTIONS ---\033[0m")
             print_wrapped_kv("    [\033[1;96mL\033[0m] ", "Login to Firebase (Browser)")
             print_wrapped_kv("    [\033[1;96mK\033[0m] ", "Configure Headless Signing (Keychain Auto-Unlock)")
-            print_wrapped_kv("    [\033[1;96mT\033[0m] ", "Test Distribution Script (Dry Run via build delivery)")
+            print_wrapped_kv("    [\033[1;96mT\033[0m] ", "Run Live Build & Firebase Delivery Test")
             print_wrapped_kv("    [\033[1;96mR\033[0m] ", "Refresh Status (Re-run checks)\n")
             print_wrapped_kv("    [\033[1;91mB\033[0m] ", "Back")
             
@@ -8504,9 +8504,9 @@ def handle_firebase_distro(session_allowed_machines: list[str], session_allowed_
                 status_bar.clear_footer()
                 status_bar.reset_scroll_region(force=True)
                 clear_screen()
-                print_header("Smoke Test Delivery")
-                print("This runs the build delivery smoke test directly and streams its output without menu refreshes.")
-                print("\033[90mExpect the delivery portion to take several minutes when Xcode archiving runs.\033[0m")
+                print_header("Live Build & Firebase Delivery Test")
+                print("This archives the current branch and publishes a real Firebase App Distribution release.")
+                print("\033[90mThe operation can take several minutes and sends the build to configured recipients.\033[0m")
                 run_script("smoke_test_delivery.py", [], sub_menu=True, session_machines=session_allowed_machines, session_models=session_allowed_models)
                 needs_check = True
 

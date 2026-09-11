@@ -113,7 +113,7 @@ orchestrator worker-check --machine worker1
 
 ## 📱 Mobile Delivery
 
-For iOS projects, Orchestrator can archive and sign an app, upload the IPA to Firebase App Distribution, and release it to configured tester emails or groups for installation on multiple devices.
+For iOS projects, Orchestrator can archive and sign an app, upload the IPA to Firebase App Distribution, and release it to configured tester emails or groups for installation on multiple devices. Successful deliveries include a receipt with the version, build number, artifact checksum, and recipients.
 
 For a phone-operated workflow, use [Secure ShellFish](https://secureshellfish.app/) on iPhone or iPad to connect over SSH to the machine running Orchestrator. From there, you can coordinate the job, run builds and tests, and distribute the resulting beta build through Firebase.
 

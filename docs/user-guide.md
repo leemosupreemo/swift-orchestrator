@@ -414,13 +414,16 @@ Firebase delivery is opt-in:
   "delivery_provider": "firebase",
   "firebase_distribution": true,
   "distribution_script_path": "scripts/distribute_ios.sh",
-  "firebase_plist_path": "MyApp/GoogleService-Info.plist"
+  "firebase_plist_path": "MyApp/GoogleService-Info.plist",
+  "firebase_groups": "internal-testers"
 }
 ```
 
 `check-config` fails early if Firebase delivery is enabled but the distribution script or plist path is missing.
 
-The delivery workflow archives and signs the iOS app, uploads the IPA to Firebase App Distribution, and can release it to configured tester emails or groups. This lets multiple testers install the beta build on their devices.
+The delivery workflow archives and signs the iOS app, uploads the IPA to Firebase App Distribution, and releases it to configured tester emails or groups. If no recipients are configured, Orchestrator uses the `internal-testers` group. Each successful delivery writes a receipt under `.orchestrator/output/delivery/` with the app version, build number, IPA path, recipients, and SHA-256 checksum.
+
+In the console, use **Quick Build & Distribution** to deliver the current branch. The live delivery test under **Firebase App Distro** also publishes a real release; it is not a dry run. A delivery job targeting another branch stops and asks you to switch explicitly so local changes are never discarded.
 
 For an end-to-end workflow from iPhone or iPad, use [Secure ShellFish](https://secureshellfish.app/) to connect over SSH to the machine running Orchestrator. You can manage the coding workflow remotely, run builds and tests, and trigger Firebase delivery from the same terminal session.
 
