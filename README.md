@@ -13,9 +13,9 @@ Orchestrator began with deep support for Swift and Xcode. It is now expanding ac
 *   **Interactive Dev Console**: A terminal-based UI designed for speed. Single-key shortcuts (`y/n`, `A`/`F`/`Q`) and real-time status bars make orchestration feel like a native tool.
 *   **Structured Multi-Agent Workflow**: Jobs pass through specialized agents, with feature work guided by a test-driven development (TDD) philosophy:
     *   **Planner**: Analyzes requirements and drafts a multi-step plan that defines tests before production code.
+    *   **Verifier**: Checks the plan against the codebase for feasibility, architectural fit, regression risks, and appropriate test coverage.
     *   **Builder**: Follows the Red–Green–Refactor cycle: write a failing test, implement the minimum code needed to pass, then improve the code while keeping tests green.
     *   **Reviewer**: Audits the implementation, test coverage, and regression risks before changes are finalized.
-    *   **Verifier**: Runs the configured test suite and validates that the implementation meets the original goal without breaking existing behavior.
 *   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote machines via SSH. The Orchestrator handles branch synchronization, worker package installation, remote execution, and job output automatically.
 *   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
 *   **Automated GitHub PR & Issue Workflow**: Integrates with GitHub through the `gh` CLI to create issues, open pull requests, and post automated status updates.
@@ -78,12 +78,12 @@ See the [User Guide](docs/user-guide.md#first-run-wizard) for every option, non-
 
 | Agent | Role | Output |
 | :--- | :--- | :--- |
-| **Planner** | Strategic analysis & Step-by-step planning | `plan.json` |
-| **Builder** | Code implementation & Tool execution | File changes |
-| **Reviewer** | Technical audit & PR readiness check | Review comments |
-| **Verifier** | Goal validation & regression testing | Pass/Fail status |
-| **Debug Agent** | Iterative fix & test-loop management | Bug fixes |
-| **Build Checker** | Log analysis & error diagnostics | Root cause insights |
+| **Planner** | Codebase research, scoping, and test planning | Grounded implementation plan |
+| **Verifier** | Plan feasibility and architecture validation | Approval status, corrections, and risks |
+| **Builder** | Test-driven implementation and validation | Tested code changes |
+| **Reviewer** | Diff review against the brief and acceptance criteria | Risk-ranked findings and verdict |
+| **Debug Agent** | Evidence-based root-cause investigation | Hypothesis and targeted action plan |
+| **Build Checker** | Build and test log triage | Ranked blockers and recommended fix order |
 
 ---
 
