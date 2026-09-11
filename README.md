@@ -16,7 +16,7 @@ Orchestrator began with deep support for Swift and Xcode. It is now expanding ac
     *   **Builder**: Executes the plan, writing code and running terminal tools.
     *   **Reviewer**: Performs a technical audit of changes before they are finalized.
     *   **Verifier**: Validates that the implementation meets the original goal and maintains system integrity.
-*   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote Macs via SSH. The Orchestrator handles branch synchronization, worker package installation, remote execution, and job output automatically.
+*   **Fleet Orchestration**: Dispatch heavy builds or exhaustive test suites to remote machines via SSH. The Orchestrator handles branch synchronization, worker package installation, remote execution, and job output automatically.
 *   **Project-Local Intelligence**: Store role-specific prompt overrides (`.orchestrator/prompts/`) and architecture guides (`AGENTS.md`) directly in your repo to keep agents grounded in your project's conventions.
 *   **Interactive AI Login**: Missing an API key or session? Log in to providers (`antigravity`, `claude`, `gh`, etc.) directly from the discovery wizard without restarting.
 *   **Automated PR & Issue Workflow**: Seamlessly integrates with `gh` CLI to create issues, open PRs, and post-automated status updates.
@@ -82,7 +82,7 @@ Orchestrator is expanding beyond Swift and Xcode. Beta project detection and tes
 
 The wizard proposes commands from the detected stack and lets you review or replace them before saving. For interpreted projects, the build command should perform a meaningful validation such as compilation, type checking, or linting.
 
-Remote Mac workers, simulator inspection, code signing, and Firebase distribution remain Apple-focused. See [Generic Projects](docs/generic-projects.md) for configuration details and current limitations.
+Simulator inspection, code signing, and Firebase distribution remain Apple-focused. See [Generic Projects](docs/generic-projects.md) for configuration details and current limitations.
 
 ---
 
@@ -111,7 +111,7 @@ The Dev Console is the primary way to interact with the Orchestrator. It feature
 
 ## 📡 Remote Workers (Fleet)
 
-Scale your workflow by adding remote Macs as workers. Remote workers can handle:
+Scale your workflow by adding remote machines as workers. Remote workers can handle:
 - **Builds**: Offload heavy `xcodebuild` tasks.
 - **Tests**: Run exhaustive UI or unit test suites in parallel.
 - **Execution**: The Orchestrator syncs your repository and its own runtime to the worker automatically.
