@@ -52,19 +52,17 @@ orchestrator --help
 
 ### Setup Wizard
 
-The interactive wizard detects the project stack and walks through five stages:
+The wizard detects your project stack and guides you through five steps:
 
-1. **Project**: Review the detected project name, branch, and build/test configuration. Xcode projects use a scheme and test target; other projects use build and test commands.
-2. **AI setup**: Choose at least one model and, when needed, sign in to a provider or enter an API key.
-3. **Optional tools**: Configure GitHub integration, custom role prompts, SSH workers, and Apple delivery/signing. Press Enter to skip this stage.
-4. **Review and apply**: Review every proposed change before files are written. You can edit project settings or models, apply the configuration, or cancel without changing project files.
-5. **Verify and finish**: Validate the configuration, index the project, and optionally check Xcode build settings. The completion message appears only after the requested checks pass.
+1. **Project**: Confirm the project and its build/test settings.
+2. **AI**: Choose at least one model and sign in if needed.
+3. **Tools**: Optionally configure GitHub, custom prompts, SSH workers, and Apple delivery.
+4. **Review**: Edit, apply, or cancel before files are written.
+5. **Verify**: Validate the configuration and index the project.
 
-Prompts explain what Enter will do. Optional fields display **Enter: skip this field**, fields with detected values display **Enter: keep default**, and optional sections can be skipped with **Ctrl-S**. Use **Ctrl-Q** to quit the wizard.
+You need a project name, an AI model, and valid build/test settings for your stack. Worker and delivery fields are required only when enabled. Prompts clearly label how to skip optional fields or keep defaults; use **Ctrl-S** to skip an optional section and **Ctrl-Q** to quit.
 
-The core required settings are a project name and at least one AI model. Xcode projects also need a project or workspace, scheme, and test target or test command. Other projects need build and test commands. SSH worker and Firebase delivery fields become required only when those optional features are selected.
-
-For all wizard options, non-interactive setup, and generated files, see the [User Guide](docs/user-guide.md#first-run-wizard).
+See the [User Guide](docs/user-guide.md#first-run-wizard) for every option, non-interactive setup, and generated file.
 
 ### Multi-Language Support (Beta)
 
