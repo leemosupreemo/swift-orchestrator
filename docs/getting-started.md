@@ -53,9 +53,4 @@ orchestrator use <name-or-path>   # Select the active project
 orchestrator update               # Update Orchestrator
 ```
 
-## Read Next 📖
-
-- [User Guide](user-guide.md)
-- [AI Workflow](ai-workflow.md)
-- [Build/Test Commands](build-test-commands.md)
-- [Recommended MCP Plugins](recommended-mcp-plugins.md)
+For complete setup options and troubleshooting, see the [User Guide](user-guide.md).
