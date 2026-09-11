@@ -66,20 +66,11 @@ See the [User Guide](docs/user-guide.md#first-run-wizard) for every option, non-
 
 ### Multi-Language Support (Beta)
 
-Orchestrator is expanding beyond Swift and Xcode. Beta project detection and test discovery currently support:
-
-| Stack | Typical build command | Typical test command |
-| :--- | :--- | :--- |
-| Rust | `cargo build` | `cargo test` |
-| Python | `python3 -m compileall` | `pytest` or `python3 -m unittest` |
-| Node.js / TypeScript | Project package script | Project package test script |
-| Go | `go build ./...` | `go test ./...` |
-| Swift Package Manager | `swift build` | `swift test` |
-| Xcode | Detected `xcodebuild` configuration | Detected scheme and test target |
-
-The wizard proposes commands from the detected stack and lets you review or replace them before saving. For interpreted projects, the build command should perform a meaningful validation such as compilation, type checking, or linting.
-
-Simulator inspection, code signing, and Firebase distribution remain Apple-focused. See [Generic Projects](docs/generic-projects.md) for configuration details and current limitations.
+- Swift
+- Rust
+- Python
+- JavaScript and TypeScript
+- Go
 
 ---
 
