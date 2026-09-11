@@ -1,8 +1,10 @@
-# Orchestrator
+# Orchestrator (Beta)
 
-Orchestrator is a multi-agent AI development CLI and interactive console for planning features, implementing changes, reviewing code, running tests, and managing delivery workflows. Its most mature support is for Swift and Xcode, including `xcodebuild`, simulators, remote Mac workers, code signing, and Firebase distribution.
+**Build product features and fix bugs by coordinating multiple machines and LLMs through one end-to-end development workflow.**
 
-Support for additional languages is currently in beta. Orchestrator can detect and configure Rust, Python, Node.js/TypeScript, Go, Swift Package Manager, and Xcode projects. Non-Xcode projects use explicit build and test commands, while Apple-specific features remain available to Swift and Xcode projects.
+Orchestrator brings planning, implementation, review, testing, and delivery into a single multi-agent process. It distributes work across local and remote machines, assigns different LLMs to specialized roles, and carries each change from an idea or bug report through verification.
+
+Orchestrator began with deep support for Swift and Xcode. It is now expanding across languages, with beta support for Rust, Python, Node.js/TypeScript, Go, Swift Package Manager, and Xcode projects.
 
 ---
 
