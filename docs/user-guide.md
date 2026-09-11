@@ -1,6 +1,6 @@
-# Swift Orchestrator User Guide
+# Orchestrator User Guide
 
-This guide covers using the standalone package from any Swift/Xcode project.
+This guide covers using Orchestrator with supported project stacks. Swift and Xcode support is the most mature; support for additional languages is in beta.
 
 If you are new to Orchestrator, start with [Getting Started](getting-started.md) for the short overview and first-run path.
 
